@@ -725,6 +725,30 @@ def map_where_button(kb, key: str, t):
     return b
 
 
+class _ItemRequests(QObject):
+    """An item's ⓘ (its card or its tile): the app opens the item details window on it."""
+
+    requested = Signal(str)       # the item's KB key
+
+
+ITEM_REQUESTS = _ItemRequests()
+
+
+def item_details_button(key: str, t, size: int | None = None):
+    """The ⓘ that opens an item's details (stats, who drops it, Meow Notes)."""
+    from PySide6.QtWidgets import QToolButton
+
+    from . import theme
+    b = QToolButton(objectName="Icon", text=theme.ICON["info"])
+    if size:
+        b.setFixedSize(size, size)
+    b.setCursor(Qt.PointingHandCursor)
+    b.setToolTip(t("card_item_details"))
+    b.setAccessibleName(t("card_item_details"))
+    b.clicked.connect(lambda: ITEM_REQUESTS.requested.emit(key))
+    return b
+
+
 class Selectable:
     """Mixin: a tap selects this entity (orange border); every selectable follows the shared selection."""
 
@@ -887,6 +911,7 @@ class EntityCard(Selectable, QFrame):
             WISHLIST.changed.connect(self._refresh_star)
             self._refresh_star()
             bl.addWidget(self._star)
+            bl.addWidget(item_details_button(key, t))
         if key.startswith("map/"):
             from .. import routes
             if routes.of(kb).of_key(key):          # a map in the game the route graph has
@@ -1388,6 +1413,7 @@ class EntityTile(Selectable, QFrame):
             WISHLIST.changed.connect(self._refresh_star)
             self._refresh_star()
             row.addWidget(self._star, 0, Qt.AlignTop)
+            row.addWidget(item_details_button(key, t, 26), 0, Qt.AlignTop)
         # a map, an NPC or a quest in a list ("Maps", "NPCs", "Quests"): where it is, as on its full card
         where = map_where_button(kb, key, t)
         if where is not None:
