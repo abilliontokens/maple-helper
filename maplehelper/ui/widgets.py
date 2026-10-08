@@ -723,6 +723,7 @@ def item_details_button(key: str, t, size: int | None = None):
     b.clicked.connect(lambda: ITEM_REQUESTS.requested.emit(key))
     return b
 
+
 class _MapRequests(QObject):
     """A map's, an NPC's or a quest's "Where it is on the map" (its card or its tile): the app opens the map window."""
 
@@ -748,7 +749,6 @@ def map_where_button(kb, key: str, t):
     b.setToolTip(t("card_map_where"))
     b.setAccessibleName(t("card_map_where"))
     b.clicked.connect(lambda: MAP_REQUESTS.requested.emit(key))
-
     return b
 
 
