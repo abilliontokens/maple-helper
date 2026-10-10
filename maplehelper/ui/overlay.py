@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import html
+import logging
 import sys
 import time
 
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QParallelAnimationGroup, QPoint, QPointF, QPropertyAnimation, QRect, QRectF,
                             Qt, QThread, QTimer, Signal)
-from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
+from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
+from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPlainTextEdit,
+                               QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from .. import __version__, bidi, osapi, quick, routes, sources, telemetry
 from ..brain import Answer, Brain
@@ -30,6 +31,7 @@ WINDOW_KIND = Qt.Tool if sys.platform == "darwin" else Qt.Window
 
 class AskWorker(QObject):
     delta = Signal(str)
+    stage = Signal(str)        # what the AI is doing before its first words (brain.Stream): the waiting bubble
     done = Signal(object)
 
     def __init__(self, brain: Brain, question: str, character, history, shot: bytes | None, focus=None,
@@ -43,7 +45,7 @@ class AskWorker(QObject):
         try:
             more = {"model": self.model, "light": True} if self.light else {}     # (Brain.ask: the ⟳ sync)
             ans = self.brain.ask(self.question, self.character, self.history, self.shot, on_delta=self.delta.emit,
-                                 focus=self.focus, extra=self.extra, **more)
+                                 focus=self.focus, extra=self.extra, on_stage=self.stage.emit, **more)
         except Exception as e:  # noqa: BLE001
             ans = Answer(error=f"internal: {e}")
         self.done.emit(ans)
@@ -127,14 +129,94 @@ class Capsule(QFrame):
     """Input capsule; highlights its border while the field has focus."""
 
     def set_focus_look(self, on: bool):
-        self.setProperty("focus", "true" if on else "false")
+        self._look("focus", on)
+
+    def set_voice_look(self, on: bool):
+        """A red border while the mic records (the mic's own red was a small 14 px glyph, CHAT-08)."""
+        self._look("voice", on)
+
+    def _look(self, prop: str, on: bool):
+        self.setProperty(prop, "true" if on else "false")
         self.style().unpolish(self)
         self.style().polish(self)
 
 
-class FocusLineEdit(QLineEdit):
+class FocusLineEdit(QPlainTextEdit):
+    """The question field: one line that grows to MAX_LINES as a long question wraps (a long one scrolled sideways out
+    of sight, and a pasted quest text lost its line breaks, CHAT-10). Enter sends, Shift+Enter starts a new line.
+    It keeps the QLineEdit calls the chat uses: text(), setText(), returnPressed, text_edited(str)."""
     focus_changed = Signal(bool)
+    returnPressed = Signal()
+    text_edited = Signal(str)       # (QPlainTextEdit's own textChanged carries no text)
+    grew = Signal(int)              # the field's new height
+    MAX_LINES = 4
     _hint = _short = ""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setTabChangesFocus(True)            # Tab moves on through the chat, as in a one-line field
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)     # past MAX_LINES the wheel and the cursor scroll
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.document().setDocumentMargin(4)
+        self._align = Qt.AlignLeft | Qt.AlignAbsolute
+        self.textChanged.connect(self._changed)
+        self._fit_height()
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
+        self.moveCursor(QTextCursor.End)
+
+    def setAlignment(self, align) -> None:
+        """The text's side (absolute: the chat sets it from the question's direction); the vertical part is ours."""
+        align = align & ~(Qt.AlignVertical_Mask)
+        if align == self._align:
+            return
+        self._align = align
+        opt = self.document().defaultTextOption()
+        opt.setAlignment(align)
+        self.document().setDefaultTextOption(opt)
+
+    def alignment(self):
+        return self._align
+
+    def _changed(self):
+        self._fit_height()
+        self.text_edited.emit(self.text())
+
+    def _lines(self) -> int:
+        lay = self.document().documentLayout()
+        # the plain-text layout counts its height in lines (wrapped ones too), not pixels
+        n = int(lay.documentSize().height()) if self.document().characterCount() > 1 else 1
+        return max(1, min(self.MAX_LINES, n))
+
+    def _fit_height(self):
+        h = self._lines() * self.fontMetrics().lineSpacing() + 2 * round(self.document().documentMargin())
+        if h != self.height() or self.minimumHeight() != h:
+            self.setFixedHeight(h)
+            self.grew.emit(h)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if e.modifiers() & Qt.ShiftModifier:
+                self.insertPlainText("\n")      # (Qt's own Shift+Enter puts a line separator, not a new line)
+            else:
+                self.returnPressed.emit()
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
+    def insertFromMimeData(self, source):
+        # pasted text keeps its line breaks, but never its formatting or a trailing empty line
+        if source.hasText():
+            self.insertPlainText(source.text().replace("\r\n", "\n").rstrip("\n"))
+        else:
+            super().insertFromMimeData(source)
 
     def set_hint(self, text: str, short: str = "") -> None:
         """The placeholder, cut with "…" at the end of its reading direction when the field is too narrow (at
@@ -144,7 +226,7 @@ class FocusLineEdit(QLineEdit):
         self._fit_hint()
 
     def _fit_hint(self):
-        room = max(40, self.contentsRect().width() - 14)          # the text margins and the cursor
+        room = max(40, self.viewport().width() - 2 * round(self.document().documentMargin()) - 6)
         fm = self.fontMetrics()
         hint = self._short if self._short and fm.horizontalAdvance(self._hint) > room else self._hint
         self.setPlaceholderText(fm.elidedText(hint, Qt.ElideRight, room))
@@ -152,6 +234,12 @@ class FocusLineEdit(QLineEdit):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._fit_hint()
+        self._fit_height()          # a narrower field wraps the question onto more lines
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == QEvent.FontChange:            # the font size setting: the line height changes
+            self._fit_height()
 
     def focusInEvent(self, e):
         super().focusInEvent(e)
@@ -322,6 +410,31 @@ def read_inventory(full, cursor, kb) -> tuple[list, list, str]:
     return tiles, slots, described
 
 
+# an inventory window shows a grid of 16-24 slots; a brick wall passed for 3 (live frames)
+INVENTORY_MIN_SLOTS = 8
+
+
+def local_grind_read(full, table: dict, map_name: str | None) -> tuple[dict, dict] | None:
+    """A grind read without the AI: the bottom bar (level, job, name, EXP) read here (hud.py), the map from the
+    minimap read. None when the AI must read it: the inventory is open (its mesos, potions and loot), or the bar
+    gave no EXP percentage or no sure level. No Qt: runs on a worker thread."""
+    import logging
+
+    import numpy as np
+
+    from .. import hud, inventory
+    if full is None:
+        return None
+    if len(inventory.find_slots(np.asarray(full.convert("RGB")))) >= INVENTORY_MIN_SLOTS:
+        logging.getLogger("maplehelper").debug("grind read: inventory open, the AI reads it")
+        return None
+    got = hud.read(full, table)
+    if got is None or got.exp_pct is None or got.level is None:
+        logging.getLogger("maplehelper").info("grind read: the bar didn't read (%s), the AI reads it", got)
+        return None
+    return got.profile_update(), ({"map": map_name} if map_name else {})
+
+
 def crop_portrait(shot_jpeg: bytes, box: list | None, full, name: str, have_portrait: bool,
                   letters_dir=None) -> bytes | None:
     """The player's own sprite as a 128 px PNG portrait, on their name tag (found in the pixels by the name's
@@ -334,6 +447,7 @@ def crop_portrait(shot_jpeg: bytes, box: list | None, full, name: str, have_port
     from PIL import Image
 
     from ..portrait import mask_reaches_feet, portrait_rect, sprite_mask
+    _plog = logging.getLogger("maplehelper")
     try:
         img = Image.open(io.BytesIO(shot_jpeg)).convert("RGB")
         # the full-resolution grab when it is the same picture (same shape): small name tags survive there
@@ -360,9 +474,10 @@ def crop_portrait(shot_jpeg: bytes, box: list | None, full, name: str, have_port
                 # not a standing figure: scenery the box pointed at (live, 2026-10-07: bricks and a beam cut out
                 # for a magician, whose card showed a map). No portrait rather than a wrong one; the job's picture
                 # stays until a read finds the tag
+                _plog.info("portrait: the name tag was found, but no standing figure above it: kept the old one")
                 return None
-            crop = crop.convert("RGBA")         # just the character on a transparent background, like the job art
-            crop.putalpha(Image.fromarray((mask * 255).astype(np.uint8)))
+            # the character with the game's own background behind it, as on screen (the owner's, 2026-10-08: the
+            # cut-out on a transparent background came out ragged); the mask only vouches that a figure stands there
             # pixel art: NEAREST keeps it crisp when it grows, LANCZOS when it shrinks
             square = crop.resize((128, 128), Image.NEAREST if crop.width < 128 else Image.LANCZOS)
             buf = io.BytesIO()
@@ -370,8 +485,12 @@ def crop_portrait(shot_jpeg: bytes, box: list | None, full, name: str, have_port
             return buf.getvalue()
         # no name tag: no portrait. The AI's box alone cropped scenery (live, 2026-10-04: the lamp beside Nana(H) and an
         # HP bar, for a new character with no portrait yet); the job's picture stays until a read finds the tag
+        # (logged: a refresh that updated everything but the picture said nothing about why, 2026-10-08)
+        _plog.info("portrait: no name tag spelling %r in the screenshot (%s): kept the old one",
+                   name, "learned letters" if learned is not None else "drawn name")
         return None
     except Exception:      # noqa: BLE001
+        _plog.warning("portrait: crop failed", exc_info=True)
         return None
 
 
@@ -456,6 +575,7 @@ class Overlay(EdgeResize, QWidget):
     delete_character_requested = Signal(str)      # plan usage read in the background after an answer (ChatGPT)
     inventory_read = Signal(object)    # (question, shown, character id, tiles, slots, description), worker thread
     avatar_cropped = Signal(object)    # (character id, PNG bytes or None, on_done), worker thread
+    local_grind_done = Signal(object)  # (token, shot, full, cursor, (update, grind) or None), worker thread
     tour_ended = Signal()              # the first-run tour was skipped or finished
     news_requested = Signal()          # the megaphone or the news strip: the News window
     minimap_requested = Signal()       # the minimap icon: choose the game's minimap box to read where the player is
@@ -563,7 +683,8 @@ class Overlay(EdgeResize, QWidget):
         for w in (self.saver_badge, self.beta_badge):
             w.setMinimumWidth(1)
         tb.addStretch(1)
-        # in reading order (the owner's, 2026-10-04): search, news, guides, wishlist, play tools, minimap, settings | minimize, close
+        # in reading order (the owner's, 2026-10-04): search, news, guides, wishlist, play tools, settings | minimize, close
+        # (the minimap button sits on the character card, beside ⟳)
         self.history_btn = self._icon_button(theme.ICON["search"])
         self.history_btn.clicked.connect(self.history_requested.emit)
         tb.addWidget(self.history_btn)
@@ -581,9 +702,6 @@ class Overlay(EdgeResize, QWidget):
         self.tools_btn = ControllerButton()                           # a game controller: the play tools
         self.tools_btn.clicked.connect(self.tools_requested.emit)
         tb.addWidget(self.tools_btn)
-        self.minimap_btn = self._icon_button(theme.ICON["minimap"])
-        self.minimap_btn.clicked.connect(self.minimap_requested.emit)
-        tb.addWidget(self.minimap_btn)
         self.settings_btn = self._icon_button(theme.ICON["settings"])
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         tb.addWidget(self.settings_btn)
@@ -631,7 +749,7 @@ class Overlay(EdgeResize, QWidget):
         self.update_btn.clicked.connect(self.update_requested.emit)
         ub.addWidget(self.update_btn)
         # ✕: out of the way until the app opens again (every note in the chat can be closed: the owner)
-        self.update_close = self._icon_button(theme.ICON["close"])
+        self.update_close = theme.dismiss_button()
         self.update_close.setFixedSize(24, 24)
         self.update_close.clicked.connect(self.update_bar.hide)
         ub.addWidget(self.update_close, 0, Qt.AlignTop)
@@ -648,6 +766,8 @@ class Overlay(EdgeResize, QWidget):
         # the character, pinned at the top of the conversation
         self.profile_card = ProfileCard()
         self.profile_card.refresh_requested.connect(self.sync_profile)
+        self.minimap_btn = self.profile_card.minimap
+        self.profile_card.minimap_requested.connect(self.minimap_requested.emit)
         self.profile_card.clicked.connect(self.character_menu)
         self.profile_card.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.profile_card)
@@ -675,6 +795,8 @@ class Overlay(EdgeResize, QWidget):
         self.feed_lay = QVBoxLayout(self.feed)
         self.feed_lay.setContentsMargins(0, 4, 6, 4)
         self.feed_lay.setSpacing(8)
+        # the stretch first: a short conversation sits just above the input, as in chat apps (it hung from the
+        # top, the empty space between the answer and the field: CHAT-15). Rows go after it
         self.feed_lay.addStretch(1)
         self.scroll.setWidget(self.feed)
         lay.addWidget(self.scroll, 1)
@@ -707,7 +829,7 @@ class Overlay(EdgeResize, QWidget):
         self.focus_chips.setSpacing(6)
         self.focus_scroll.setWidget(chips)
         fb.addWidget(self.focus_scroll, 1)
-        self.clear_tags_btn = self._icon_button(theme.ICON["close"])
+        self.clear_tags_btn = theme.dismiss_button()
         self.clear_tags_btn.clicked.connect(lambda: self.set_tags([]))
         fb.addWidget(self.clear_tags_btn)
         self.focus_bar.hide()
@@ -720,26 +842,36 @@ class Overlay(EdgeResize, QWidget):
         row = QHBoxLayout(self.capsule)
         row.setContentsMargins(6, 5, 6, 5)
         row.setSpacing(2)
+        # the buttons stay on the last line when a long question grows the field
+        bottom = Qt.AlignBottom
         self.recapture_btn = self._icon_button(theme.ICON["camera"])
         self.recapture_btn.clicked.connect(self.recapture)
-        row.addWidget(self.recapture_btn)
+        row.addWidget(self.recapture_btn, 0, bottom)
         self.input = FocusLineEdit(objectName="Input")
         self.input.returnPressed.connect(self._send_typed)
-        self.input.textChanged.connect(self._on_text)
+        self.input.text_edited.connect(self._on_text)
         self.input.focus_changed.connect(self.capsule.set_focus_look)
-        row.addWidget(self.input, 1)
+        # one line keeps the 42 px capsule; each wrapped line adds its height (up to the field's MAX_LINES)
+        self.input.grew.connect(lambda h: self.capsule.setFixedHeight(max(42, h + 10)))
+        row.addWidget(self.input, 1, Qt.AlignVCenter)
         # left of the mic: an empty chat, and the next question starts a new conversation (the History window keeps it)
         self.clear_btn = self._icon_button(theme.ICON["delete"])
         self.clear_btn.clicked.connect(self.clear_chat)
-        row.addWidget(self.clear_btn)
+        row.addWidget(self.clear_btn, 0, bottom)
         self.mic_btn = self._icon_button(theme.ICON["mic"])
         self.mic_btn.clicked.connect(self.mic_clicked.emit)   # click to talk; holding the voice key works too
-        row.addWidget(self.mic_btn)
+        row.addWidget(self.mic_btn, 0, bottom)
         self.send_btn = QToolButton(objectName="Send", text=theme.ICON["send"])     # (named in apply_language)
         self.send_btn.setCursor(Qt.PointingHandCursor)
         self.send_btn.clicked.connect(self._send_clicked)     # while an answer runs it is the Stop button
         self.send_btn.setEnabled(False)
-        row.addWidget(self.send_btn)
+        row.addWidget(self.send_btn, 0, bottom)
+        self.capsule.setFixedHeight(max(42, self.input.height() + 10))      # the field's first height
+        # the voice state above the capsule: the field's placeholder, where it was shown, is hidden once the field
+        # holds text (CHAT-08)
+        self.voice_chip = QLabel(objectName="VoiceChip")
+        self.voice_chip.hide()
+        self._voice_state = "idle"
         # what the next question sends: the screenshot taken on opening goes with the first question only
         self.shot_hint = QLabel(objectName="ShotHint")
         self.shot_hint.setTextFormat(Qt.RichText)
@@ -747,6 +879,7 @@ class Overlay(EdgeResize, QWidget):
         self.shot_hint.linkActivated.connect(lambda _link: self.recapture())
         self.shot_hint.hide()
         lay.addWidget(self.shot_hint)
+        lay.addWidget(self.voice_chip, 0, Qt.AlignLeft)       # (the leading side: right in Hebrew)
         lay.addWidget(self.capsule)
         # under the chat: what the answers cover. Only what the KB confirms is in the game, and when it last checked
         self.scope_note = QLabel(objectName="ScopeNote")
@@ -795,7 +928,7 @@ class Overlay(EdgeResize, QWidget):
         self.saver_badge.setVisible(self._saver_on)
         self.beta_badge.setText("BETA")
         self.beta_badge.show()
-        buttons = (self.history_btn, self.news_btn, self.guides_btn, self.wish_btn, self.tools_btn, self.minimap_btn,
+        buttons = (self.history_btn, self.news_btn, self.guides_btn, self.wish_btn, self.tools_btn,
                    self.settings_btn, self.min_btn, self.close_btn)
         for b in buttons:
             # a low minimum, so the header never holds the chat wider than 470 px; full size when there's room
@@ -868,7 +1001,7 @@ class Overlay(EdgeResize, QWidget):
         self.input.setAccessibleName(self.t("input_a11y"))
         set_tip(self.recapture_btn, self.t("recapture"))
         set_tip(self.settings_btn, self.t("settings"))
-        set_tip(self.minimap_btn, self.t("minimap_select"))
+        set_tip(self.minimap_btn, self.t("minimap_tip"))
         self.saver_badge.setToolTip(self.t.p("saver_hint", self.settings["provider"]))
         self._fit_header()
         self.show_scope()
@@ -889,7 +1022,7 @@ class Overlay(EdgeResize, QWidget):
         set_tip(self.min_btn, self.t("minimize"))
         set_tip(self.update_close, self.t("notice_close"))
         set_tip(self.close_btn, self.t("close_chat"))
-        set_tip(self.mic_btn, self.t("mic_tip"))
+        self.voice_state(self._voice_state)       # the mic's tip and the voice chip in the new language
         set_tip(self.clear_btn, self.t("clear_chat"))
         self._on_text(self.input.text())
         self.refresh_profile_chip()
@@ -959,7 +1092,13 @@ class Overlay(EdgeResize, QWidget):
     def refresh_pins(self):
         from .. import pins
         c = self.profiles.active
-        self.pins_bar.show_pins(pins.items(self.settings, c.id if c else None), self.t, self.t.rtl)
+        have = pins.items(self.settings, c.id if c else None)
+        self.pins_bar.show_pins(have, self.t, self.t.rtl)
+        # an answer's pin is grey only while that answer is pinned (CHAT-11)
+        pinned = {p.get("a") for p in have}
+        for b in self.feed.findChildren(Bubble):
+            if b.pin_btn is not None and _alive(b.pin_btn):
+                b.pin_btn.setEnabled(b.pin_key not in pinned)
 
     def pin_answer(self, question: str, answer: str, cid: str | None = None):
         from .. import pins
@@ -1100,7 +1239,7 @@ class Overlay(EdgeResize, QWidget):
         # no question running: a screen read holds the chat ("still answering" was false during a grind session)
         key = "busy_wait" if self.busy else "busy_reading"
         line = getattr(self, "_busy_line", None)
-        if line is not None and _alive(line) and self.feed_lay.indexOf(line) == self.feed_lay.count() - 2 \
+        if line is not None and _alive(line) and self.feed_lay.indexOf(line) == self.feed_lay.count() - 1 \
                 and getattr(self, "_busy_key", None) == key:
             return
         self._busy_key = key
@@ -1130,6 +1269,11 @@ class Overlay(EdgeResize, QWidget):
             if not getattr(self, "_inventory_wired", False):
                 self.inventory_read.connect(self._on_inventory_read)
                 self._inventory_wired = True
+            # the chat says it is on it at once (it sat silent for up to 7 s while the icon index built, PERF-08);
+            # the line goes when the items are named
+            from .. import inventory
+            key = "inv_checking" if inventory.index_ready(kb) else "inv_checking_cold"
+            self._inv_line = self.add_system(lambda t: t(key))
             cid = self.profiles.active_id
             threading.Thread(target=lambda: self.inventory_read.emit(
                 (question, shown, cid, *read_inventory(full, cursor, kb))), daemon=True).start()
@@ -1139,6 +1283,11 @@ class Overlay(EdgeResize, QWidget):
     def _on_inventory_read(self, r: tuple):
         question, shown, cid, tiles, slots, described = r
         self._reading_inventory = False
+        line, self._inv_line = getattr(self, "_inv_line", None), None
+        if line is not None and _alive(line):      # "Checking the inventory…" makes way for what was found
+            self.feed_lay.removeWidget(line)
+            line.hide()
+            line.deleteLater()
         if self.profiles.active_id == cid:     # another character meanwhile: its question gets none of this
             self._detail_tiles = tiles
             self._hidden_context = described or None
@@ -1247,6 +1396,9 @@ class Overlay(EdgeResize, QWidget):
             a.triggered.connect(lambda _=False, cid=c.id: self.switch_character(cid))
             menu.add_highlight(a, choice)
             menu.addAction(a)
+        if busy:
+            # the grey rows say why (they looked broken, CHAT-17)
+            menu.add_note(self.t("menu_busy_note"))
         if self.profiles.active is not None:
             menu.add_row("edit", self.t("edit_character"), lambda: self.edit_character_requested.emit(active), not busy)
             menu.add_row("delete", self.t("delete_character"),
@@ -1445,7 +1597,6 @@ class Overlay(EdgeResize, QWidget):
     def open_overlay(self, shot: bytes | None, game_hwnd: int | None):
         self.shot, self.shot_used, self.game_hwnd = shot, False, game_hwnd
         self._tell_brain_shown(True)          # the first answer's AI process starts now, while the player types
-        self._update_shot_hint()
         self.show_news()               # news a KB update brought since, or that aged out of "new"
         if not self.settings["window"]:
             self.place_default(game_hwnd)
@@ -1459,6 +1610,8 @@ class Overlay(EdgeResize, QWidget):
         # Win+D, "Show desktop" or its own minimize button left it minimized: opening it again brings it back
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.show()
+        self._shot_full = None          # a hint shown in full last time is one line now (CHAT-05)
+        self._update_shot_hint()        # (shown: a hint seen in full counts only on screen)
         self.raise_()
         self.activateWindow()
         osapi.float_over_fullscreen(int(self.winId()))
@@ -1618,10 +1771,12 @@ class Overlay(EdgeResize, QWidget):
             # the section itself too: the character card takes focus (Enter opens the character menu)
             for w in [sec, *sec.findChildren(QWidget)]:
                 if (w.isVisible() and w.isEnabled() and w.focusPolicy().value & Qt.TabFocus.value
-                        and not isinstance(w, QAbstractScrollArea)):
+                        and (not isinstance(w, QAbstractScrollArea) or w is self.input)):    # (the field is one)
                     at = w.mapTo(self, w.rect().center())
-                    # one row at a time (rows ~12 px apart at least), reading direction inside a row
-                    found.append(((i, w.mapTo(self, w.rect().topLeft()).y() // 12, -at.x() if rtl else at.x()), w))
+                    # one row at a time (rows ~12 px apart at least), reading direction inside a row; the input
+                    # row is one row, however tall its field has grown
+                    top = 0 if sec is self.capsule else w.mapTo(self, w.rect().topLeft()).y() // 12
+                    found.append(((i, top, -at.x() if rtl else at.x()), w))
         return [w for _, w in sorted(found, key=lambda p: p[0])]
 
     def focusNextPrevChild(self, nxt: bool) -> bool:
@@ -1642,16 +1797,28 @@ class Overlay(EdgeResize, QWidget):
         from ..capture import problem_key
         problem = None if self.shot else problem_key()     # the game covered, or no Screen Recording grant
         if problem:
-            text = self.t(problem)
+            state = problem
         elif not self.game_hwnd and not self.shot:
-            text = self.t("shot_hint_no_game")
+            state = "shot_hint_no_game"
         elif self.shot and not self.shot_used:
-            text = self.t("shot_hint_ready")
+            state = "shot_hint_ready"
         else:
+            state = "shot_hint_used"
+        # the whole explanation the first time a state shows (and for as long as it stays on screen), then one line
+        # with the rest in the tooltip: two or three lines on every open took the conversation's room (CHAT-05). A
+        # problem always says it all.
+        seen = list(self.settings["shot_hints_seen"] or [])
+        short = not problem and state in seen and state != getattr(self, "_shot_full", None)
+        if not problem and state not in seen and self.isVisible():
+            self.settings["shot_hints_seen"] = seen + [state]
+            self._shot_full = state
+        text = self.t(state + "_short" if short else state)
+        if state == "shot_hint_used":
             # the retake link never splits over two lines (at 470 px "לצלם / מחדש" did)
             retake = self.t("shot_hint_retake").replace(" ", "&nbsp;")
-            text = self.t("shot_hint_used") + f" <a href='shot:now' style='color:{theme.accent_text(deep=True)}; " \
-                                               f"text-decoration:none; white-space:nowrap;'><b>{retake}</b></a>"
+            text += (" ·" if short else "") + f" <a href='shot:now' style='color:{theme.accent_text(deep=True)}; " \
+                                              f"text-decoration:none; white-space:nowrap;'><b>{retake}</b></a>"
+        self.shot_hint.setToolTip(self.t(state).replace("**", "") if short else "")
         import re
         text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
         d = "rtl" if self.t.rtl else "ltr"
@@ -1684,8 +1851,9 @@ class Overlay(EdgeResize, QWidget):
     FEED_MAX = 80      # rows kept in the chat; older ones are in the History window
 
     def _add_widget(self, w: QWidget):
-        self.feed_lay.insertWidget(self.feed_lay.count() - 1, w)
+        self.feed_lay.addWidget(w)
         self._trim_feed()
+        QTimer.singleShot(0, self._note_new_below)
         # new content fades in rather than popping
         eff = QGraphicsOpacityEffect(w)
         w.setGraphicsEffect(eff)
@@ -1704,29 +1872,107 @@ class Overlay(EdgeResize, QWidget):
         keep = {self._anchor, self._reading.parentWidget() if self._reading is not None and _alive(self._reading)
                 else None}
         while self.feed_lay.count() - 1 > self.FEED_MAX:
-            item = self.feed_lay.itemAt(0)
+            item = self.feed_lay.itemAt(1)          # (0: the stretch)
             w = item.widget() if item else None
             if w is None or w in keep:
                 break
             gone = w.height() + self.feed_lay.spacing()
-            self.feed_lay.takeAt(0)
+            self.feed_lay.takeAt(1)
             w.hide()
             w.deleteLater()
             if not self._follow and self._anchor is None:
                 bar.setValue(max(0, bar.value() - gone))      # what the player is reading stays put
 
+    UNDO_SECONDS = 5
+
     def clear_chat(self):
-        """The clear button: the chat empties, an answer still coming is stopped, and the AI's next question starts a
-        new conversation (History.start_fresh; the History window still has everything)."""
+        """The clear button: the chat empties, and the AI's next question starts a new conversation
+        (History.start_fresh; the History window still has everything). For UNDO_SECONDS a "Chat cleared · Undo" note
+        can bring it all back (one click wiped the chat for good, CHAT-04); the AI forgets only once that time is up,
+        or at the next question. Mid-answer it asks first: the answer can't come back."""
         if self.busy:
-            self.stop_answer()
+            row = getattr(self, "_clear_ask", None)
+            if row is not None and _alive(row) and row.isEnabled():
+                return          # already asked
+
+            def yes():
+                ask = getattr(self, "_clear_ask", None)
+                if ask is not None and _alive(ask):          # not part of what Undo brings back
+                    self.feed_lay.removeWidget(ask)
+                    ask.hide()
+                    ask.deleteLater()
+                self._clear_ask = None
+                self.stop_answer()
+                self.clear_chat()
+                return False         # (the row is gone already)
+            self._clear_ask = self.add_confirm(lambda t: t("clear_busy_ask"), yes, "clear_busy_yes", "cancel")
+            return
+        self._commit_clear()           # an earlier clear still waiting: final now
+        ask = getattr(self, "_clear_ask", None)
+        if ask is not None and _alive(ask):        # a "stop and clear?" left from an answer that has ended since
+            self.feed_lay.removeWidget(ask)
+            ask.deleteLater()
+        rows = []
+        while self.feed_lay.count() > 1:
+            w = self.feed_lay.takeAt(1).widget()       # (0: the stretch, which keeps the chat at the bottom)
+            if w:
+                w.hide()               # kept, not deleted: Undo puts them back
+                rows.append(w)
         c = self.profiles.active
-        if c:
-            History(c.id).start_fresh()
+        cleared = {"rows": rows, "tags": list(self.focus_keys), "cid": c.id if c else None,
+                   "hidden": getattr(self, "_hidden_context", None), "tiles": getattr(self, "_detail_tiles", None)}
         self.set_tags([])
         self.clear_feed()
+        self._cleared = cleared
+        self._cleared_note = self.add_notice(lambda t: t("chat_cleared"), lambda t: t("chat_cleared_undo"),
+                                             self.undo_clear)
+        if not hasattr(self, "_clear_timer"):
+            self._clear_timer = QTimer(self, singleShot=True, timeout=self._commit_clear)
+        self._clear_timer.start(self.UNDO_SECONDS * 1000)
+
+    def undo_clear(self):
+        """Undo: the rows, the tags and the AI's conversation as they were before the clear."""
+        cleared, self._cleared = getattr(self, "_cleared", None), None
+        if cleared is None:
+            return
+        self._clear_timer.stop()
+        self._drop_cleared_note()
+        for i, w in enumerate(cleared["rows"]):
+            if _alive(w):
+                self.feed_lay.insertWidget(i + 1, w)   # above anything said since the clear (after the stretch)
+                w.show()
+        c = self.profiles.active
+        if (c.id if c else None) == cleared["cid"]:      # (another character meanwhile: its context is its own)
+            self._hidden_context = cleared["hidden"]
+            self._detail_tiles = cleared["tiles"]
+            self.set_tags(cleared["tags"])
+        self._follow = True
+        self._trim_feed()
+
+    def _commit_clear(self, fresh: bool = True):
+        """The clear is final: the kept rows go and the AI's next question starts a new conversation. fresh=False:
+        the conversation is gone anyway (the character deleted, the history cleared)."""
+        cleared, self._cleared = getattr(self, "_cleared", None), None
+        if cleared is None:
+            return
+        if hasattr(self, "_clear_timer"):
+            self._clear_timer.stop()
+        self._drop_cleared_note()
+        for w in cleared["rows"]:
+            if _alive(w):
+                w.deleteLater()
+        if cleared["cid"] and fresh:
+            History(cleared["cid"]).start_fresh()
+
+    def _drop_cleared_note(self):
+        note, self._cleared_note = getattr(self, "_cleared_note", None), None
+        if note is not None and _alive(note):
+            self.feed_lay.removeWidget(note)
+            note.hide()
+            note.deleteLater()
 
     def clear_feed(self):
+        self._commit_clear(fresh=False)      # a clear waiting for Undo: nothing to bring back any more
         self._hidden_context = self._detail_tiles = None      # a cleared chat leaves nothing for the next question
         self._anchor = None
         self._pending_bubble = None
@@ -1734,8 +1980,9 @@ class Overlay(EdgeResize, QWidget):
         self._pending_history = None
         self._stop_deltas()
         self._reading = None
+        self._hide_new_pill()
         while self.feed_lay.count() > 1:
-            w = self.feed_lay.takeAt(0).widget()
+            w = self.feed_lay.takeAt(1).widget()
             if w:
                 w.deleteLater()
 
@@ -1786,6 +2033,7 @@ class Overlay(EdgeResize, QWidget):
         self.focus_label.setText(bidi.plain(self.t("asking_about_short"), self.t.rtl))
         self.clear_tags_btn.setToolTip(self.t("untag_all"))
         self.focus_bar.setVisible(bool(self.focus_keys))
+        self._show_placeholder()          # "Ask about Mano…" while tagged
 
     def set_focus(self, key: str):   # kept for callers that tag a single card
         self.set_tags([key] if key else [])
@@ -1990,6 +2238,7 @@ class Overlay(EdgeResize, QWidget):
         if self._is_busy():
             self._say_busy()        # "Ask Claude anyway", the tip strip and voice went silent while busy
             return False
+        self._commit_clear()        # a clear still open to Undo: the AI starts the new conversation with this one
         label = shown or question
         # the app-made context belongs to this question only, however it gets answered (an instant answer too)
         tiles, self._detail_tiles = getattr(self, "_detail_tiles", None), None
@@ -2042,7 +2291,12 @@ class Overlay(EdgeResize, QWidget):
             # history search pairs both answers with it); asked later, after other questions, it goes in again
             history.append("user", stored)
             self._pending_stored = stored
+        # all a "Try again" needs to ask it the same way: the question, its tags and the app's context (CHAT-02)
+        c = self.profiles.active
+        self._ask_ctx = {"question": question, "shown": shown, "extra": hidden, "focus": focus, "tiles": tiles,
+                         "shot": shot, "cid": c.id if c else None}
         self._pending_bubble = self.add_bubble(self.t("thinking"), "assistant")
+        self._pending_bubble.start_waiting(lambda: self.t)
         self._start_reading(self._pending_bubble)
         self.busy = True
         self._show_send_or_stop()        # Stop, for as long as the answer runs
@@ -2053,6 +2307,7 @@ class Overlay(EdgeResize, QWidget):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.delta.connect(self._on_delta)
+        self._worker.stage.connect(self._on_stage)
         # a bound method of this QObject → Qt queues the call onto the GUI thread.
         # (a lambda here would run in the worker thread and build widgets there: crash + stray window)
         self._pending_history = history
@@ -2174,6 +2429,43 @@ class Overlay(EdgeResize, QWidget):
         self._anchor = None
         self._reader_scrolled = True
         self._follow = bar.value() >= bar.maximum() - 24
+        if self._follow:
+            self._hide_new_pill()
+
+    def _note_new_below(self):
+        """Something landed below while the player reads higher up: a "↓ New answer" pill over the bottom of the
+        chat says so (nothing did, CHAT-07). Only when the player scrolled away, never for the app's own anchor."""
+        if self._follow or not self._reader_scrolled:
+            return
+        bar = self.scroll.verticalScrollBar()
+        if bar.value() >= bar.maximum() - 24:
+            return
+        pill = getattr(self, "_new_pill", None)
+        if pill is None:
+            from .widgets import NewPill
+            pill = self._new_pill = NewPill(self.scroll)
+            pill.clicked.connect(self._to_new_answer)
+        pill.show_text(bidi.plain(self.t("new_answer_pill"), self.t.rtl))
+
+    def _hide_new_pill(self):
+        pill = getattr(self, "_new_pill", None)
+        if pill is not None:
+            pill.hide()
+
+    def _to_new_answer(self):
+        """The pill: to the newest answer's first line, and follow it again."""
+        self._hide_new_pill()
+        bar = self.scroll.verticalScrollBar()
+        b = self._reading
+        row = b.parentWidget() if b is not None and _alive(b) else None
+        self._reader_scrolled = False
+        self._follow = True
+        if row is not None and row.mapTo(self.feed, row.rect().topLeft()).y() - 8 > bar.value():
+            self._anchor = row          # below where the player was: its first line at the top
+            bar.setValue(self._anchor_top())
+        else:
+            self._anchor = None
+            bar.setValue(bar.maximum())
 
     def _on_range(self, _lo: int, hi: int):
         bar = self.scroll.verticalScrollBar()
@@ -2192,6 +2484,7 @@ class Overlay(EdgeResize, QWidget):
         self._follow = True
         self._reader_scrolled = False
         self._reading = bubble
+        self._hide_new_pill()
 
     def _keep_answer_readable(self):
         """Once the answer (plus what follows it) is taller than the view, pin its first line to the top."""
@@ -2225,6 +2518,15 @@ class Overlay(EdgeResize, QWidget):
         if self._pending_bubble and text:
             self._pending_bubble.set_text(text)
             QTimer.singleShot(0, self._keep_answer_readable)
+            QTimer.singleShot(0, self._note_new_below)
+
+    def _on_stage(self, kind: str):
+        """The AI reports what it does before its first words ("tools", "hedge"): the waiting bubble says so."""
+        if self.sender() is not None and self.sender() in getattr(self, "_dropped_workers", []):
+            return
+        b = self._pending_bubble
+        if b is not None and _alive(b):
+            b.set_stage(kind)
 
     def _stop_deltas(self):
         """The answer is in (or the chat was cleared): a queued piece of it must not be drawn over the end."""
@@ -2340,8 +2642,57 @@ class Overlay(EdgeResize, QWidget):
             self._sync_shot = shot
             from .. import capture
             self._sync_full = capture.LAST_FULL       # the same grab at full resolution, for the portrait
-            self._sync_thread = QThread(self)
             self._sync_cid = self.profiles.active_id
+            if getattr(self, "_sync_grind", False):
+                # a grind read: the bar is read here first (hud.py), the AI only when the inventory is open or the
+                # bar won't read (the owner's, 2026-10-08: a screenshot to the AI every minute just for the numbers)
+                self._start_local_grind_read(shot, self._sync_full, capture.LAST_CURSOR)
+                return
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("profile refresh could not start")
+            self._on_sync_done(Answer(error="internal"))
+            return
+        self._start_sync_worker(shot)
+
+    def _start_local_grind_read(self, shot: bytes, full, cursor) -> None:
+        """Read the bar on a worker thread; its result comes back through local_grind_done (on the GUI thread)."""
+        import threading
+
+        from .. import plan
+        from .location import LOCATION
+        if not getattr(self, "_local_grind_wired", False):
+            self.local_grind_done.connect(self._on_local_grind)
+            self._local_grind_wired = True
+        table = plan.exp_table(self.kb)
+        here = LOCATION.here
+        map_name = routes.of(self.kb).name(here.map) if here is not None else None
+        token = object()
+        self._local_grind_token = token
+
+        def work():
+            try:
+                got = local_grind_read(full, table, map_name)
+            except Exception:      # noqa: BLE001 - the AI read still runs
+                got = None
+            self.local_grind_done.emit((token, shot, full, cursor, got))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_local_grind(self, r: tuple) -> None:
+        token, shot, full, cursor, got = r
+        if token is not getattr(self, "_local_grind_token", None) or not getattr(self, "_syncing", False):
+            return             # timed out meanwhile (said so), or a newer read: this one goes nowhere
+        if got is None:
+            # the inventory is open (its mesos, potions and loot need the AI) or the bar didn't read
+            self._start_sync_worker(shot)
+            return
+        update, grind_obj = got
+        self._on_sync_done(Answer(profile_update=update, grind=grind_obj))
+
+    def _start_sync_worker(self, shot: bytes) -> None:
+        try:
+            from .. import capture
+            self._sync_thread = QThread(self)
             # reading a name, a level and a bar off a screenshot: no knowledge base, no file tools (it went looking
             # through the pages). The player's own model: measured 2026-10-02, Sonnet answered this read in ~3 s and
             # Haiku in 13-50 s, so the "light" model is no faster here
@@ -2431,9 +2782,12 @@ class Overlay(EdgeResize, QWidget):
             self._syncing = False
             if changes:
                 self._show_changes(changes)
-            if not asked and not [ch for ch in changes if ch[0] != "exp"]:
+            if avatar:
+                # a new picture is a change too: it said "up to date, no changes" while the portrait had just changed
+                self.add_system(lambda t: t("sync_portrait"))
+            elif not asked and not [ch for ch in changes if ch[0] != "exp"]:
                 # nothing that shows as its own line (an EXP change only moves the bar): still say it worked
-                key = "sync_nothing" if ans.profile_update or ans.avatar_box or avatar or changes else "sync_not_found"
+                key = "sync_nothing" if ans.profile_update or ans.avatar_box or changes else "sync_not_found"
                 self.add_system(lambda t: t(key))
             self.refresh_profile_chip()
             self.sync_finished.emit(bool(ans.profile_update))
@@ -2490,12 +2844,7 @@ class Overlay(EdgeResize, QWidget):
         if ans.error:
             import logging
             logging.getLogger(__name__).warning("answer failed: %s", ans.error)
-            key, provider = self._error_key(ans.error), self.settings["provider"]
-            if ans.error in ("not_logged_in", "usage_limit") and self.settings.api_key_mode(provider):
-                # an API key: no sign-in or plan to point at (it said "sign in to Claude again")
-                self._pending_bubble.set_text(self.t(key + "_key"))
-            else:
-                self._pending_bubble.set_text(self.t.p(key, provider))
+            self._show_failed(self._pending_bubble, ans.error, getattr(self, "_ask_ctx", None))
             self._remember_model(ans)
             if history and getattr(self, "_pending_stored", None):
                 history.drop_last_if_user(self._pending_stored)     # no answer: the question goes too
@@ -2521,6 +2870,64 @@ class Overlay(EdgeResize, QWidget):
             # treetop), so replacing a good portrait is left to the explicit ⟳ sync
             if ans.avatar_box and getattr(self, "_question_shot", None) and not self.profiles.avatar_path():
                 self._update_avatar(self._question_shot, ans.avatar_box)
+
+    # errors that Settings fixes: installing the AI, signing in again, updating it, the API key
+    SETTINGS_ERRORS = ("not_installed", "not_logged_in", "cli_outdated", "no_credit")
+
+    def _show_failed(self, bubble: Bubble, error: str, ctx: dict | None) -> None:
+        """A failed answer: the error look, "Try again" (the same question, tags and context) and, where Settings
+        fixes it, "Open Settings". The question also goes back into an empty field (it was gone from the field and
+        the history, and every error says "Try again": CHAT-02)."""
+        provider = self.settings["provider"]
+        key_mode = bool(self.settings.api_key_mode(provider))
+
+        def render(t):
+            key = self._error_key(error)
+            if error in ("not_logged_in", "usage_limit") and key_mode:
+                # an API key: no sign-in or plan to point at (it said "sign in to Claude again")
+                text = t(key + "_key")
+            else:
+                text = t.p(key, provider)
+            actions = []
+            if ctx and not getattr(bubble, "retried", False):
+                actions.append((t("answer_retry"), lambda: self._retry(ctx, bubble)))
+            if error in self.SETTINGS_ERRORS or (key_mode and error == "usage_limit"):
+                actions.append((t("answer_open_settings"), lambda: self.settings_requested.emit()))
+            bubble.show_error(text, actions)
+        render(self.t)
+        self._remember_render(bubble, render)
+        if ctx and not ctx["shown"] and not self.input.text().strip():
+            self.input.setText(ctx["question"])
+            if not self.focus_keys:
+                self.set_tags([k for k in ctx["focus"] if self.kb.get(k)])
+
+    def _retry(self, ctx: dict, bubble: Bubble) -> None:
+        """ "Try again" under a failed answer: the same question asked again, with its tags, the app's context and
+        the screenshot it went with (its bubble is already in the chat above)."""
+        if self._is_busy():
+            self._say_busy()
+            return
+        restored = self.input.text().strip() == ctx["question"].strip()
+        if restored:
+            self.input.clear()              # (put back by _show_failed, with its tags)
+        c = self.profiles.active
+        if (c.id if c else None) != ctx.get("cid"):
+            # another character since: the question again, without the old one's context (it went out as the new
+            # character carrying the old talk, review CHAT-R2)
+            ctx = {**ctx, "extra": "", "tiles": None}
+        keep, self.focus_keys = self.focus_keys, [k for k in ctx["focus"] if self.kb.get(k)]
+        self._detail_tiles = ctx["tiles"]
+        if ctx["shot"] is not None and self.shot_used:
+            self.shot, self.shot_used = ctx["shot"], False
+        try:
+            asked = self.ask(ctx["question"], force_claude=True, shown=ctx["shown"], extra=ctx["extra"])
+        finally:
+            self.focus_keys = keep
+        if restored and asked and keep == [k for k in ctx["focus"] if self.kb.get(k)]:
+            self.set_tags([])               # the next, unrelated question went out tagged (review X-R1)
+        if asked and _alive(bubble):
+            bubble.retried = True
+            bubble.show_error(bubble._text, [])
 
     def _remember_model(self, ans: Answer) -> None:
         """The model that answered, for Settings: stored after the answer is on screen, so a settings write can
@@ -2673,22 +3080,44 @@ class Overlay(EdgeResize, QWidget):
 
     def voice_state(self, state: str):
         """listening | transcribing | idle | loading (from disk) | downloading (first use)"""
-        self.mic_btn.setProperty("active", "true" if state.startswith("listening") else "false")
+        self._voice_state = state
+        listening = state.startswith("listening")
+        self.mic_btn.setProperty("active", "true" if listening else "false")
         self.mic_btn.style().unpolish(self.mic_btn)
         self.mic_btn.style().polish(self.mic_btn)
+        # while recording the mic's click stops and sends: its tooltip and name say so
+        set_tip(self.mic_btn, self.t("mic_stop_tip" if listening else "mic_tip"))
+        self.capsule.set_voice_look(listening)
         text = {"listening": self.t("listening"),
                 "transcribing": self.t("transcribing"),
                 "loading": self.t("voice_loading"),
                 "downloading": self.t("voice_downloading")}.get(state)
+        self._voice_text = text
         if text is None:
             self._show_placeholder()
         else:
             self.input.set_hint(bidi.plain(text, self.t.rtl))
+        # the same state above the capsule, where it shows whatever the field holds
+        chip = self.t("listening_chip") if listening else text
+        if chip:
+            self.voice_chip.setText(bidi.plain(("● " if listening else "") + chip, self.t.rtl))
+            self.voice_chip.setProperty("voice", "true" if listening else "false")
+            self.voice_chip.style().unpolish(self.voice_chip)
+            self.voice_chip.style().polish(self.voice_chip)
+        self.voice_chip.setVisible(bool(chip))
 
     def _show_placeholder(self):
-        """The field's own hint, and its shorter form for a narrow chat."""
+        """The field's own hint, and its shorter form for a narrow chat. With cards tagged: "Ask about Mano…", so
+        the tag reads as the subject of the next question, not as a question already asked (CHAT-16)."""
+        if getattr(self, "_voice_text", None):
+            return          # "Listening…" keeps the field's hint until the voice state ends
+        if self.focus_keys:
+            names = ", ".join((self.kb.get(k) or {}).get("name", k) for k in self.focus_keys)
+            text = self.t("input_placeholder_tagged", name=bidi.name_block(names, self.t.rtl))
+            self.input.set_hint(bidi.plain(text, self.t.rtl))
+            return
         short = self.t("input_placeholder_short")
-        self.input.set_hint(bidi.plain(self._placeholder, self.t.rtl), bidi.plain(short, self.t.rtl))
+        self.input.set_hint(bidi.plain(getattr(self, "_placeholder", ""), self.t.rtl), bidi.plain(short, self.t.rtl))
 
     def offer_voice_download(self, size: int):
         """The first voice question: the speech model isn't on disk. Ask before downloading it, with its size (it
@@ -2773,6 +3202,7 @@ class Overlay(EdgeResize, QWidget):
         """This session's transcript of each character the player talked as {character id: transcript}, for
         the long-term summaries (only the character active at the end got one; the others' questions never
         reached their earlier sessions)."""
+        self._commit_clear()        # quitting within the Undo seconds: the clear still holds next time
         if self._session_started is None:
             return {}
         out = {}

@@ -154,6 +154,7 @@ DEFAULT_SETTINGS = {
     # Older files hold a single bool here, which meant the Anthropic key.
     "api_key_fallback": {},
     "onboarding_done": False,
+    "shot_hints_seen": [],        # the screenshot hints shown in full once (then one line, CHAT-05)
     "tour_done": False,           # the first-run tour of the chat window was shown (skipped counts too)
     "pins": {},                   # character id -> pinned answers [{q, a, t}]
     "tips_dismissed": {},         # character id -> {tip kind: level it was hidden at}
@@ -166,7 +167,7 @@ DEFAULT_SETTINGS = {
     "news_read": [],              # news ids the player dismissed or read (news.py), so they come up once
     "last_session": None,         # summary of the previous play session, shown when the chat next opens
     "instant_answers": True,      # simple factual questions answered from the KB, without Claude
-    "telemetry": False,           # anonymous usage stats, opt-in (see telemetry.py)
+    "telemetry": True,            # anonymous usage stats, on unless turned off (the owner's, 2026-10-08; telemetry.py)
     "install_id": "",             # random id for those stats, created on first use
     "presence": True,             # anonymous "the app is running" ping, for player counts (see presence.py)
     "presence_sent": {},          # what that ping last marked as sent: {"ever", "day", "month"}
