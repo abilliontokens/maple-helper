@@ -41,6 +41,7 @@ from .gamesearch import QSS as _GLASS_QSS, _SearchBox
 from .glass import EdgeResize
 from .npcoverlay import (BOTTOM, FILL1, FILL2, GEOM_DEBOUNCE_MS, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN,
                          SIDE, TEXT, TOP, _Header, _paint_glass, accent_of, set_capturable)
+from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
 log = logging.getLogger("maplehelper")
@@ -377,6 +378,7 @@ class GearAdvisor(EdgeResize, QWidget):
         # not the NPCs window's _flags(): the stat boxes and the picker take the keyboard
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setMouseTracking(True)          # hovering the rim shows the resize cursor
         self.setMinimumSize(MIN_W, MIN_H)
         self.resize(DEFAULT_W, DEFAULT_H)

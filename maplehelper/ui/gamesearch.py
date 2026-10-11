@@ -31,6 +31,7 @@ from .glass import SHADOW, EdgeResize
 from .location import LOCATION
 from .npcoverlay import (BOTTOM, FILL1, FILL2, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TEXT, TOP,
                          _Header, _flags, _paint_glass, accent_of, direction, dock_beside, set_capturable)
+from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
 # the searches the toolbar offers: monsters and NPCs together (each row opens its own page), the maps (listed before
@@ -714,6 +715,7 @@ class DetailWindow(EdgeResize, QWidget):
     def __init__(self, owner: GameSearch):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setMouseTracking(True)          # hovering the rim shows the resize cursor
@@ -1230,6 +1232,7 @@ class GameSearch(EdgeResize, QWidget):
         # not the NPCs window's _flags(): this one takes the keyboard, so no WindowDoesNotAcceptFocus
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setMouseTracking(True)          # hovering the rim shows the resize cursor
         self.setMinimumSize(MIN_W, MIN_H)
         self.resize(DEFAULT_W, DEFAULT_H)

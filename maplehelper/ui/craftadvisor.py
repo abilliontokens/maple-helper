@@ -69,6 +69,7 @@ from .npcoverlay import (
     dock_beside,
     set_capturable,
 )
+from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
 log = logging.getLogger("maplehelper")
@@ -384,6 +385,7 @@ class CraftAdvisor(EdgeResize, QWidget):
     def __init__(self, kb: KnowledgeBase, settings: Settings, profiles: Profiles, t: I18n):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setMouseTracking(True)  # hovering the rim shows the resize cursor
         self.setMinimumSize(MIN_W, MIN_H)
         self.resize(DEFAULT_W, DEFAULT_H)
@@ -1334,6 +1336,7 @@ class ForgePlanWindow(EdgeResize, QWidget):
     def __init__(self, owner: CraftAdvisor):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setMouseTracking(True)  # hovering the rim shows the resize cursor
