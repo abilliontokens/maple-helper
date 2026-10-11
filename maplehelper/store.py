@@ -182,17 +182,17 @@ DEFAULT_SETTINGS = {
     "game_toolbar_pos": None,     # where the player left the bar: {"x","y"}; None: above the minimap box
     "game_search_geom": None,     # where the player left the search window: {"x","y","w","h"}; None: under the bar
     "game_detail_size": None,     # the size the player dragged the search's page window to: {"w","h"}; None: fits its page
-    "game_rides": False,          # the toolbar's Cabs & Teleports switch: the way to a found NPC/map takes them, or walks
+    "game_rides": False,          # the bar's ⚙ panel's Cabs & Teleports switch: the way to a found NPC/map takes them, or walks
     "overlays_in_screenshots": False,   # the windows over the game show in screen captures (they hide from them)
     "loot_region": None,          # the game's pickup messages on screen, drawn by the player (the loot log reads them)
     "loot_overlay": False,        # the loot log's window over the game (ui/lootoverlay.py); a log starting turns it on
     "loot_overlay_pos": None,     # ... where the player left it: {"x","y"} in screen pixels
     "loot_overlay_folded": False,  # ... folded to its title row (its – button)
-    "scroll_planner": False,      # the scroll planner's window over the game (ui/scrollplanner.py): the bar's Scrolls button
+    "scroll_planner": False,      # the scroll planner's window over the game (ui/scrollplanner.py): the bar's Tools > Scrolls
     "scroll_planner_geom": None,  # ... where the player left it: {"x","y","w","h"}; None: under the bar
-    "gear_advisor": False,        # the gear upgrade advisor's window over the game (ui/gearadvisor.py): the bar's Gear button
+    "gear_advisor": False,        # the gear upgrade advisor's window over the game (ui/gearadvisor.py): the bar's Tools > Gear
     "gear_advisor_geom": None,    # ... where the player left it: {"x","y","w","h"}; None: under the bar
-    "craft_advisor": False,       # the crafting advisor's window over the game (ui/craftadvisor.py): the bar's Crafting button
+    "craft_advisor": False,       # the crafting advisor's window over the game (ui/craftadvisor.py): the bar's Tools > Crafting
     "craft_advisor_geom": None,   # ... where the player left it: {"x","y","w","h"}; None: under the bar
     "craft_plan_size": None,      # ... the size the player dragged its Forge plan window to: {"w","h"}; None: fits its plan
     "craft_exp_table": None,      # crafting EXP per level the player measured in game: {"7": 1234}; None: the KB's table

@@ -66,33 +66,26 @@ MARKS = {"npc_guide_here": "◎", "npc_guide_marked": "⌖", "npc_guide_unplaced
 # Shopkeeper", "Thief Instructor · Quest Giver · Job Instructor"): each such word the table uses, as a kind
 KINDS = {"Job Instructor": "job", "Transport": "transport", "Storage": "storage", "Shopkeeper": "shop",
          "Quest Giver": "quest", "Environmental": "object", "Townsfolk": "townsfolk"}
-# each kind's chip colour, in the order a row shows them: readable on every glass tint (the accent lights the pick)
+# each kind's chip colour, in the order a row shows them: readable on every dark glass tint, darkened by ink() on the
+# white one (the accent lights the pick)
 KIND_COLORS = {"job": "#FF8A80", "transport": "#4DD0C8", "storage": "#C39BFF", "shop": "#64B5FF",
                "quest": "#FFC857", "object": "#D9B98C", "townsfolk": "#B7BBC5"}
 
-# the panel floats over the game, whatever theme the app's own windows are in: its own dark glass and light text
-PANEL = (24, 24, 27)
-TEXT = "#F5F5F7"
-MUTED = "rgba(235,235,245,0.64)"
-FILL1 = "rgba(255,255,255,0.08)"
-FILL2 = "rgba(255,255,255,0.14)"
-SEL_TEXT = "#07230F"                # on the selected row's green, as the NPC's dot is ringed dark green
-
-# the colours every window over the game follows (the bar's ⚙ panel picks them): the
-# glass tints, all dark enough for the light text, and the accents that light a lit or selected button, each
+# the colours every window over the game follows (the bar's ⚙ panel picks them): the glass tints (dark ones under
+# light text, the white one under dark text: palette_of), and the accents that light a lit or selected button, each
 # with the text colour that reads on it. "dark"/"green" are today's look, the ones a stale setting falls back to.
 TINTS = {"dark": ("tbs_tint_dark", (24, 24, 27)),
          "midnight": ("tbs_tint_midnight", (17, 24, 43)),
          "forest": ("tbs_tint_forest", (13, 31, 22)),
          "wine": ("tbs_tint_wine", (38, 17, 27)),
-         "slate": ("tbs_tint_slate", (36, 39, 44))}
+         "slate": ("tbs_tint_slate", (36, 39, 44)),
+         "white": ("tbs_tint_white", (246, 246, 248))}
 ACCENTS = {"green": ("tbs_accent_green", "#2E9E5B", "#07230F"),
            "blue": ("tbs_accent_blue", "#3D8BD6", "#082138"),
            "purple": ("tbs_accent_purple", "#8265D6", "#180C2C"),
            "orange": ("tbs_accent_orange", "#E08A3C", "#2F1706"),
            "pink": ("tbs_accent_pink", "#D65C8E", "#2F081A"),
            "teal": ("tbs_accent_teal", "#2FA8A0", "#062623")}
-OPACITY_STEPS = (0.3, 0.5, 0.7, 0.85, 1.0)   # the transparency's choices on the ⚙ panel's slider
 
 
 def _picked(settings, key: str):
@@ -109,7 +102,7 @@ def tint_of(settings) -> tuple[int, int, int]:
     """The glass fill the settings pick (a name TINTS doesn't know: today's dark)."""
     name = _picked(settings, "overlay_tint")
     entry = TINTS.get(name) if isinstance(name, str) else None
-    return entry[1] if entry is not None else PANEL
+    return entry[1] if entry is not None else TINTS["dark"][1]
 
 
 def accent_of(settings) -> tuple[str, str]:
@@ -117,23 +110,68 @@ def accent_of(settings) -> tuple[str, str]:
     know: today's green)."""
     name = _picked(settings, "overlay_accent")
     entry = ACCENTS.get(name) if isinstance(name, str) else None
-    return (entry[1], entry[2]) if entry is not None else (theme.GOOD_TEXT_LIGHT, SEL_TEXT)
+    entry = entry if entry is not None else ACCENTS["green"]
+    return entry[1], entry[2]
 
 
-_tint = PANEL       # the tint _paint_glass paints right now: set from the settings by apply_look
+@dataclass(frozen=True)
+class Palette:
+    """The colours a window over the game draws in, by the glass under them: light text on the dark tints, dark text
+    on the white one. `rim` is the glass's top edge highlight, `shade` a hairline/divider."""
+    light: bool
+    text: str
+    muted: str
+    fill1: str          # a row's, a button's, a box's fill
+    fill2: str          # ... under the mouse, or a stronger fill
+    rim: tuple[int, int, int]
+    shade: str
+
+
+# the panel floats over the game, whatever theme the app's own windows are in: its own glass and text in these
+DARK = Palette(False, "#F5F5F7", "rgba(235,235,245,0.64)", "rgba(255,255,255,0.08)", "rgba(255,255,255,0.14)",
+               (255, 255, 255), "rgba(255,255,255,0.08)")
+LIGHT = Palette(True, "#1D1D1F", "rgba(60,60,67,0.68)", "rgba(0,0,0,0.06)", "rgba(0,0,0,0.11)", (0, 0, 0),
+                "rgba(0,0,0,0.10)")
+LIGHT_TINTS = {"white"}     # the glass colours whose text is dark (TINTS)
+
+
+def palette_of(settings) -> Palette:
+    """The palette for the glass the settings pick."""
+    return LIGHT if _picked(settings, "overlay_tint") in LIGHT_TINTS else DARK
+
+
+_tint = TINTS["dark"][1]    # the tint _paint_glass paints right now: set from the settings by apply_look
+_palette = DARK     # the colours every window over the game draws in right now: set with it
 
 
 def apply_look(settings) -> None:
     """The one place the windows-over-the-game look follows the settings: the glass tint every _paint_glass
-    paints (the accent each window takes itself in its own style sheet, from accent_of). The app calls this
-    at start and whenever the tint is picked, so every window repaints with none of its own code."""
-    global _tint
+    paints, and the palette (palette()) every window builds its style sheet and paints with (the accent each
+    window takes itself, from accent_of). The app calls this at start and whenever the tint is picked, then every
+    window's refresh restyles and repaints."""
+    global _tint, _palette
     _tint = tint_of(settings)
+    _palette = palette_of(settings)
 
 
 def current_tint() -> tuple[int, int, int]:
     """The tint _paint_glass is painting (the tests ask; a window never needs it)."""
     return _tint
+
+
+def palette() -> Palette:
+    """The colours to draw in now: read when a style sheet is built or a widget paints, never kept."""
+    return _palette
+
+
+def ink(color: str) -> str:
+    """A coloured text's or chip's colour that reads on the glass now: as it is on the dark tints, darkened on the
+    white glass (the chips' light pastels vanish on white)."""
+    if not _palette.light:
+        return color
+    c = QColor(color)
+    h, s, v, a = c.getHsvF()
+    return QColor.fromHsvF(max(h, 0.0), min(1.0, s * 1.1 + 0.15), v * 0.55, a).name()
 
 
 def _rgba(color: str, alpha: float) -> str:
@@ -143,58 +181,63 @@ def _rgba(color: str, alpha: float) -> str:
 
 
 def qss(settings) -> str:
-    """The window's own style at the accent the settings pick: the picked row, the guide's arrow and the filter box
-    being typed in light in it (the rest of the look is every window's; each kind's chip has its own colour).
-    Rebuilt whenever the accent is picked, so a window follows with no code of its own."""
+    """The window's own style at the accent the settings pick, in the palette of the glass under it (palette(): light
+    text on the dark tints, dark on the white one): the picked row, the guide's arrow and the filter box being typed
+    in light in the accent (the rest of the look is every window's; each kind's chip has its own colour, ink()ed to
+    read on the glass). Rebuilt on every refresh and set only when it changed, so a window follows the ⚙ panel
+    with no code of its own."""
     accent, on_accent = accent_of(settings)
-    chips = "\n".join(f'QLabel#Chip[kind="{kind}"] {{ color: {c}; background: {_rgba(c, 0.16)}; }}'
+    pal = palette()
+    veil = "rgba({},{},{},{{}})".format(*pal.rim)       # the glass's own contrast colour at an opacity
+    chips = "\n".join(f'QLabel#Chip[kind="{kind}"] {{ color: {ink(c)}; background: {_rgba(ink(c), 0.16)}; }}'
                       for kind, c in KIND_COLORS.items())
+    text, muted, fill1, fill2 = pal.text, pal.muted, pal.fill1, pal.fill2
     return f"""
-#Title {{ color: {TEXT}; font-weight: 600; }}
-#Status {{ color: {MUTED}; }}
-#Status[empty="true"] {{ color: {TEXT}; font-size: 14px; font-weight: 600; }}
-#Hint {{ color: {MUTED}; font-size: 12px; }}
-QFrame#Empty[empty="true"] {{ background: {FILL1}; border-radius: 12px; }}
-#EmptyIcon {{ color: {TEXT}; background: {FILL2}; border-radius: 18px; font-family: "{SYMBOL_FONT}";
+#Title {{ color: {text}; font-weight: 600; }}
+#Status {{ color: {muted}; }}
+#Status[empty="true"] {{ color: {text}; font-size: 14px; font-weight: 600; }}
+#Hint {{ color: {muted}; font-size: 12px; }}
+QFrame#Empty[empty="true"] {{ background: {fill1}; border-radius: 12px; }}
+#EmptyIcon {{ color: {text}; background: {fill2}; border-radius: 18px; font-family: "{SYMBOL_FONT}";
              font-size: 19px; }}
-QPushButton {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px;
+QPushButton {{ background: {fill1}; color: {text}; border: none; border-radius: 8px;
               padding: 6px 10px; text-align: left; }}
-QPushButton:hover {{ background: {FILL2}; }}
+QPushButton:hover {{ background: {fill2}; }}
 QPushButton#NpcRow {{ border: 1px solid transparent; border-radius: 10px; padding: 0; }}
 QPushButton#NpcRow[sel="true"] {{ background: {_rgba(accent, 0.26)}; border: 1px solid {accent}; }}
 QPushButton#NpcRow[sel="true"]:hover {{ background: {_rgba(accent, 0.34)}; }}
-QLabel#NpcPic {{ background: rgba(255,255,255,0.06); border-radius: 8px; }}
-QLabel#NpcName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-QLabel#NpcSub {{ color: {MUTED}; font-size: 11px; }}
+QLabel#NpcPic {{ background: {veil.format(0.06)}; border-radius: 8px; }}
+QLabel#NpcName {{ color: {text}; font-size: 13px; font-weight: 600; }}
+QLabel#NpcSub {{ color: {muted}; font-size: 11px; }}
 QLabel#Chip {{ border-radius: 6px; padding: 1px 6px; font-size: 11px; font-weight: 700; }}
 {chips}
 QPushButton#Section {{ background: transparent; border: none; border-radius: 8px; margin-top: 6px; padding: 0; }}
-QPushButton#Section:hover {{ background: {FILL1}; }}
-QLabel#SecIcon {{ color: {DOOR_COLOR}; font-family: "{SYMBOL_FONT}"; font-size: 18px; }}
-QLabel#SecName {{ color: {TEXT}; font-size: 12px; font-weight: 700; }}
-QLabel#SecCount {{ color: {MUTED}; background: {FILL2}; border-radius: 8px; padding: 0 6px; font-size: 11px;
+QPushButton#Section:hover {{ background: {fill1}; }}
+QLabel#SecIcon {{ color: {ink(DOOR_COLOR)}; font-family: "{SYMBOL_FONT}"; font-size: 18px; }}
+QLabel#SecName {{ color: {text}; font-size: 12px; font-weight: 700; }}
+QLabel#SecCount {{ color: {muted}; background: {fill2}; border-radius: 8px; padding: 0 6px; font-size: 11px;
                    font-weight: 700; }}
-QLabel#SecMark {{ color: {MUTED}; font-family: "{SYMBOL_FONT}"; font-size: 11px; }}
-QLineEdit#Filter {{ background: {FILL1}; color: {TEXT}; border: 1px solid transparent; border-radius: 8px;
+QLabel#SecMark {{ color: {muted}; font-family: "{SYMBOL_FONT}"; font-size: 11px; }}
+QLineEdit#Filter {{ background: {fill1}; color: {text}; border: 1px solid transparent; border-radius: 8px;
                     padding: 4px 4px; }}
-QLineEdit#Filter:focus {{ background: {FILL2}; border: 1px solid {accent}; }}
-#GuideName {{ color: {TEXT}; font-size: 15px; font-weight: 700; }}
-QFrame#Way {{ background: {FILL1}; border-radius: 12px; }}
+QLineEdit#Filter:focus {{ background: {fill2}; border: 1px solid {accent}; }}
+#GuideName {{ color: {text}; font-size: 15px; font-weight: 700; }}
+QFrame#Way {{ background: {fill1}; border-radius: 12px; }}
 #Arrow {{ background: {accent}; color: {on_accent}; border-radius: 20px; font-family: "{SYMBOL_FONT}";
          font-size: 24px; font-weight: 700; }}
-#Arrow[still="true"] {{ background: {FILL2}; color: {TEXT}; }}
-#GuideLine {{ color: {TEXT}; font-size: 15px; font-weight: 600; }}
-#RowHint {{ color: {MUTED}; font-size: 11px; }}
-QPushButton#StopBtn {{ background: {FILL2}; color: {TEXT}; border: 1px solid rgba(255,255,255,0.16);
+#Arrow[still="true"] {{ background: {fill2}; color: {text}; }}
+#GuideLine {{ color: {text}; font-size: 15px; font-weight: 600; }}
+#RowHint {{ color: {muted}; font-size: 11px; }}
+QPushButton#StopBtn {{ background: {fill2}; color: {text}; border: 1px solid {veil.format(0.16)};
                        border-radius: 9px; padding: 7px 12px; font-weight: 600; text-align: center; }}
-QPushButton#StopBtn:hover {{ background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.28); }}
-QToolButton {{ background: transparent; color: {MUTED}; border: none; border-radius: 6px;
+QPushButton#StopBtn:hover {{ background: {veil.format(0.22)}; border-color: {veil.format(0.28)}; }}
+QToolButton {{ background: transparent; color: {muted}; border: none; border-radius: 6px;
               padding: 2px 7px; font-size: 13px; }}
-QToolButton:hover {{ background: {FILL2}; color: {TEXT}; }}
+QToolButton:hover {{ background: {fill2}; color: {text}; }}
 QScrollArea {{ background: transparent; border: none; }}
 #Rows {{ background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: rgba(255,255,255,0.25); border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: {veil.format(0.25)}; border-radius: 4px; min-height: 30px; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 """
@@ -350,9 +393,11 @@ def _paint_glass(w: QWidget, opacity: float) -> None:
     fill.setAlphaF(opacity)
     p.fillPath(path, fill)
     rim = QLinearGradient(0, SHADOW, 0, w.height() - SHADOW)
-    rim.setColorAt(0.0, QColor(255, 255, 255, 60))
-    rim.setColorAt(0.4, QColor(255, 255, 255, 22))
-    rim.setColorAt(1.0, QColor(255, 255, 255, 11))
+    r, g, b = _palette.rim              # a light edge on the dark glass, a soft dark one on the white
+    strong = (60, 22, 11) if not _palette.light else (34, 22, 18)
+    rim.setColorAt(0.0, QColor(r, g, b, strong[0]))
+    rim.setColorAt(0.4, QColor(r, g, b, strong[1]))
+    rim.setColorAt(1.0, QColor(r, g, b, strong[2]))
     p.setPen(QPen(rim, 1))
     p.drawPath(path)
     p.end()
@@ -877,10 +922,9 @@ class NpcOverlay(EdgeResize, QWidget):
         col.addWidget(head)
         self._filter = _FilterBox(objectName="Filter")     # over a long list (FILTER_FROM)
         self._filter.setFocusPolicy(Qt.ClickFocus)         # never the focus a shown window hands its first box
-        muted = QColor(235, 235, 245, 163)                  # MUTED, for a QPainter
-        self._filter.addAction(_glyph_icon(MAGNIFIER, muted), QLineEdit.LeadingPosition)
-        self._filter_clear = self._filter.addAction(_glyph_icon(theme.SYMBOL_ICONS["close"], muted),
-                                                    QLineEdit.TrailingPosition)
+        self._filter_find = self._filter.addAction(QIcon(), QLineEdit.LeadingPosition)
+        self._filter_clear = self._filter.addAction(QIcon(), QLineEdit.TrailingPosition)
+        self._filter_icons()
         self._filter_clear.setVisible(False)
         self._filter_clear.triggered.connect(self._filter.clear)
         self._filter.textChanged.connect(self._filtered)
@@ -924,6 +968,12 @@ class NpcOverlay(EdgeResize, QWidget):
 
     def paintEvent(self, e) -> None:
         _paint_glass(self, self._opacity)
+
+    def _filter_icons(self) -> None:
+        """The filter box's magnifier and ✕ in the palette's muted colour (redrawn when the glass flips)."""
+        muted = theme.qcolor(palette().muted)
+        self._filter_find.setIcon(_glyph_icon(MAGNIFIER, muted))
+        self._filter_clear.setIcon(_glyph_icon(theme.SYMBOL_ICONS["close"], muted))
 
     # ------------------------------------------------------------ text (all of it, for apply_language)
 
@@ -1294,11 +1344,13 @@ class NpcOverlay(EdgeResize, QWidget):
         self._guide.update()
 
     def _restyle(self) -> None:
-        """The accent the settings pick, in this window's and the guide's own style sheets (the glass itself is
-        painted in the tint by _paint_glass); skipped when it is the same, a restyle re-polishing every row."""
+        """The accent and the palette the settings pick, in this window's and the guide's own style sheets and the
+        filter box's marks (the glass itself is painted in the tint by _paint_glass); skipped when it is the same, a
+        restyle re-polishing every row."""
         sheet = qss(self._settings)
         if sheet != self.styleSheet():
             self.setStyleSheet(sheet)
+            self._filter_icons()
         if sheet != self._guide.styleSheet():
             self._guide.setStyleSheet(sheet)
 

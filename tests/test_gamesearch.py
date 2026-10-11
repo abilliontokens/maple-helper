@@ -27,6 +27,15 @@ def settings(isolated_store):
     return isolated_store.Settings()
 
 
+@pytest.fixture(autouse=True)
+def _dark_look():
+    """Every test starts and ends on today's dark glass, whatever look a test picked (npcoverlay's module state)."""
+    from maplehelper.ui import npcoverlay
+    npcoverlay.apply_look(None)
+    yield
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture(scope="module")
 def _own_kb(tmp_path_factory) -> Path:
     """This file's own copy of the fixture KB, without the tables any build writes (they are built here once):
@@ -641,7 +650,7 @@ def test_an_npc_on_the_players_map_guides_and_hiding_clears_it(win, qapp, kb, cl
     clean_location.set(_here("999999999", (0.5, 0.5)))  # another map: the ring goes, the way from there shown
     assert LOCATION.guide is None
     assert _texts(d) == [f"{name} is on Fake Town", "The way from here on foot",
-                         "No way on foot from your map is known. Try the toolbar's Cabs & Teleports"]
+                         win.t("lk_way_none_walk")]
     clean_location.set(_here(MID, (0.5, 0.5)))          # back on it: the map's own page says so
     d.open_view("map", f"map/{MID}")
     assert _head(d) == ("Fake Town", [], "Fake Street") and _texts(d) == ["You're on this map"]
@@ -828,6 +837,28 @@ def test_the_lit_row_and_the_switch_take_the_accent_picked(win, qapp, settings):
     sheet = win.styleSheet()
     assert gamesearch._rgba(purple, 0.26) in sheet and gamesearch._rgba(green, 0.26) not in sheet
     assert f"QPushButton#Segment:checked {{ background: {purple};" in sheet
+    assert win._detail.styleSheet() == sheet
+
+
+def test_the_white_glass_takes_dark_text_and_back(win, qapp, settings):
+    """The ⚙ panel's white glass: both windows' style sheets in the light palette's dark text (no light text left,
+    the chips' pastels darkened by ink); the dark glass again, today's light text back."""
+    from maplehelper.ui import gamesearch, npcoverlay
+    win.open("sell")
+    assert npcoverlay.DARK.text in win.styleSheet()
+    settings["overlay_tint"] = "white"
+    npcoverlay.apply_look(settings)
+    win._read_opacity()                                     # what the app calls whenever the look changes
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.DARK.text not in sheet
+    assert npcoverlay.DARK.muted not in sheet and "rgba(255,255,255" not in sheet
+    assert f"color: {npcoverlay.ink(gamesearch.TONES['safe'])};" in sheet and gamesearch.TONES["safe"] not in sheet
+    assert win._detail.styleSheet() == sheet
+    settings["overlay_tint"] = "dark"
+    npcoverlay.apply_look(settings)
+    win._read_opacity()
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
     assert win._detail.styleSheet() == sheet
 
 

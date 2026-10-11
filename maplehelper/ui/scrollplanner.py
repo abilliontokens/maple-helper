@@ -7,7 +7,7 @@ every final total as a small bar chart, and the cost (an NPC price from the data
 from MeowDB, or the player's own typed price — never one made up; a grade without one says so, and the answer never
 ranks it as if it had one).
 
-Built like the other windows over the game (the crafting advisor, the searches): the NPCs window's dark glass at the
+Built like the other windows over the game (the crafting advisor, the searches): the NPCs window's glass at the
 opacity and in the colours the ⚙ panel picks, the title row that drags it, cards in the same rounded fills, item
 pictures shown large on hover, its place kept in scroll_planner_geom. It takes the keyboard while its boxes are used
 (like the search window), shows while settings["scroll_planner"] is on, and its ✕ turns that off. The Free Market
@@ -31,10 +31,10 @@ from ..i18n import NBSP, I18n
 from ..kb import KnowledgeBase
 from ..store import Profiles, Settings
 from . import mapview, theme
-from .gamesearch import GAP, QSS as _GLASS_QSS, TYPE_DEBOUNCE_MS
+from .gamesearch import GAP, TYPE_DEBOUNCE_MS, glass_qss, rim
 from .glass import SHADOW, EdgeResize
-from .npcoverlay import (BOTTOM, FILL1, FILL2, GEOM_DEBOUNCE_MS, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN,
-                         SIDE, TEXT, TOP, _Header, _paint_glass, accent_of, set_capturable)
+from .npcoverlay import (BOTTOM, GEOM_DEBOUNCE_MS, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TOP, _Header,
+                         _paint_glass, accent_of, ink, palette, set_capturable)
 from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
@@ -46,80 +46,83 @@ ITEM_PIC, ROW_PIC, SCROLL_PIC = 44, 32, 32  # the picked equip's picture, a sear
 GUTTER = 4                                  # between the cards and the scrollbar
 LOW_ODDS = 0.5                              # under this, "all 7 pass only 2.8% of the time"
 SEGMENT_PAD = 24                            # a stat segment's padding around its (bold) word, as the QSS gives it
-# a grade's success badge: how risky its scroll is reads at a glance, whatever accent the player picked
+# a grade's success badge: how risky its scroll is reads at a glance, whatever accent the player picked (ink: darkened
+# on the white glass)
 RISK_COLORS = {"sure": "#4CD07D", "risky": "#FFB066", "long": "#FF8A80"}
-_MUTED = QColor(235, 235, 245, 163)         # MUTED for painting (a QColor can't read an "rgba(...)" string)
 
 
 def _rgba(color: str, alpha: float) -> str:
-    """A "#RRGGBB" colour at this opacity, for a tinted fill."""
-    c = color.lstrip("#")
-    return f"rgba({int(c[0:2], 16)},{int(c[2:4], 16)},{int(c[4:6], 16)},{alpha})"
+    """A colour ("#RRGGBB" or "rgba(...)") at this opacity, for a tinted fill."""
+    c = theme.qcolor(color)
+    return f"rgba({c.red()},{c.green()},{c.blue()},{alpha})"
 
 
 def qss(settings) -> str:
-    """The window's own style at the accent the settings pick (npcoverlay.ACCENTS): the lit stat, the answer card,
-    a typed price's tag and the set-price button; the glass itself is painted in the tint by _paint_glass. Rebuilt
-    whenever the accent is picked, so the window follows with no more code of its own."""
+    """The window's own style at the accent the settings pick (npcoverlay.ACCENTS) on the glass's palette
+    (npcoverlay.palette: light text on the dark tints, dark on the white one): the lit stat, the answer card, a
+    typed price's tag and the set-price button; the glass itself is painted in the tint by _paint_glass. Rebuilt
+    whenever the look is picked, so the window follows with no more code of its own."""
     fill, on_fill = accent_of(settings)
-    risks = "\n".join(f'QLabel#Badge[risk="{risk}"] {{ color: {c}; background: {_rgba(c, 0.16)}; }}\n'
-                      f'QLabel#Dot[risk="{risk}"] {{ color: {c}; }}'
+    pal = palette()
+    text, muted, fill1, fill2 = pal.text, pal.muted, pal.fill1, pal.fill2
+    risks = "\n".join(f'QLabel#Badge[risk="{risk}"] {{ color: {ink(c)}; background: {_rgba(c, 0.16)}; }}\n'
+                      f'QLabel#Dot[risk="{risk}"] {{ color: {ink(c)}; }}'
                       for risk, c in RISK_COLORS.items())
-    return _GLASS_QSS + f"""
+    return glass_qss() + f"""
 QLabel {{ background: transparent; }}
-#Sub {{ color: {MUTED}; font-size: 12px; }}
-#Note {{ color: {MUTED}; font-size: 11px; }}
-#Hint {{ color: {MUTED}; padding: 8px 2px; }}
-QFrame#ItemCard {{ background: {FILL1}; border: none; border-radius: 12px; }}
-#ItemName {{ color: {TEXT}; font-size: 15px; font-weight: 700; }}
-#SlotsNum {{ color: {TEXT}; font-size: 22px; font-weight: 700; }}
-#SlotsWord {{ color: {MUTED}; font-size: 11px; }}
-#Knob {{ color: {MUTED}; font-size: 12px; font-weight: 600; }}
-#Stepper {{ background: {FILL1}; border: none; border-radius: 8px; }}
-QToolButton#StepBtn {{ background: transparent; color: {TEXT}; border: none; border-radius: 6px; padding: 0;
+#Sub {{ color: {muted}; font-size: 12px; }}
+#Note {{ color: {muted}; font-size: 11px; }}
+#Hint {{ color: {muted}; padding: 8px 2px; }}
+QFrame#ItemCard {{ background: {fill1}; border: none; border-radius: 12px; }}
+#ItemName {{ color: {text}; font-size: 15px; font-weight: 700; }}
+#SlotsNum {{ color: {text}; font-size: 22px; font-weight: 700; }}
+#SlotsWord {{ color: {muted}; font-size: 11px; }}
+#Knob {{ color: {muted}; font-size: 12px; font-weight: 600; }}
+#Stepper {{ background: {fill1}; border: none; border-radius: 8px; }}
+QToolButton#StepBtn {{ background: transparent; color: {text}; border: none; border-radius: 6px; padding: 0;
                        min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; font-size: 15px;
                        font-weight: 600; }}
-QToolButton#StepBtn:hover {{ background: {FILL2}; }}
-QToolButton#StepBtn:disabled {{ color: rgba(235,235,245,0.28); }}
-#StepNum {{ color: {TEXT}; font-size: 14px; font-weight: 700; min-width: 22px; }}
-#Segmented {{ background: {FILL1}; border: none; border-radius: 10px; }}
-QPushButton#Segment {{ background: transparent; color: {MUTED}; border: none; border-radius: 8px; min-height: 28px;
+QToolButton#StepBtn:hover {{ background: {fill2}; }}
+QToolButton#StepBtn:disabled {{ color: {_rgba(muted, 0.28)}; }}
+#StepNum {{ color: {text}; font-size: 14px; font-weight: 700; min-width: 22px; }}
+#Segmented {{ background: {fill1}; border: none; border-radius: 10px; }}
+QPushButton#Segment {{ background: transparent; color: {muted}; border: none; border-radius: 8px; min-height: 28px;
                        max-height: 28px; padding: 0 10px; font-size: 13px; font-weight: 600; text-align: center; }}
-QPushButton#Segment:hover:!checked {{ background: {FILL2}; color: {TEXT}; }}
+QPushButton#Segment:hover:!checked {{ background: {fill2}; color: {text}; }}
 QPushButton#Segment:checked {{ background: {fill}; color: {on_fill}; font-weight: 700; }}
 QFrame#Answer {{ background: {_rgba(fill, 0.15)}; border: 1px solid {_rgba(fill, 0.50)}; border-radius: 12px; }}
-#AnswerTitle {{ color: {TEXT}; font-size: 15px; font-weight: 700; }}
-#AnswerText {{ color: {TEXT}; font-size: 13px; }}
-#AnswerNote {{ color: {MUTED}; font-size: 12px; }}
+#AnswerTitle {{ color: {text}; font-size: 15px; font-weight: 700; }}
+#AnswerText {{ color: {text}; font-size: 13px; }}
+#AnswerNote {{ color: {muted}; font-size: 12px; }}
 QLabel#Dot {{ font-size: 9px; padding-top: 4px; }}
-QFrame#Grade {{ background: {FILL1}; border: none; border-radius: 12px; }}
-#GradeName {{ color: {TEXT}; font-size: 14px; font-weight: 700; }}
+QFrame#Grade {{ background: {fill1}; border: none; border-radius: 12px; }}
+#GradeName {{ color: {text}; font-size: 14px; font-weight: 700; }}
 QLabel#Badge {{ border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 700; }}
 {risks}
-#Big {{ color: {TEXT}; }}
-#BigOdds {{ color: {TEXT}; font-size: 20px; font-weight: 700; }}
-#BigLabel {{ color: {MUTED}; font-size: 11px; }}
-#Caption {{ color: {MUTED}; font-size: 11px; }}
-QFrame#Rule {{ background: rgba(255,255,255,0.08); border: none; }}
-QLabel#Tag {{ color: {TEXT}; background: rgba(255,255,255,0.10); border-radius: 6px; padding: 2px 7px;
+#Big {{ color: {text}; }}
+#BigOdds {{ color: {text}; font-size: 20px; font-weight: 700; }}
+#BigLabel {{ color: {muted}; font-size: 11px; }}
+#Caption {{ color: {muted}; font-size: 11px; }}
+QFrame#Rule {{ background: {pal.shade}; border: none; }}
+QLabel#Tag {{ color: {text}; background: {rim(0.10)}; border-radius: 6px; padding: 2px 7px;
              font-size: 11px; font-weight: 600; }}
-QLabel#Tag[kind="yours"] {{ color: {fill}; background: {_rgba(fill, 0.16)}; }}
+QLabel#Tag[kind="yours"] {{ color: {ink(fill)}; background: {_rgba(fill, 0.16)}; }}
 QLabel#Tag[kind="none"], QLabel#Tag[kind="loading"], QLabel#Tag[kind="offline"] {{
-             color: {MUTED}; background: transparent; padding: 2px 0; font-weight: 400; }}
-QPushButton#PriceBtn {{ background: transparent; color: {TEXT}; border: none; border-radius: 6px; padding: 3px 6px;
+             color: {muted}; background: transparent; padding: 2px 0; font-weight: 400; }}
+QPushButton#PriceBtn {{ background: transparent; color: {text}; border: none; border-radius: 6px; padding: 3px 6px;
                        font-size: 12px; font-weight: 600; text-align: center; }}
-QPushButton#PriceBtn:hover {{ background: {FILL2}; }}
-QPushButton#SetPrice {{ background: {_rgba(fill, 0.20)}; color: {TEXT}; border: none; border-radius: 6px;
+QPushButton#PriceBtn:hover {{ background: {fill2}; }}
+QPushButton#SetPrice {{ background: {_rgba(fill, 0.20)}; color: {text}; border: none; border-radius: 6px;
                        padding: 3px 10px; font-size: 12px; font-weight: 600; text-align: center; }}
 QPushButton#SetPrice:hover {{ background: {_rgba(fill, 0.34)}; }}
 QLineEdit#PriceEdit {{ padding: 3px 8px; font-size: 12px; border-radius: 6px; }}
-#Total {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#PerPoint {{ color: {MUTED}; font-size: 11px; }}
+#Total {{ color: {text}; font-size: 13px; font-weight: 700; }}
+#PerPoint {{ color: {muted}; font-size: 11px; }}
 QFrame#FoldHead {{ background: transparent; border: none; border-radius: 8px; }}
-QFrame#FoldHead:hover {{ background: {FILL1}; }}
-#FoldTitle {{ color: {MUTED}; font-size: 12px; font-weight: 600; }}
-#FoldIcon {{ color: {MUTED}; font-family: "{theme.ICON_FONT}"; font-size: 12px; }}
-#FoldMark {{ color: {MUTED}; font-size: 13px; font-weight: 700; }}
+QFrame#FoldHead:hover {{ background: {fill1}; }}
+#FoldTitle {{ color: {muted}; font-size: 12px; font-weight: 600; }}
+#FoldIcon {{ color: {muted}; font-family: "{theme.ICON_FONT}"; font-size: 12px; }}
+#FoldMark {{ color: {muted}; font-size: 13px; font-weight: 700; }}
 """
 
 
@@ -494,7 +497,9 @@ class _Outcomes(QWidget):
         p.setLayoutDirection(Qt.LeftToRight)       # "+60" and "29%" read left to right in Hebrew too (not "60+")
         peak = self.peak()
         base = self.TOP + self.BARS
-        p.fillRect(QRectF(0, base, self.width(), 1), QColor(255, 255, 255, 36))
+        pal = palette()                            # read at paint time: the glass's text (dark on the white one)
+        rim = pal.rim                              # the baseline and the other bars: the glass's own ink, faint
+        p.fillRect(QRectF(0, base, self.width(), 1), QColor(*rim, 36))
         small = QFont(self.font())
         small.setPixelSize(10)
         bold = QFont(small)
@@ -502,7 +507,7 @@ class _Outcomes(QWidget):
         labelled = self._labelled(QFontMetrics(bold))
         for i, b in enumerate(self.bars):
             rect = self.bar_rect(i)
-            color = QColor(self._accent) if i == peak else QColor(255, 255, 255, 120 if i == self._hover else 66)
+            color = QColor(self._accent) if i == peak else QColor(*rim, 120 if i == self._hover else 66)
             if i == peak and i == self._hover:
                 color = color.lighter(120)
             path = QPainterPath()
@@ -512,10 +517,10 @@ class _Outcomes(QWidget):
             if i in labelled:
                 font = bold if i == peak else small
                 p.setFont(font)
-                p.setPen(QColor(TEXT) if i == peak else _MUTED)
+                p.setPen(theme.qcolor(pal.text) if i == peak else theme.qcolor(pal.muted))
                 self._text(p, QFontMetrics(font), b.label, rect.center().x(), base + 2, self.LABELS - 2, top_align=True)
         p.setFont(bold)
-        p.setPen(QColor(TEXT))
+        p.setPen(theme.qcolor(pal.text))
         self._text(p, QFontMetrics(bold), _pct(self.bars[peak].chance), self.column(peak).center().x(), 0, self.TOP - 2)
         p.end()
 
@@ -676,7 +681,7 @@ class _GradeCard(QFrame):
         self.tag = QLabel(objectName="Tag")
         self.price_btn = QPushButton(objectName="PriceBtn")
         # the pencil in the icon font, not "✎" in the text: inside a Hebrew line it fell back to no font (a box)
-        self.price_btn.setIcon(theme.glyph_icon("edit", MUTED, 12))
+        self.tint()
         self.set_btn = QPushButton(objectName="SetPrice")
         self.edit = _PriceBox(objectName="PriceEdit")
         self.edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"[\d,]{0,13}"), self.edit))
@@ -703,6 +708,12 @@ class _GradeCard(QFrame):
         cost.addWidget(self.per_point, 1, 2, end)
         cost.setColumnStretch(1, 1)
         v.addLayout(cost)
+
+    def tint(self) -> None:
+        """The pencil drawn in the glass's muted text, and the chart repainted: a glass picked that changes the
+        palette (npcoverlay.palette) re-tints what the style sheet doesn't reach."""
+        self.price_btn.setIcon(theme.glyph_icon("edit", palette().muted, 12))
+        self.chart.update()
 
     def start_edit(self, _=False) -> None:
         """The price (or Set price) clicked: a price box in its place, holding the player's own price if they gave
@@ -848,7 +859,7 @@ class _Body(QWidget):
 
 
 class ScrollPlanner(EdgeResize, QWidget):
-    """The window itself: over the game, in the overlays' dark glass, taking the keyboard while its boxes are used.
+    """The window itself: over the game, in the overlays' glass, taking the keyboard while its boxes are used.
     A picked equip (or, until the player picks one, the active character's first scrollable worn one) shows its
     header, the slots-to-use stepper and the stat to scroll, the plain answer, and a card per grade. A price the
     player types is kept for the window's life (until another equip is picked), never saved."""
@@ -1012,11 +1023,14 @@ class ScrollPlanner(EdgeResize, QWidget):
         self.update()                     # the glass repaints in the tint the settings now give
 
     def _restyle(self) -> None:
-        """The accent the settings pick, in the window's style sheet and its charts' likeliest bars; the style sheet
-        is set again only when it changed (a restyle re-polishes every card)."""
+        """The look the settings pick — the glass's palette (npcoverlay.palette) and the accent — in the window's
+        style sheet, its pencils and its charts; the style sheet is set again only when it changed (a restyle
+        re-polishes every card)."""
         sheet = qss(self._settings)
         if sheet != self.styleSheet():
             self.setStyleSheet(sheet)
+            for card in self._cards:
+                card.tint()
         accent = QColor(accent_of(self._settings)[0])
         if accent != self._accent:
             self._accent = accent
@@ -1547,7 +1561,7 @@ class ScrollPlanner(EdgeResize, QWidget):
         _paint_glass(self, self._opacity)
 
     def _read_opacity(self) -> None:
-        """The NPCs window's own slider sets it: the same dark glass, as see-through as the player asked."""
+        """The NPCs window's own slider sets it: the same glass, as see-through as the player asked."""
         try:
             self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, float(self._settings["npc_overlay_opacity"])))
         except (TypeError, ValueError):

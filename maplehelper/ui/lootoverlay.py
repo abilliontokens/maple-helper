@@ -5,9 +5,10 @@ follow, most picked first, each with its picture, its count and its NPC value; t
 and older ones fainter; and its buttons: Start, or Stop and Reset while a log runs. In its title row a – folds it to
 that row (what the log made stays in the title) and a ✕ hides it.
 
-It is built like the other windows over the game (the NPCs here window, the searches): the same dark glass in the
-tint and at the opacity the player picked for them (npc_overlay_opacity), the accent lighting what is on, the title
-row that drags it, muted secondary text and the same rounded buttons. It shows while settings["loot_overlay"] is on:
+It is built like the other windows over the game (the NPCs here window, the searches): the same glass in the tint
+and at the opacity the player picked for them (npc_overlay_opacity), its text in that glass's palette (dark text on
+the white one), the accent lighting what is on, the title row that drags it, muted secondary text and the same
+rounded buttons. It shows while settings["loot_overlay"] is on:
 the bar's Loot log button and the Loot log page's switch flip it, its ✕ turns it off, and a log starting (from
 anywhere) turns it on. A stopped log stays in it, to read what it made. Every 5 s (the clock, the per-hour figures
 and the "how long ago" move between pickups too) and on every pickup its rows are filled again in place, never made
@@ -27,8 +28,8 @@ from .. import bidi, lootlog
 from ..i18n import I18n
 from . import theme
 from .glass import SHADOW
-from .npcoverlay import (BOTTOM, FILL1, FILL2, GEOM_DEBOUNCE_MS, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN,
-                         SIDE, TEXT, TOP, _Header, _flags, _paint_glass, accent_of, set_capturable)
+from .npcoverlay import (BOTTOM, GEOM_DEBOUNCE_MS, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TOP, _Header,
+                         _flags, _paint_glass, accent_of, ink, palette, set_capturable)
 from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
@@ -41,12 +42,11 @@ SLOT, PIC = 28, 24              # an item row's slot (like an inventory's) and t
 VALUE_PX, VALUE_MIN_PX = 19, 12  # a tile's big number, stepped down to fit its tile ("12.35M" in Rubik)
 FEED_PIC = 16                   # a pickup's picture, or the EXP's sparkle and the mesos' coin
 WORTH_W = 48                    # the NPC value column: its numbers line up at the rows' end
-# each figure in a colour of its own, in its tile and in its pickups' glyph, readable on every glass tint whatever
-# accent is picked (the accent lights what is on: the log's state, Start)
+# each figure in a colour of its own, in its tile and in its pickups' glyph, readable on every dark glass tint whatever
+# accent is picked, darkened by ink() on the white one (the accent lights what is on: the log's state, Start)
 STAT_COLORS = {"exp": "#64B5FF", "mesos": "#FFC940", "items": "#B39DFF"}
 COIN_EDGE, COIN_RIM = "#E3A21F", "#A8720F"
-STOP = "#FF8A80"                # Stop: a warm red that reads on every tint (the crafting window's loss colour)
-WARN = theme.WARN_TEXT["dark"]  # the log can't read: no game window, another window over its corner, no reader
+STOP = "#FF8A80"                # Stop: a warm red that reads on every dark tint (the crafting window's loss colour)
 FADE = (1.0, 0.84, 0.7, 0.56)   # the latest pickups, newest first: each older one fainter
 DOT, SQUARE = "\u25cf", "\u25a0"   # ● Recording, ■ Stopped (the chips' own marks)
 BUTTON_ICON = 12                # the buttons' marks (▶ Start, ■ Stop, ↻ Reset) and the clock, in the icon font
@@ -59,50 +59,56 @@ def _rgba(color: str, alpha: float) -> str:
 
 
 def qss(settings) -> str:
-    """The window's own style at the accent the settings pick: the Recording chip, the folded title's dot and Start
-    light in it. Rebuilt whenever the accent is picked (refresh follows it), so the window follows with no more code
-    of its own."""
+    """The window's own style at the accent the settings pick, in the palette of the glass under it (palette(): light
+    text on the dark tints, dark on the white one): the Recording chip, the folded title's dot and Start light in the
+    accent, the figures and Stop in their own colours ink()ed to read on the glass. Rebuilt on every refresh and set
+    only when it changed, so the window follows the ⚙ panel with no more code of its own."""
     accent, on_accent = accent_of(settings)
+    pal = palette()
+    text, muted, fill1, fill2 = pal.text, pal.muted, pal.fill1, pal.fill2
+    lit, stop = ink(accent), ink(STOP)
+    warn = theme.WARN_TEXT["light" if pal.light else "dark"]   # the log can't read: no game, covered, no reader
     tiles = "".join(
-        f"QFrame#Tile_{k} {{ background: {_rgba(c, 0.12)}; border: 1px solid {_rgba(c, 0.26)}; border-radius: 10px; }}\n"
-        f"#TileName_{k} {{ color: {c}; font-size: 11px; font-weight: 700; }}\n"
+        f"QFrame#Tile_{k} {{ background: {_rgba(c, 0.12)}; border: 1px solid {_rgba(ink(c), 0.26)};"
+        f" border-radius: 10px; }}\n"
+        f"#TileName_{k} {{ color: {ink(c)}; font-size: 11px; font-weight: 700; }}\n"
         for k, c in STAT_COLORS.items())
     feed = "".join(
-        f"#FeedText{i} {{ color: {_rgba(TEXT, a)}; font-size: 12px; }}\n"
-        f"#FeedAgo{i} {{ color: {_rgba(TEXT, 0.5 * a)}; font-size: 11px; }}\n"
+        f"#FeedText{i} {{ color: {_rgba(text, a)}; font-size: 12px; }}\n"
+        f"#FeedAgo{i} {{ color: {_rgba(text, 0.5 * a)}; font-size: 11px; }}\n"
         for i, a in enumerate(FADE))
     return f"""
 QLabel {{ background: transparent; }}
-#Title {{ color: {TEXT}; font-weight: 600; }}
-#Dot {{ color: {accent}; font-size: 12px; }}
-#ChipOn {{ color: {accent}; background: {_rgba(accent, 0.16)}; border: 1px solid {_rgba(accent, 0.5)};
+#Title {{ color: {text}; font-weight: 600; }}
+#Dot {{ color: {lit}; font-size: 12px; }}
+#ChipOn {{ color: {lit}; background: {_rgba(accent, 0.16)}; border: 1px solid {_rgba(accent, 0.5)};
           border-radius: 10px; padding: 1px 9px; font-size: 12px; font-weight: 700; }}
-#ChipOff {{ color: {MUTED}; background: {FILL1}; border: 1px solid {FILL2}; border-radius: 10px; padding: 1px 9px;
+#ChipOff {{ color: {muted}; background: {fill1}; border: 1px solid {fill2}; border-radius: 10px; padding: 1px 9px;
            font-size: 12px; font-weight: 600; }}
-#Clock {{ color: {MUTED}; font-family: "{theme.ICON_FONT}"; font-size: {BUTTON_ICON}px; }}
-#Elapsed {{ color: {TEXT}; font-size: 12px; font-weight: 600; }}
-#Status {{ color: {WARN}; font-size: 12px; }}
-{tiles}#TileValue {{ color: {TEXT}; font-size: {VALUE_PX}px; font-weight: 700; }}
-#TileRate {{ color: {MUTED}; font-size: 11px; }}
-#Head {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
-#HeadNote {{ color: {MUTED}; font-size: 11px; }}
-#Slot {{ background: {FILL1}; border-radius: 6px; color: {MUTED}; font-size: 12px; font-weight: 700; }}
-#ItemName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-#Badge {{ color: {TEXT}; background: {FILL2}; border-radius: 8px; padding: 1px 7px; font-size: 11px;
+#Clock {{ color: {muted}; font-family: "{theme.ICON_FONT}"; font-size: {BUTTON_ICON}px; }}
+#Elapsed {{ color: {text}; font-size: 12px; font-weight: 600; }}
+#Status {{ color: {warn}; font-size: 12px; }}
+{tiles}#TileValue {{ color: {text}; font-size: {VALUE_PX}px; font-weight: 700; }}
+#TileRate {{ color: {muted}; font-size: 11px; }}
+#Head {{ color: {muted}; font-size: 11px; font-weight: 700; }}
+#HeadNote {{ color: {muted}; font-size: 11px; }}
+#Slot {{ background: {fill1}; border-radius: 6px; color: {muted}; font-size: 12px; font-weight: 700; }}
+#ItemName {{ color: {text}; font-size: 13px; font-weight: 600; }}
+#Badge {{ color: {text}; background: {fill2}; border-radius: 8px; padding: 1px 7px; font-size: 11px;
          font-weight: 700; }}
-#Worth {{ color: {MUTED}; font-size: 12px; }}
-#More {{ color: {MUTED}; font-size: 11px; }}
-#FeedIcon {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
-{feed}QPushButton {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px; padding: 7px 12px;
+#Worth {{ color: {muted}; font-size: 12px; }}
+#More {{ color: {muted}; font-size: 11px; }}
+#FeedIcon {{ color: {muted}; font-size: 11px; font-weight: 700; }}
+{feed}QPushButton {{ background: {fill1}; color: {text}; border: none; border-radius: 8px; padding: 7px 12px;
               font-weight: 600; }}
-QPushButton:hover {{ background: {FILL2}; }}
+QPushButton:hover {{ background: {fill2}; }}
 QPushButton#Go {{ background: {accent}; color: {on_accent}; }}
 QPushButton#Go:hover {{ background: {QColor(accent).lighter(112).name()}; }}
-QPushButton#Stop {{ background: {_rgba(STOP, 0.16)}; color: {STOP}; }}
-QPushButton#Stop:hover {{ background: {_rgba(STOP, 0.28)}; }}
-QToolButton {{ background: transparent; color: {MUTED}; border: none; border-radius: 6px;
+QPushButton#Stop {{ background: {_rgba(stop, 0.16)}; color: {stop}; }}
+QPushButton#Stop:hover {{ background: {_rgba(stop, 0.28)}; }}
+QToolButton {{ background: transparent; color: {muted}; border: none; border-radius: 6px;
               padding: 2px 7px; font-size: 13px; }}
-QToolButton:hover {{ background: {FILL2}; color: {TEXT}; }}
+QToolButton:hover {{ background: {fill2}; color: {text}; }}
 """
 
 
@@ -169,10 +175,11 @@ _GLYPHS: dict[tuple, QPixmap] = {}
 
 
 def _glyph(kind: str, size: int, widget: QWidget, alpha: float = 1.0) -> QPixmap:
-    """The EXP's sparkle or the mesos' coin, painted in their tiles' colours at the screen's own pixels: the KB has
-    no picture for either, and an emoji coin is missing from older Windows' fonts."""
+    """The EXP's sparkle or the mesos' coin, painted in their tiles' colours at the screen's own pixels (the sparkle
+    ink()ed to the glass, as its tile's name): the KB has no picture for either, and an emoji coin is missing from
+    older Windows' fonts."""
     dpr = widget.devicePixelRatioF() or 1.0
-    key = (kind, size, dpr, alpha)
+    key = (kind, size, dpr, alpha, palette().light)
     pm = _GLYPHS.get(key)
     if pm is None:
         px = max(1, round(size * dpr))
@@ -183,7 +190,7 @@ def _glyph(kind: str, size: int, widget: QWidget, alpha: float = 1.0) -> QPixmap
         p.setOpacity(alpha)
         p.scale(px / 16, px / 16)              # drawn on a 16-unit square
         if kind == "exp":
-            c = QColor(STAT_COLORS["exp"])
+            c = QColor(ink(STAT_COLORS["exp"]))
             p.fillPath(_star(9.5, 9.5, 6.5), c)
             p.fillPath(_star(3.6, 3.6, 2.8), c.lighter(120))
         else:
@@ -668,21 +675,24 @@ class LootOverlay(QWidget):
         self._stop.setToolTip(t("loot_card_stop_tip"))
 
     def _button_icons(self) -> None:
-        """The buttons' marks drawn from the icon font, each in its button's text colour (Start's follows the accent):
-        as text, a "↻" inside a Hebrew label fell back to no font and showed a box."""
+        """The buttons' marks drawn from the icon font, each in its button's text colour (Start's follows the accent,
+        Reset's the palette's text): as text, a "↻" inside a Hebrew label fell back to no font and showed a box."""
         _accent, on_accent = accent_of(self.settings)
-        for b, icon, colour in ((self._start, "play", on_accent), (self._stop, "stop", STOP),
-                                (self._reset, "refresh", TEXT)):
+        for b, icon, colour in ((self._start, "play", on_accent), (self._stop, "stop", ink(STOP)),
+                                (self._reset, "refresh", palette().text)):
             b.setIcon(theme.glyph_icon(icon, colour, BUTTON_ICON))
             b.setIconSize(QSize(BUTTON_ICON, BUTTON_ICON))
 
     def _restyle(self) -> None:
-        """The accent the settings pick, in the window's own style sheet and Start's mark (its glass is painted in
-        the tint by _paint_glass); skipped when it is the same — this refreshes every few seconds while a log runs."""
+        """The accent and the palette the settings pick, in the window's own style sheet, the buttons' marks and the
+        pickups' glyphs (its glass is painted in the tint by _paint_glass); skipped when it is the same — this
+        refreshes every few seconds while a log runs."""
         sheet = qss(self.settings)
         if sheet != self.styleSheet():
             self.setStyleSheet(sheet)
             self._button_icons()
+            for r in self._feed:
+                r.what = None               # the sparkle drawn again in the glass's ink on the next fill
 
     def sync(self) -> None:
         """Shown while settings["loot_overlay"] is on; a log that just started turns it on."""

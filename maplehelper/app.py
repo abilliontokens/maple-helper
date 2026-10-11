@@ -237,8 +237,8 @@ class MapleHelperApp:
         self.game_toolbar.loot_toggled.connect(self.loot_overlay.sync)
         self.loot_overlay.closed.connect(self.game_toolbar.refresh)
         self.loot_scanner.changed.connect(self.game_toolbar.refresh)     # a log starting opens it: the button follows
-        # the bar's Scrolls and Gear buttons: the scroll planner's and the gear advisor's windows (ui/scrollplanner.py,
-        # ui/gearadvisor.py), made on the first ask, or now when the app last closed with one open
+        # the bar's Tools card (Scrolls, Gear, Crafting): the tool windows (ui/scrollplanner.py, ui/gearadvisor.py,
+        # ui/craftadvisor.py), made on the first ask, or now when the app last closed with one open
         self._tool_windows: dict = {}
         self.game_toolbar.tool_toggled.connect(self._tool_toggled)
         for key in TOOLS:
@@ -378,8 +378,8 @@ class MapleHelperApp:
         self.game_toolbar.refresh()
 
     def _game_rides_toggled(self) -> None:
-        """The toolbar's Cabs & Teleports switch: a way already shown follows it, in the search's detail page and
-        in the ◎ where-is-it window."""
+        """The toolbar's ⚙ panel's Cabs & Teleports switch: a way already shown follows it, in the search's detail
+        page and in the ◎ where-is-it window."""
         search = getattr(self, "game_search", None)
         if search is not None:
             search.rides_changed()

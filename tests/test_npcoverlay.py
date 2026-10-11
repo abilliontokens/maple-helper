@@ -68,6 +68,14 @@ def clean_location():
     LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = old
 
 
+@pytest.fixture(autouse=True)
+def default_look():
+    """Every test ends on today's dark glass (apply_look is module state every window over the game reads)."""
+    yield
+    from maplehelper.ui import npcoverlay
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture
 def overlay(qapp, isolated_store, kb, clean_location, monkeypatch):
     from maplehelper.ui import npcoverlay
@@ -862,3 +870,45 @@ def test_a_map_with_no_npcs_says_the_database_has_none(overlay):
     assert w._hint.text() == "The database has no NPC on this map or in a building off it."
     loc.set(_here())                                # NPCs: the plain line over the list, no card
     assert w._empty.property("empty") is False and w._empty_icon.isHidden() and w._hint.isHidden()
+
+
+# ------------------------------------------------------------ the white glass
+
+
+def _strongest(icon) -> tuple[int, int, int]:
+    """The most opaque pixel's colour in an icon (its glyph's own colour, away from its anti-aliased edge)."""
+    img = icon.pixmap(16, 16).toImage()
+    best = max((img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height())),
+               key=lambda c: c.alpha())
+    return best.red(), best.green(), best.blue()
+
+
+def test_on_the_white_glass_the_list_and_the_guide_turn_dark_on_light(overlay, monkeypatch):
+    """The ⚙ panel's white glass: the list's and the guide's text, fills and chips flip to the light palette (the
+    chips' pastels darkened by ink), the filter box's marks with them; the dark glass brings today's look back."""
+    from PySide6.QtGui import QPalette
+    from maplehelper.ui import npcoverlay
+    w, s, loc = overlay
+    monkeypatch.setattr(npcoverlay, "roles_of", lambda kb: _roles())
+    loc.set(_here(spot=(0.1, 0.5)))
+    _row(w, "Cara").click()
+    s["overlay_tint"] = "white"
+    npcoverlay.apply_look(s)
+    w.refresh()                                     # as the app does after the ⚙ panel's pick
+    sheet = w.styleSheet()
+    assert w._guide.styleSheet() == sheet
+    assert f"#Title {{ color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.LIGHT.muted in sheet
+    assert npcoverlay.DARK.text not in sheet and "255,255,255" not in sheet and "235,235,245" not in sheet
+    for kind, colour in npcoverlay.KIND_COLORS.items():
+        assert f'QLabel#Chip[kind="{kind}"] {{ color: {npcoverlay.ink(colour)};' in sheet
+        assert npcoverlay.ink(colour) != colour
+    assert _row(w, "Cara").name.palette().color(QPalette.WindowText).name() == npcoverlay.LIGHT.text.lower()
+    assert max(_strongest(w._filter_find.icon())) < 128         # the magnifier dark on the white glass
+    s["overlay_tint"] = "dark"
+    npcoverlay.apply_look(s)
+    w.refresh()
+    sheet = w.styleSheet()
+    assert f"#Title {{ color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
+    assert w._guide.styleSheet() == sheet
+    assert _row(w, "Cara").name.palette().color(QPalette.WindowText).name() == npcoverlay.DARK.text.lower()
+    assert min(_strongest(w._filter_find.icon())) > 200         # light again

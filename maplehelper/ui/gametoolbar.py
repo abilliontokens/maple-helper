@@ -1,21 +1,35 @@
 """The little bar over the game: the NPCs-here window's own switch, the searches — where a monster lives, any NPC,
 any map, any item, and whether an item is safe to sell (each asks the app to open ui/gamesearch.py in that mode) —
-Cabs & Teleports for the way shown, the loot log and the tool windows. Like the NPCs window it floats over the game:
-frameless, always on top, never taking the keyboard from it (clicks still work), dark glass the minimap reads never
-see. Its ends are draggable (its sides; its top and bottom when the ◯ before the grip stands it upright): the buttons
-wrap into as many lines as the length leaves room for, the other side following, and show their icons alone once the
-words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width (game_toolbar_height
-upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's colour: small beside the
-words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙ beside the ✕
-opens the panel with the look of every window over the game, the icons mode and the bar's show/hide key
-(_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the player left it is
-kept in game_toolbar_pos; with none saved it opens just above the drawn minimap box."""
+the loot log, and Tools: a little card with the tool windows (Scrolls, Gear, Crafting). Like the NPCs window it
+floats over the game: frameless, always on top, never taking the keyboard from it (clicks still work), glass the
+minimap reads never see. Its ends are draggable (its sides; its top and bottom when the ◯ before the grip stands it
+upright): the buttons wrap into as many lines as the length leaves room for, the other side following, and show their
+icons alone once the words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width
+(game_toolbar_height upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's
+colour: small beside the words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙
+beside the ✕ opens the panel with the look of every window over the game, the icons mode, the bar's show/hide key
+and Cabs & Teleports (_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the
+player left it is kept in game_toolbar_pos; with none saved it opens just above the drawn minimap box. Every colour
+is read from npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints,
+dark text on the white one."""
 from __future__ import annotations
 
 import sys
+import time
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QIconEngine, QImage, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QGuiApplication,
+    QIcon,
+    QIconEngine,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QFrame,
@@ -38,25 +52,24 @@ from .glass import SHADOW, EdgeResize
 from .hotkeybox import HotkeyBox
 from .npcoverlay import (
     ACCENTS,
-    FILL1,
-    FILL2,
+    DARK,
     GAP,
     GEOM_DEBOUNCE_MS,
-    MUTED,
+    LIGHT,
+    LIGHT_TINTS,
     OPACITY_DEFAULT,
     OPACITY_MAX,
     OPACITY_MIN,
-    OPACITY_STEPS,
-    TEXT,
     TINTS,
     _flags,
     _Header,
     _paint_glass,
     accent_of,
     apply_look,
+    keep_over_game,
+    palette,
     set_capturable,
 )
-from .npcoverlay import keep_over_game
 from .regionpick import from_capture
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
@@ -65,18 +78,21 @@ FLOW_GAP = 6                                              # between the buttons,
 WORD_LINES_MAX = 2
 QT_MAX = 16777215                                         # Qt's "no limit" for a widget's size
 KINDS = {"monster_npc": "tb_monster_npc", "map": "tb_maps", "item": "tb_items", "sell": "tb_sell"}  # search buttons, i18n keys
-# the tool windows the bar shows and hides, after the loot log: each button is its window's setting -> its i18n key
+# the tool windows the Tools card shows and hides: each button is its window's setting -> its i18n key
 TOOLS = {"scroll_planner": "tb_scrolls", "gear_advisor": "tb_gear", "craft_advisor": "tb_craft"}
 # each button's line icon, by its i18n key: assets/icons/toolbar/<name>.svg (Lucide's, its LICENSE beside them)
 ICON_DIR = ASSETS / "icons" / "toolbar"
 ICONS = {"tb_npcs_here": "users", "tb_monster_npc": "ghost", "tb_maps": "map", "tb_items": "backpack",
-         "tb_sell": "coins", "tb_rides": "car-taxi-front", "tb_loot": "scroll-text", "tb_scrolls": "sparkles",
+         "tb_sell": "coins", "tb_loot": "scroll-text", "tb_tools": "toolbox", "tb_scrolls": "sparkles",
          "tb_gear": "shield", "tb_craft": "hammer"}
+AWAY_MS = 1000          # the mouse this long off the Tools card and its button: the card goes
+AWAY_POLL_MS = 150      # ... checked this often while it is up (it takes no focus to lose)
 ICON_PX = 18            # an icon alone on its button (icons mode)
 WORD_ICON_PX = 15       # the small one beside the word
 TOOL_ICON_PX = 16       # the bar's ⚙ and ✕
 PANEL_W = 300 + 2 * SHADOW                                # the ⚙ panel's card ~300 px wide, its shadow around it
 PANEL_SIDE = SHADOW + 16
+FOLLOW_MS = 80         # a transparency drag: every other window over the game follows at most this often
 # what "Reset to default look" puts back (the hotkey is no look: it stays)
 LOOK_KEYS = ("overlay_tint", "overlay_accent", "npc_overlay_opacity", "game_toolbar_icons")
 
@@ -146,17 +162,20 @@ def line_icon(name: str, colour: str, on: str | None = None, hover: str | None =
 
 
 def qss(settings) -> str:
-    """The bar's own style: the accent that lights a lit button, from the settings, and the room an icon alone takes
-    on its button (iconOnly: the ⚙'s icons mode, or a bar dragged too short for the words)."""
+    """The bar's own style (and its Tools card's): the glass's text and fills (palette()), the accent that lights a
+    lit button, from the settings, and the room an icon alone takes on its button (iconOnly: the ⚙'s icons mode, or a
+    bar dragged too short for the words)."""
     accent, on_accent = accent_of(settings)
+    pal = palette()
     return f"""
-QPushButton {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px;
+QPushButton {{ background: {pal.fill1}; color: {pal.text}; border: none; border-radius: 8px;
               padding: 5px 10px; text-align: center; }}
 QPushButton[iconOnly="true"] {{ padding: 6px 9px; }}
-QPushButton:hover {{ background: {FILL2}; }}
+QPushButton:hover {{ background: {pal.fill2}; }}
 QPushButton:checked, QPushButton[on="true"] {{ background: {accent}; color: {on_accent}; }}
+QPushButton#MenuItem {{ padding: 7px 12px; text-align: left; }}
 QToolButton {{ background: transparent; border: none; border-radius: 6px; padding: 4px; }}
-QToolButton:hover {{ background: {FILL2}; }}
+QToolButton:hover {{ background: {pal.fill2}; }}
 """
 
 
@@ -167,15 +186,21 @@ class _Grip(QWidget):
         super().__init__()
         self.setCursor(Qt.OpenHandCursor)
         self._grab = None          # (its window is self.window(), not kept)
+        self._upright = False
+        self._icon, self._icon_for = None, None     # its dots, and the (upright, colour) they were drawn for
         self.set_upright(False)
 
     def set_upright(self, upright: bool) -> None:
         """Its dots across an upright bar (grip-horizontal), down a lying one (grip-vertical)."""
+        self._upright = upright
         self.setFixedSize(28, 12) if upright else self.setFixedSize(12, 28)
-        self._icon = line_icon("grip-horizontal" if upright else "grip-vertical", MUTED)
         self.update()
 
     def paintEvent(self, e):
+        want = (self._upright, palette().muted)       # the glass's muted colour now: redrawn when it changes
+        if want != self._icon_for:
+            self._icon = line_icon("grip-horizontal" if self._upright else "grip-vertical", want[1])
+            self._icon_for = want
         p = QPainter(self)
         s = 20                     # the dots sit in the icon's middle third: the widget is only as wide as they are
         self._icon.paint(p, QRect((self.width() - s) // 2, (self.height() - s) // 2, s, s))
@@ -267,25 +292,36 @@ class _BarLayout(FlowLayout):
 
 # ---------------------------------------------------------------- the ⚙ panel's own controls
 
-# the ⚙ panel's style: a title, small muted section heads, labels with their picked value, one-line hints (its
-# accent-lit controls paint themselves: the swatches' rings, the slider, the switch, the key box)
-PANEL_QSS = f"""
+def panel_qss() -> str:
+    """The ⚙ panel's style in the glass's colours now (palette()): a title, small muted section heads, labels with
+    their picked value, one-line hints (its accent-lit controls paint themselves: the swatches' rings, the slider,
+    the switches, the key box)."""
+    pal = palette()
+    faint = "rgba(60,60,67,0.30)" if pal.light else "rgba(235,235,245,0.30)"
+    return f"""
 QLabel {{ background: transparent; }}
-#Title {{ color: {TEXT}; font-size: 14px; font-weight: 600; }}
-#Section {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
-#Label {{ color: {TEXT}; font-size: 13px; }}
-#Picked {{ color: {MUTED}; font-size: 12px; }}
-#Value {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-#Hint {{ color: {MUTED}; font-size: 11px; }}
-QFrame#Rule {{ background: rgba(255,255,255,0.08); border: none; }}
-QToolButton#Close {{ background: transparent; color: {MUTED}; border: none; border-radius: 6px;
+#Title {{ color: {pal.text}; font-size: 14px; font-weight: 600; }}
+#Section {{ color: {pal.muted}; font-size: 11px; font-weight: 700; }}
+#Label {{ color: {pal.text}; font-size: 13px; }}
+#Picked {{ color: {pal.muted}; font-size: 12px; }}
+#Value {{ color: {pal.text}; font-size: 13px; font-weight: 600; }}
+#Hint {{ color: {pal.muted}; font-size: 11px; }}
+QFrame#Rule {{ background: {pal.shade}; border: none; }}
+QToolButton#Close {{ background: transparent; color: {pal.muted}; border: none; border-radius: 6px;
                      padding: 2px 7px; font-size: 13px; }}
-QToolButton#Close:hover {{ background: {FILL2}; color: {TEXT}; }}
-QToolButton#Reset {{ background: transparent; color: {MUTED}; border: none; padding: 4px 0;
+QToolButton#Close:hover {{ background: {pal.fill2}; color: {pal.text}; }}
+QToolButton#Reset {{ background: transparent; color: {pal.muted}; border: none; padding: 4px 0;
                      font-size: 12px; font-weight: 600; }}
-QToolButton#Reset:hover {{ color: {TEXT}; }}
-QToolButton#Reset:disabled {{ color: rgba(235,235,245,0.30); }}
+QToolButton#Reset:hover {{ color: {pal.text}; }}
+QToolButton#Reset:disabled {{ color: {faint}; }}
 """
+
+
+def _edge(alpha: int) -> QColor:
+    """A hairline or faint fill on the glass now: white on the dark tints, black on the white one (a little less of
+    it: black reads stronger on white than white on dark)."""
+    r, g, b = palette().rim
+    return QColor(r, g, b, round(alpha * 0.8) if palette().light else alpha)
 
 
 class _Swatch(QPushButton):
@@ -302,7 +338,7 @@ class _Swatch(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         if kind == "tint":
-            self.setMinimumSize(40, 36)
+            self.setMinimumSize(36, 36)                 # six tiles and their gaps across the panel's 268 px
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         else:
             self.setFixedSize(32, 32)
@@ -342,7 +378,7 @@ class _Swatch(QPushButton):
             sheen.setColorAt(0.55, QColor(255, 255, 255, 0))
             p.setBrush(sheen)
             p.drawRoundedRect(tile, 7, 7)
-            p.setPen(QPen(QColor(255, 255, 255, 115 if hover and not on else 46), 1))
+            p.setPen(QPen(_edge(115 if hover and not on else 46), 1))   # the white tile still edged on white glass
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), 6.5, 6.5)
             mark = 16
@@ -354,7 +390,7 @@ class _Swatch(QPushButton):
                 p.setBrush(Qt.NoBrush)
                 p.drawEllipse(c, d / 2 - 1, d / 2 - 1)
             elif hover:
-                p.setPen(QPen(QColor(255, 255, 255, 90), 1.5))
+                p.setPen(QPen(_edge(90), 1.5))
                 p.setBrush(Qt.NoBrush)
                 p.drawEllipse(c, d / 2 - 1, d / 2 - 1)
             p.setPen(Qt.NoPen)
@@ -365,31 +401,33 @@ class _Swatch(QPushButton):
             self._check.paint(p, QRect(round(r.center().x() - mark / 2), round(r.center().y() - mark / 2), mark, mark))
 
 
-class _StepSlider(QWidget):
-    """The transparency as a slider over its few steps: the track lit in the accent up to the knob, a tick at each
-    step; a click or a drag lands on the nearest one (mirrored in Hebrew: the first step on the right)."""
+class _Slider(QWidget):
+    """The transparency as a slider from `lo` to `hi`, at any whole percent: the track lit in the accent from its
+    start up to the knob; a click or a drag puts the knob there (mirrored in Hebrew: the start on the right).
+    changed(value) on every percent it moves to, released() when the mouse lets go."""
 
-    changed = Signal(int)           # the step the player moved it to
+    changed = Signal(float)
+    released = Signal()
     KNOB = 16
 
-    def __init__(self, steps: int):
+    def __init__(self, lo: float, hi: float):
         super().__init__()
-        self._n = steps
-        self._i = 0
-        self._accent = QColor(TEXT)
+        self._lo, self._hi = lo, hi
+        self._v = hi
+        self._accent = QColor(DARK.text)
         self.setFixedHeight(24)
         self.setMinimumWidth(120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
 
-    def index(self) -> int:
-        return self._i
+    def value(self) -> float:
+        return self._v
 
-    def set_index(self, i: int) -> None:
-        i = max(0, min(self._n - 1, i))
-        if i != self._i:
-            self._i = i
+    def set_value(self, v: float) -> None:
+        v = round(min(self._hi, max(self._lo, v)), 2)
+        if v != self._v:
+            self._v = v
             self.update()
 
     def set_accent(self, colour: str) -> None:
@@ -397,18 +435,25 @@ class _StepSlider(QWidget):
             self._accent = QColor(colour)
             self.update()
 
-    def _x(self, i: int) -> float:
-        frac = i / (self._n - 1)
+    def _x(self, v: float) -> float:
+        frac = (v - self._lo) / (self._hi - self._lo)
         if self.layoutDirection() == Qt.RightToLeft:
             frac = 1 - frac
         return self.KNOB / 2 + frac * (self.width() - self.KNOB)
 
+    def _value_at(self, x: float) -> float:
+        """The whole percent under this x (the ends past the track: the ends themselves)."""
+        frac = min(1.0, max(0.0, (x - self.KNOB / 2) / max(1, self.width() - self.KNOB)))
+        if self.layoutDirection() == Qt.RightToLeft:
+            frac = 1 - frac
+        return round(self._lo + frac * (self._hi - self._lo), 2)
+
     def _drag(self, x: float) -> None:
-        i = min(range(self._n), key=lambda k: abs(self._x(k) - x))
-        if i != self._i:
-            self._i = i
+        v = self._value_at(x)
+        if v != self._v:
+            self._v = v
             self.update()
-            self.changed.emit(i)
+            self.changed.emit(v)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -418,37 +463,39 @@ class _StepSlider(QWidget):
         if e.buttons() & Qt.LeftButton:
             self._drag(e.position().x())
 
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.released.emit()
+
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         cy = self.height() / 2
-        start, knob = self._x(0), self._x(self._i)
+        start, knob = self._x(self._lo), self._x(self._v)
         left, right = self.KNOB / 2, self.width() - self.KNOB / 2
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 38))
+        p.setBrush(_edge(38))
         p.drawRoundedRect(QRectF(left - 2, cy - 2, right - left + 4, 4), 2, 2)
         p.setBrush(self._accent)
         lo, hi = min(start, knob), max(start, knob)
         p.drawRoundedRect(QRectF(lo - 2, cy - 2, hi - lo + 4, 4), 2, 2)
-        for k in range(self._n):         # a small tick at each step, faint on the unlit track
-            if k != self._i:
-                lit = (lo <= self._x(k) <= hi)
-                p.setBrush(QColor(255, 255, 255, 150 if lit else 70))
-                p.drawEllipse(QRectF(self._x(k) - 2, cy - 2, 4, 4))
         p.setBrush(QColor(0, 0, 0, 60))                 # the knob, on a soft shadow
         p.drawEllipse(QRectF(knob - self.KNOB / 2, cy - self.KNOB / 2 + 1, self.KNOB, self.KNOB))
+        if palette().light:                            # a hairline round the white knob on the white glass
+            p.setPen(QPen(QColor(0, 0, 0, 40), 1))
         p.setBrush(QColor("#FFFFFF"))
         p.drawEllipse(QRectF(knob - self.KNOB / 2, cy - self.KNOB / 2, self.KNOB, self.KNOB))
 
 
 class _GlassSwitch(Switch):
-    """controls.Switch drawn for the dark glass: its track in the windows' accent when on, a faint white one off."""
+    """controls.Switch drawn for the glass over the game: its track in the windows' accent when on, a faint one off
+    (white on the dark tints, grey on the white one)."""
 
     W, H = 40, 24
 
     def __init__(self):
         super().__init__(False)
-        self._accent = QColor(TEXT)
+        self._accent = QColor(DARK.text)
         self.setFocusPolicy(Qt.NoFocus)
 
     def sizeHint(self):
@@ -464,7 +511,7 @@ class _GlassSwitch(Switch):
         p.setRenderHint(QPainter.Antialiasing)
         w, h, t = self.W, self.H, self._pos
         track = QRectF(0, (self.height() - h) / 2, w, h)
-        off, on = QColor(255, 255, 255, 46), self._accent
+        off, on = _edge(46), self._accent
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(int(off.red() + (on.red() - off.red()) * t), int(off.green() + (on.green() - off.green()) * t),
                           int(off.blue() + (on.blue() - off.blue()) * t), int(off.alpha() + (255 - off.alpha()) * t)))
@@ -479,12 +526,13 @@ class _GlassSwitch(Switch):
 
 
 class _SettingsPanel(QWidget):
-    """The bar's ⚙ panel, a small card in the same dark glass over the game. Look: the glass colour of every window
+    """The bar's ⚙ panel, a small card in the same glass over the game. Look: the glass colour of every window
     over the game as tiles of each tint and the lit buttons' accent as dots, the picked one ringed and named;
-    Transparency: their glass's opacity on a slider; Toolbar: icons instead of words, and the bar's show/hide key in
-    the same key box Settings has. Each choice is written, applies at once to every window and stays; "Reset to
-    default look" puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into:
-    like the search window it takes the keyboard only then, never on opening)."""
+    Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead of words, and the bar's
+    show/hide key in the same key box Settings has; Directions: Cabs & Teleports, whether the way to a found NPC or
+    map rides cabs and NPC teleports or walks. Each choice is written, applies at once and stays; "Reset to default
+    look" puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like the
+    search window it takes the keyboard only then, never on opening)."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -501,7 +549,7 @@ class _SettingsPanel(QWidget):
         self.setLayoutDirection(Qt.RightToLeft if self.t.rtl else Qt.LeftToRight)
         self._opacity = OPACITY_DEFAULT
         self.setFixedWidth(PANEL_W)
-        self.setStyleSheet(PANEL_QSS)
+        self._pal = None                    # the glass's colours its style and icons were made in (refresh)
         col = QVBoxLayout(self)
         col.setContentsMargins(PANEL_SIDE, TOP + 4, PANEL_SIDE, BOTTOM + 6)
         col.setSpacing(0)
@@ -522,20 +570,23 @@ class _SettingsPanel(QWidget):
         self._tint_label, self._tint_name = self._label_row(col)
         col.addSpacing(8)
         self._tints = self._swatches("tint", TINTS, lambda k: "#{:02x}{:02x}{:02x}".format(*TINTS[k][1]),
-                                     self._pick_tint, spacing=8)
+                                     self._pick_tint, spacing=6)
         col.addWidget(self._tints)
         col.addSpacing(16)
         self._accent_label, self._accent_name = self._label_row(col)
         col.addSpacing(8)
         self._accents = self._swatches("accent", ACCENTS, lambda k: ACCENTS[k][1], self._pick_accent)
         col.addWidget(self._accents)
-        # Transparency: the windows' glass opacity, the steps Settings offered (OPACITY_STEPS)
+        # Transparency: the windows' glass opacity, any whole percent from OPACITY_MIN to OPACITY_MAX
         self._opacity_head = self._section(col)
         self._opacity_label, self._opacity_value = self._label_row(col, value="Value")
         col.addSpacing(6)
-        self._slider = _StepSlider(len(OPACITY_STEPS))
-        self._slider.changed.connect(lambda i: self._pick_opacity(OPACITY_STEPS[i]))
+        self._slider = _Slider(OPACITY_MIN, OPACITY_MAX)
+        self._slider.changed.connect(self._pick_opacity)
+        self._slider.released.connect(self._opacity_settled)
         col.addWidget(self._slider)
+        # every other window over the game follows a drag of the slider once a moment, not at every percent
+        self._follow = QTimer(self, singleShot=True, interval=FOLLOW_MS, timeout=self.changed.emit)
         # Toolbar: icons instead of words, and the key that shows or hides the bar
         self._bar_head = self._section(col)
         row = QHBoxLayout()
@@ -560,6 +611,19 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         col.addSpacing(3)
         self._hotkey_hint = self._hint(col)
+        # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button)
+        self._way_head = self._section(col)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._rides_label = QLabel(objectName="Label")
+        self._rides = _GlassSwitch()
+        self._rides.setCursor(Qt.PointingHandCursor)
+        self._rides.clicked.connect(self._pick_rides)
+        row.addWidget(self._rides_label, 1)
+        row.addWidget(self._rides, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        col.addSpacing(3)
+        self._rides_hint = self._hint(col)
         # Reset to default look, at the leading edge under a hairline
         col.addSpacing(14)
         rule = QFrame(objectName="Rule")
@@ -572,7 +636,6 @@ class _SettingsPanel(QWidget):
         self._reset.setAutoRaise(True)              # the icon brightens with the text under the mouse
         self._reset.setCursor(Qt.PointingHandCursor)
         self._reset.setFocusPolicy(Qt.NoFocus)
-        self._reset.setIcon(line_icon("rotate-ccw", MUTED, hover=TEXT))
         self._reset.setIconSize(QSize(14, 14))
         self._reset.clicked.connect(self._reset_look)
         row.addWidget(self._reset)
@@ -620,22 +683,28 @@ class _SettingsPanel(QWidget):
         for i, key in enumerate(presets):
             if i and not spacing:
                 row.addStretch(1)
-            check = TEXT if kind == "tint" else ACCENTS[key][2]
+            # a tint's check reads on its own tile (dark on the white one), an accent's in its own text colour
+            check = (LIGHT.text if key in LIGHT_TINTS else DARK.text) if kind == "tint" else ACCENTS[key][2]
             b = _Swatch(kind, key, colour_of(key), check)
             b.clicked.connect(lambda _=False, k=key: picked(k))
             row.addWidget(b)
         return w
 
     def refresh(self) -> None:
-        """Every choice back in step with the settings (the Settings dialog may have changed them), and the
-        panel's own glass at the transparency they give."""
+        """Every choice back in step with the settings (the Settings dialog may have changed them), the panel's
+        style and icons in the glass's colours now, and its own glass at the transparency they give."""
         t, rtl, s = self.t, self.t.rtl, self._settings
         accent, _ = accent_of(s)
+        pal = palette()
+        if pal != self._pal:
+            self._pal = pal
+            self.setStyleSheet(panel_qss())
+            self._reset.setIcon(line_icon("rotate-ccw", pal.muted, hover=pal.text))
         self._title.setText(bidi.plain(t("tbs_title"), rtl))
         self._close.setAccessibleName(t("tbs_close"))
         self._close.setToolTip(t("tbs_close"))
         for lb, key in ((self._look_head, "tbs_look"), (self._opacity_head, "tbs_opacity_head"),
-                        (self._bar_head, "tbs_bar")):
+                        (self._bar_head, "tbs_bar"), (self._way_head, "tbs_way")):
             lb.setText(bidi.plain(t(key) if rtl else t(key).upper(), rtl))
         tint = s["overlay_tint"] if s["overlay_tint"] in TINTS else next(iter(TINTS))      # a stale name: today's
         accent_key = s["overlay_accent"] if s["overlay_accent"] in ACCENTS else next(iter(ACCENTS))
@@ -643,9 +712,10 @@ class _SettingsPanel(QWidget):
                         (self._accent_label, "tbs_accent"), (self._accent_name, ACCENTS[accent_key][0]),
                         (self._opacity_label, "tbs_opacity"), (self._icons_label, "tbs_icons"),
                         (self._icons_hint, "tbs_icons_hint"), (self._hotkey_label, "tb_hotkey"),
-                        (self._hotkey_hint, "tb_hotkey_hint")):
+                        (self._hotkey_hint, "tb_hotkey_hint"), (self._rides_label, "tb_rides"),
+                        (self._rides_hint, "tb_rides_tip")):
             lb.setText(bidi.plain(t(key), rtl))
-        for lb in (self._icons_hint, self._hotkey_hint):
+        for lb in (self._icons_hint, self._hotkey_hint, self._rides_hint):
             # Hebrew: two pixels' room at the right, where a line wrapped to the full width drew its first letter
             # past the label's edge, cut off (the wrap measures whole pixels, the glyphs overhang)
             lb.setContentsMargins(0, 0, 2 if rtl else 0, 0)
@@ -662,7 +732,7 @@ class _SettingsPanel(QWidget):
         except (TypeError, ValueError):
             op = OPACITY_DEFAULT
         self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, op))
-        self._slider.set_index(min(range(len(OPACITY_STEPS)), key=lambda i: abs(OPACITY_STEPS[i] - self._opacity)))
+        self._slider.set_value(self._opacity)
         self._slider.set_accent(accent)
         self._slider.setAccessibleName(t("tbs_opacity"))
         self._opacity_value.setText(bidi.ltr_block(f"{round(self._opacity * 100)}%", rtl))
@@ -672,6 +742,9 @@ class _SettingsPanel(QWidget):
         self._hotkey.set_key(s["game_toolbar_hotkey"])
         self._hotkey.set_accent(accent)
         self._hotkey.set_label(t("tb_hotkey"))
+        self._rides.setChecked(bool(s["game_rides"]))
+        self._rides.set_accent(accent)
+        self._rides.setAccessibleName(t("tb_rides"))
         self._reset.setEnabled(any(s[k] != DEFAULT_SETTINGS[k] for k in LOOK_KEYS))
         self.resize(PANEL_W, self.layout().totalHeightForWidth(PANEL_W))     # the hints wrapped at its width
         self.update()
@@ -704,8 +777,25 @@ class _SettingsPanel(QWidget):
         self._applied()
 
     def _pick_opacity(self, value: float) -> None:
+        """A percent on the slider: written, on this panel's and the bar's glass at once, and every other window
+        over the game follows a moment later (_follow: once per FOLLOW_MS of a drag, not at every percent)."""
         self._settings["npc_overlay_opacity"] = value
-        self._applied()
+        self.refresh()
+        self._bar.opacity_followed()
+        if not self._follow.isActive():
+            self._follow.start()
+
+    def _opacity_settled(self) -> None:
+        """The slider let go: every window at the last percent now, not after the moment's wait."""
+        if self._follow.isActive():
+            self._follow.stop()
+            self.changed.emit()
+
+    def _pick_rides(self, _=False) -> None:
+        """Cabs & Teleports: written, and a way already shown is found again (the bar's rides_toggled, which the
+        app wires to the search's page and the where-is-it window)."""
+        self._settings["game_rides"] = self._rides.isChecked()
+        self._bar.rides_toggled.emit()
 
     def _reset_look(self, _=False) -> None:
         """The look the app starts with: today's dark glass, green accent, 85 % and words on the buttons."""
@@ -743,21 +833,115 @@ class _SettingsPanel(QWidget):
         self.refresh()
 
 
+class _ToolsMenu(QWidget):
+    """The bar's Tools button's little glass card: Scrolls, Gear and Crafting, each its window's switch (lit while
+    the window is open; a click flips its setting through the bar's tool_toggled). Like the bar it never takes the
+    keyboard from the game. It goes on a pick, on the Tools button again, with the bar hidden or moved, or once the
+    mouse has been off it and the Tools button for AWAY_MS (no focus to lose: _check_away asks where the mouse is)."""
+
+    def __init__(self, bar: GameToolbar):
+        super().__init__(bar, _flags())
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setFocusPolicy(Qt.NoFocus)
+        self._bar = bar
+        self.setStyleSheet(bar.styleSheet())       # the bar's (qss); _restyle keeps them the same
+        col = QVBoxLayout(self)
+        col.setContentsMargins(SHADOW + 6, SHADOW + 6, SHADOW + 6, SHADOW + 6)
+        col.setSpacing(4)
+        col.setSizeConstraint(QLayout.SetFixedSize)     # as big as its buttons
+        self.buttons: dict[str, QPushButton] = {}
+        for key in TOOLS:
+            b = QPushButton(checkable=True, objectName="MenuItem")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setIconSize(QSize(WORD_ICON_PX, WORD_ICON_PX))
+            b.clicked.connect(lambda _=False, k=key: bar._tool_clicked(k))
+            self.buttons[key] = b
+            col.addWidget(b)
+        self._away = QTimer(self, interval=AWAY_POLL_MS, timeout=self._check_away)
+        self._away_since: float | None = None
+
+    def retext(self, t: I18n, settings) -> None:
+        """The tools' names, tips and icons (the glass's text colour, the accent's own text colour while lit)."""
+        self.setLayoutDirection(Qt.RightToLeft if t.rtl else Qt.LeftToRight)
+        _, on_fill = accent_of(settings)
+        for key, b in self.buttons.items():
+            name = TOOLS[key]
+            b.setText(bidi.plain(t(name), t.rtl).replace("&", "&&"))
+            b.setToolTip(t(name + "_tip"))
+            b.setAccessibleName(t(name))
+            b.setIcon(line_icon(ICONS[name], palette().text, on=on_fill))
+
+    def paintEvent(self, e) -> None:
+        _paint_glass(self, self._bar._opacity)
+
+    def place(self, btn: QPushButton, upright: bool) -> None:
+        """Beside the bar at its Tools button: under (or, with no room, over) a lying bar, lined up with the button's
+        leading edge; at the trailing side (or, with no room, the other) of an upright one, lined up with its top.
+        The glass's edges sit GAP apart (each window's shadow margin left out), all of it on the button's screen."""
+        self.adjustSize()
+        bar, w, h = self._bar, self.width(), self.height()
+        b = QRect(btn.mapToGlobal(QPoint(0, 0)), btn.size())
+        f = bar.frameGeometry()
+        screen = QGuiApplication.screenAt(b.center()) or QGuiApplication.primaryScreen()
+        room = screen.availableGeometry()
+        rtl = bar.layoutDirection() == Qt.RightToLeft
+        if upright:
+            after = f.left() + SHADOW - GAP - w + SHADOW if rtl else f.right() + 1 - SHADOW + GAP - SHADOW
+            before = f.right() + 1 - SHADOW + GAP - SHADOW if rtl else f.left() + SHADOW - GAP - w + SHADOW
+            fits = (lambda x: x >= room.left() - SHADOW) if rtl else (lambda x: x + w <= room.right() + 1 + SHADOW)
+            x = after if fits(after) else before
+            y = b.top() - SHADOW - 6
+        else:
+            x = b.right() + 1 - w + SHADOW + 6 if rtl else b.left() - SHADOW - 6
+            below = f.bottom() + 1 - SHADOW + GAP - SHADOW
+            y = below if below + h <= room.bottom() + 1 + SHADOW else f.top() + SHADOW - GAP - h + SHADOW
+        self.move(min(max(x, room.left() - SHADOW), room.right() + 1 + SHADOW - w),
+                  min(max(y, room.top() - SHADOW), room.bottom() + 1 + SHADOW - h))
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        self._away_since = None
+        self._away.start()
+
+    def hideEvent(self, e) -> None:
+        self._away.stop()
+        super().hideEvent(e)
+        self._bar._tools_menu_shown(False)
+
+    def _check_away(self) -> None:
+        """The mouse off the card and the Tools button (with a few pixels' slack) for AWAY_MS: the card goes."""
+        btn = self._bar._tools_btn
+        zone = self.frameGeometry().adjusted(SHADOW - 8, SHADOW - 8, 8 - SHADOW, 8 - SHADOW).united(
+            QRect(btn.mapToGlobal(QPoint(0, 0)), btn.size()).adjusted(-8, -8, 8, 8))
+        if zone.contains(QCursor.pos()):
+            self._away_since = None
+            return
+        now = time.monotonic()
+        if self._away_since is None:
+            self._away_since = now
+        elif (now - self._away_since) * 1000 >= AWAY_MS:
+            self.hide()
+
+
 class GameToolbar(EdgeResize, QWidget):
     """The bar itself. The NPCs-here button flips settings["npc_overlay"] (npc_toggled: the window follows),
     the search buttons ask for their search (search_requested: "monster_npc", "map", "item" or "sell"), and
     the ✕ turns the bar itself off (closed: the app says how to bring it back). Its length is dragged shorter and
     longer (its width; its height upright, the ◯ before the grip turning it), the buttons wrapping into lines and
-    showing icons alone once the words would take more than WORD_LINES_MAX lines; the ⚙ opens the panel with the
-    look, the icons mode and the bar's key. Clicks work but it never takes the keyboard from the game, and the
-    minimap reads never see it. Its place is kept in game_toolbar_pos, its length in game_toolbar_width (or
+    showing icons alone once the words would take more than WORD_LINES_MAX lines; Tools opens a little card with the
+    tool windows (_ToolsMenu); the ⚙ opens the panel with the look, the icons mode, the bar's key and Cabs &
+    Teleports (rides_toggled stays the bar's signal). Clicks work but it never takes the keyboard from the game, and
+    the minimap reads never see it. Its place is kept in game_toolbar_pos, its length in game_toolbar_width (or
     game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
 
     search_requested = Signal(str)     # which search to open: "monster_npc" | "map" | "item" | "sell"
     npc_toggled = Signal()             # settings["npc_overlay"] flipped: the NPCs-here window follows
-    rides_toggled = Signal()           # settings["game_rides"] flipped: a way shown is found again, on foot or riding
+    rides_toggled = Signal()           # the ⚙ panel's Cabs & Teleports flipped settings["game_rides"]: a way shown follows
     loot_toggled = Signal()            # settings["loot_overlay"] flipped: the loot log's window follows
-    tool_toggled = Signal(str)         # a TOOLS setting flipped ("scroll_planner" | "gear_advisor"): its window follows
+    tool_toggled = Signal(str)         # a TOOLS setting flipped (the Tools card's buttons): its window follows
     look_changed = Signal()            # a ⚙ panel choice: every window over the game re-styles and repaints
     closed = Signal()                  # the ✕ turned the bar off: Settings' switch and the tray item follow
     hotkey_changed = Signal()          # the ⚙ panel picked or cleared the bar's key: the app binds it
@@ -799,8 +983,7 @@ class GameToolbar(EdgeResize, QWidget):
         self._flow = _BarLayout(FLOW_GAP)
         col.addLayout(self._flow)
         # the ◯ before the grip's dots: the bar upright (a column) or lying (a row)
-        self._orient = QToolButton(objectName="Orient")
-        self._orient.setIcon(line_icon("circle", MUTED, hover=TEXT))
+        self._orient = QToolButton(objectName="Orient")       # (its icon, the ⚙'s and the ✕'s: _retext, in the glass's colours)
         self._orient.setIconSize(QSize(TOOL_ICON_PX - 2, TOOL_ICON_PX - 2))
         self._orient.setAutoRaise(True)
         self._orient.setCursor(Qt.PointingHandCursor)
@@ -822,32 +1005,24 @@ class GameToolbar(EdgeResize, QWidget):
             b.clicked.connect(lambda _=False, k=kind: self.search_requested.emit(k))
             self._search[kind] = b
             self._flow.addWidget(b)
-        # the way to a found NPC or map: with cabs and NPC teleports, or on foot (the owner's, 2026-10-10)
-        self._rides = QPushButton(checkable=True)
-        self._rides.setCursor(Qt.PointingHandCursor)
-        self._rides.setFocusPolicy(Qt.NoFocus)
-        self._rides.clicked.connect(self._rides_clicked)
-        self._flow.addWidget(self._rides)
         # the loot log's window, as the NPCs-here button is its window's: the checkable button is the setting
         self._loot = QPushButton(checkable=True)
         self._loot.setCursor(Qt.PointingHandCursor)
         self._loot.setFocusPolicy(Qt.NoFocus)
         self._loot.clicked.connect(self._loot_clicked)
         self._flow.addWidget(self._loot)
-        # the scroll planner's, gear advisor's and crafting advisor's windows, each button its window's setting
-        self._tools: dict[str, QPushButton] = {}
-        for key in TOOLS:
-            b = QPushButton(checkable=True)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(lambda _=False, k=key: self._tool_clicked(k))
-            self._tools[key] = b
-            self._flow.addWidget(b)
-        # the ⚙: the panel with the look, the icons mode and the bar's key; then the ✕
+        # Tools: the card with the scroll planner's, gear advisor's and crafting advisor's switches, lit while it is up
+        self._tools_btn = QPushButton()
+        self._tools_btn.setCursor(Qt.PointingHandCursor)
+        self._tools_btn.setFocusPolicy(Qt.NoFocus)
+        self._tools_btn.clicked.connect(self._tools_clicked)
+        self._flow.addWidget(self._tools_btn)
+        self._menu = _ToolsMenu(self)
+        self._tools: dict[str, QPushButton] = self._menu.buttons     # each its window's setting
+        # the ⚙: the panel with the look, the icons mode, the bar's key and Cabs & Teleports; then the ✕
         self._gear = QToolButton(objectName="Gear")
         self._close = QToolButton(objectName="Close")
-        for b, name, slot in ((self._gear, "settings", self._gear_clicked), (self._close, "x", self._close_clicked)):
-            b.setIcon(line_icon(name, MUTED, hover=TEXT))
+        for b, slot in ((self._gear, self._gear_clicked), (self._close, self._close_clicked)):
             b.setIconSize(QSize(TOOL_ICON_PX, TOOL_ICON_PX))
             b.setAutoRaise(True)             # the icon brightens under the mouse (its Active mode)
             b.setCursor(Qt.PointingHandCursor)
@@ -862,20 +1037,19 @@ class GameToolbar(EdgeResize, QWidget):
     # ------------------------------------------------------------ text and icons (all of it, for apply_language)
 
     def _buttons(self):
-        """Every button on the bar with its i18n key: the texts, tooltips and icons follow the language."""
+        """Every button on the bar with its i18n key: the texts, tooltips and icons follow the language (the Tools
+        card's own buttons: _ToolsMenu.retext)."""
         yield self._npcs, "tb_npcs_here"
         for kind, key in KINDS.items():
             yield self._search[kind], key
-        yield self._rides, "tb_rides"
         yield self._loot, "tb_loot"
-        for key, text in TOOLS.items():
-            yield self._tools[key], text
+        yield self._tools_btn, "tb_tools"
 
     def _paint_icon(self, b: QPushButton, key: str) -> None:
-        """The button's line icon in its text's colours: the text colour, the accent's own text colour while lit
-        (checked, or a search's mode lit by its "on")."""
+        """The button's line icon in its text's colours: the glass's text colour, the accent's own text colour while
+        lit (checked, or lit by its "on": a search's mode, the Tools card up)."""
         _, on_fill = accent_of(self._settings)
-        b.setIcon(line_icon(ICONS[key], on_fill if b.property("on") else TEXT, on=on_fill))
+        b.setIcon(line_icon(ICONS[key], on_fill if b.property("on") else palette().text, on=on_fill))
 
     def _retext(self) -> None:
         t = self.t
@@ -889,10 +1063,15 @@ class GameToolbar(EdgeResize, QWidget):
         self._orient.setToolTip(t("tb_horizontal" if upright else "tb_vertical"))
         for b, key in self._buttons():
             self._paint_icon(b, key)
+        pal = palette()
+        self._orient.setIcon(line_icon("circle", pal.muted, hover=pal.text))
+        for b in (self._gear, self._close):
+            b.setIcon(line_icon("settings" if b is self._gear else "x", pal.muted, hover=pal.text))
         self._gear.setAccessibleName(t("tbs_title"))
         self._gear.setToolTip(t("tbs_title"))
         self._close.setAccessibleName(t("tb_close"))
         self._close.setToolTip(t("tb_close"))
+        self._menu.retext(t, self._settings)
         self._measure()
         self._apply_size()
 
@@ -990,6 +1169,8 @@ class GameToolbar(EdgeResize, QWidget):
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
+        if self._menu.isVisible():
+            self._menu.place(self._tools_btn, self._upright())    # the Tools button moved with the wrap
         if self._fitting:
             return
         self._lengths.start()              # the player's drag: remembered once it settles
@@ -1032,19 +1213,35 @@ class GameToolbar(EdgeResize, QWidget):
         self._settings["npc_overlay"] = self._npcs.isChecked()
         self.npc_toggled.emit()
 
-    def _rides_clicked(self, _=False) -> None:
-        """Cabs and NPC teleports in the way shown, or on foot: the button is the setting."""
-        self._settings["game_rides"] = self._rides.isChecked()
-        self.rides_toggled.emit()
-
     def _loot_clicked(self, _=False) -> None:
         """The loot log's window on or off: the button is the setting (its Start, Stop and Reset are in it)."""
         self._settings["loot_overlay"] = self._loot.isChecked()
         self.loot_toggled.emit()
 
+    def _tools_clicked(self, _=False) -> None:
+        """Tools: its card with the tool windows beside the button, or gone when it is up."""
+        if self._menu.isVisible():
+            self._menu.hide()
+            return
+        self._menu.place(self._tools_btn, self._upright())
+        self._menu.show()
+        set_capturable(self._menu, self._settings)
+        self._tools_menu_shown(True)
+
+    def _tools_menu_shown(self, on: bool) -> None:
+        """The Tools button lit while its card is up, as a search's button is while its mode is."""
+        b = self._tools_btn
+        if b.property("on") != on:
+            b.setProperty("on", on)
+            b.style().unpolish(b)
+            b.style().polish(b)
+            self._paint_icon(b, "tb_tools")
+
     def _tool_clicked(self, key: str) -> None:
-        """A tool window on or off: the button is its setting (the window follows tool_toggled)."""
+        """A tool window on or off from the Tools card: the button is its setting (the window follows
+        tool_toggled), and the card goes, its pick made."""
         self._settings[key] = self._tools[key].isChecked()
+        self._menu.hide()
         self.tool_toggled.emit(key)
 
     def _close_clicked(self, _=False) -> None:
@@ -1084,22 +1281,29 @@ class GameToolbar(EdgeResize, QWidget):
         set_capturable(self._panel, self._settings)
 
     def look_followed(self) -> None:
-        """A choice in the ⚙ panel: the bar's own style, texts and icons (icons mode, the accent) and glass follow
-        at once."""
+        """A choice in the ⚙ panel: the bar's own style, texts and icons (icons mode, the accent, the glass's
+        colours) and glass follow at once."""
         self._restyle()
         self._retext()
+        self.opacity_followed()
+
+    def opacity_followed(self) -> None:
+        """The transparency the settings give, on the bar's glass and its Tools card's at once."""
         try:
             self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, float(self._settings["npc_overlay_opacity"])))
         except (TypeError, ValueError):
             self._opacity = OPACITY_DEFAULT
         self.update()
+        self._menu.update()
 
     def _restyle(self) -> bool:
-        """The accent (and the icons mode's room) the settings pick; skipped when it is the same. True: restyled."""
+        """The glass's colours, the accent (and the icons mode's room) the settings pick, on the bar and its Tools
+        card; skipped when it is the same. True: restyled."""
         sheet = qss(self._settings)
         if sheet == self.styleSheet():
             return False
         self.setStyleSheet(sheet)
+        self._menu.setStyleSheet(sheet)
         return True
 
     # ------------------------------------------------------------ place and move
@@ -1133,6 +1337,8 @@ class GameToolbar(EdgeResize, QWidget):
 
     def moveEvent(self, e) -> None:
         self._geom.start()
+        if self._menu.isVisible():
+            self._menu.hide()            # the bar dragged away from its Tools card
         super().moveEvent(e)
 
     def hideEvent(self, e) -> None:
@@ -1143,6 +1349,7 @@ class GameToolbar(EdgeResize, QWidget):
             self._remember_length()
         if self._panel is not None:
             self._panel.hide()
+        self._menu.hide()
         super().hideEvent(e)
 
     def _remember(self) -> None:
@@ -1157,12 +1364,8 @@ class GameToolbar(EdgeResize, QWidget):
         wrapping into rows), and the glass at the opacity the player picked."""
         if self._restyle() or bool(self._settings["game_toolbar_vertical"]) != self._flow.upright:
             self._retext()        # the icons in the new accent's text colour, words or icons, the way it stands
-        try:
-            self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, float(self._settings["npc_overlay_opacity"])))
-        except (TypeError, ValueError):
-            self._opacity = OPACITY_DEFAULT
+        self.opacity_followed()
         self._npcs.setChecked(bool(self._settings["npc_overlay"]))
-        self._rides.setChecked(bool(self._settings["game_rides"]))
         self._loot.setChecked(bool(self._settings["loot_overlay"]))
         for key, b in self._tools.items():
             b.setChecked(bool(self._settings[key]))

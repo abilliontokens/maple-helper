@@ -419,6 +419,15 @@ def settings(isolated_store):
     return isolated_store.Settings()
 
 
+@pytest.fixture(autouse=True)
+def _dark_look():
+    """Every test starts and ends on today's dark glass, whatever look a test picked (npcoverlay's module state)."""
+    from maplehelper.ui import npcoverlay
+    npcoverlay.apply_look(None)
+    yield
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture
 def profiles(isolated_store):
     return isolated_store.Profiles()
@@ -699,3 +708,25 @@ def test_the_window_follows_the_accent(qapp, win, settings):
     settings["overlay_accent"] = "purple"
     win.refresh()                                                                  # the ⚙ panel's pick lands here
     assert ACCENTS["purple"][1] in win.styleSheet() and accent_of(None)[0] not in win.styleSheet()
+
+
+def test_the_window_follows_the_white_glass_and_back(qapp, win, settings):
+    """The ⚙ panel's white glass: the style sheet in the light palette's dark text, its faint lines and chips dark
+    on the white (no light text or white hairline left, the gained stat's green darkened by ink); the dark glass
+    again, today's light text back."""
+    from maplehelper.ui import gearadvisor, npcoverlay
+    win.refresh()
+    assert npcoverlay.DARK.text in win.styleSheet()
+    settings["overlay_tint"] = "white"
+    npcoverlay.apply_look(settings)
+    win.refresh()                                                                  # the app's restyle on a look pick
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.DARK.text not in sheet
+    assert npcoverlay.DARK.muted not in sheet and "rgba(255,255,255" not in sheet and "#242427" not in sheet
+    assert f"color: {npcoverlay.ink(gearadvisor.GAIN)};" in sheet and gearadvisor.GAIN not in sheet
+    settings["overlay_tint"] = "dark"
+    npcoverlay.apply_look(settings)
+    win.refresh()
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
+    assert f"color: {gearadvisor.GAIN};" in sheet

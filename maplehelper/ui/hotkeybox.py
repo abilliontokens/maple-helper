@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QToolButton
 from .. import bidi, keys
 from ..i18n import I18n
 from . import theme
-from .npcoverlay import FILL1, FILL2, MUTED, TEXT
+from .npcoverlay import palette
 
 HINT_MS = 1600                  # a refused key's reason stays in the box this long, then it asks again
 
@@ -58,18 +58,21 @@ def _held(mods) -> str:
 
 
 def _qss(glass: bool, accent: str) -> str:
-    """The box in the app's own look (Settings), or in the dark glass over the game (the ⚙ panel, its accent)."""
+    """The box in the app's own look (Settings), or in the glass over the game (the ⚙ panel: its accent, and the
+    glass's colours now, palette())."""
     if glass:
+        p = palette()
+        r, g, b = p.rim
         return f"""
-QPushButton#HotkeyBox {{ background: {FILL1}; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
-                         min-height: 28px; max-height: 28px; padding: 0 12px; color: {TEXT}; font-size: 12px;
+QPushButton#HotkeyBox {{ background: {p.fill1}; border: 1px solid rgba({r},{g},{b},0.12); border-radius: 8px;
+                         min-height: 28px; max-height: 28px; padding: 0 12px; color: {p.text}; font-size: 12px;
                          font-weight: 600; }}
-QPushButton#HotkeyBox:hover {{ background: {FILL2}; }}
-QPushButton#HotkeyBox[empty="true"] {{ color: {MUTED}; font-weight: 500; }}
-QPushButton#HotkeyBox[listening="true"] {{ border: 1px solid {accent}; color: {TEXT}; font-weight: 500; }}
-QToolButton#HotkeyClear {{ background: transparent; color: {MUTED}; border: none; border-radius: 6px;
+QPushButton#HotkeyBox:hover {{ background: {p.fill2}; }}
+QPushButton#HotkeyBox[empty="true"] {{ color: {p.muted}; font-weight: 500; }}
+QPushButton#HotkeyBox[listening="true"] {{ border: 1px solid {accent}; color: {p.text}; font-weight: 500; }}
+QToolButton#HotkeyClear {{ background: transparent; color: {p.muted}; border: none; border-radius: 6px;
                            padding: 2px 6px; font-size: 11px; }}
-QToolButton#HotkeyClear:hover {{ background: {FILL2}; color: {TEXT}; }}
+QToolButton#HotkeyClear:hover {{ background: {p.fill2}; color: {p.text}; }}
 """
     c = theme.P()
     return f"""
@@ -138,10 +141,12 @@ class HotkeyBox(QWidget):
         return self._listening
 
     def set_accent(self, colour: str) -> None:
-        """The ring while it listens in the windows' accent (the ⚙ panel's pick); restyled only on a change."""
-        if colour != self._accent:
-            self._accent = colour
-            self.setStyleSheet(_qss(self._glass, colour))
+        """The ring while it listens in the windows' accent (the ⚙ panel's pick), and on the glass its colours now;
+        restyled only on a change."""
+        self._accent = colour
+        sheet = _qss(self._glass, colour)
+        if sheet != self.styleSheet():
+            self.setStyleSheet(sheet)
 
     def set_label(self, label: str) -> None:
         """What the box is for, read with the key it holds (Section.add_row passes the row's label)."""
