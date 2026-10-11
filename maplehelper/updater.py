@@ -30,12 +30,14 @@ from .store import DATA_DIR, USER_KB, kb_dir
 
 log = logging.getLogger("maplehelper")
 
-# Set when the GitHub repository exists (see README, "Publishing").
-GITHUB_REPO = "Maple-Helper/maple-helper"
+# the repository this build takes its app and knowledge-base updates from: the abilliontokens fork, which publishes
+# its own releases (the official Maple-Helper/maple-helper's would replace the fork's features on the next update)
+GITHUB_REPO = "abilliontokens/maple-helper"
 MANIFEST_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/kb-manifest.json" if GITHUB_REPO else ""
-# the same repository under its owner before it moved to the Maple-Helper organization: GitHub redirects its release
-# links here, and a manifest carried forward from back then still names it (0.8.3 refused it: no KB updates)
-FORMER_REPOS = ("Amitaflalo1995/maple-helper",)
+# the official repository's links, and the one under its first owner before it moved to the Maple-Helper
+# organization (GitHub redirects its release links, and a manifest carried forward from back then still names it:
+# 0.8.3 refused it, no KB updates): their downloads still pass
+FORMER_REPOS = ("Maple-Helper/maple-helper", "Amitaflalo1995/maple-helper")
 
 
 _TAG = re.compile(r"v?\d{1,4}(\.\d{1,4}){1,2}")        # "v0.9.2": also safe in a file name

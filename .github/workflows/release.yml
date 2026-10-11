@@ -14,6 +14,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # run by hand on a tag (gh workflow run release.yml --ref vX.Y.Z): a fork runs no push-triggered workflows until
+  # its owner enables them on the Actions tab
+  workflow_dispatch:
 
 permissions:
   contents: read

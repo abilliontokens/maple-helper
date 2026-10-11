@@ -7,14 +7,14 @@
 <p align="center"><sub>Unofficial companion for MapleStory Classic World · Not affiliated with Nexon</sub></p>
 
 <p align="center">
-  <a href="https://github.com/Maple-Helper/maple-helper/releases/latest"><img src="https://img.shields.io/badge/Download-Windows%20installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
-  <a href="https://github.com/Maple-Helper/maple-helper/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20(Apple%20Silicon)-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS (Apple Silicon)"></a>
-  <a href="https://github.com/Maple-Helper/maple-helper/releases"><img src="https://img.shields.io/badge/All-releases-555?style=for-the-badge&logo=github&logoColor=white" alt="All releases"></a>
+  <a href="https://github.com/abilliontokens/maple-helper/releases/latest"><img src="https://img.shields.io/badge/Download-Windows%20installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
+  <a href="https://github.com/abilliontokens/maple-helper/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20(Apple%20Silicon)-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS (Apple Silicon)"></a>
+  <a href="https://github.com/abilliontokens/maple-helper/releases"><img src="https://img.shields.io/badge/All-releases-555?style=for-the-badge&logo=github&logoColor=white" alt="All releases"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Maple-Helper/maple-helper/releases/latest"><img src="https://img.shields.io/github/v/release/Maple-Helper/maple-helper?label=latest&sort=semver" alt="Latest release"></a>
-  <a href="https://github.com/Maple-Helper/maple-helper/releases"><img src="https://img.shields.io/github/downloads/Maple-Helper/maple-helper/total" alt="Total downloads"></a>
+  <a href="https://github.com/abilliontokens/maple-helper/releases/latest"><img src="https://img.shields.io/github/v/release/abilliontokens/maple-helper?label=latest&sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/abilliontokens/maple-helper/releases"><img src="https://img.shields.io/github/downloads/abilliontokens/maple-helper/total" alt="Total downloads"></a>
 </p>
 
 <p align="center">
@@ -191,9 +191,9 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
 
 ## Download
 
-**[Download Maple Helper for Windows](https://github.com/Maple-Helper/maple-helper/releases/latest/download/MapleHelper-Setup.exe)**, run the installer, and follow the setup screens. The app updates itself and its game database in the background. A portable zip is on the [Releases page](https://github.com/Maple-Helper/maple-helper/releases/latest).
+**[Download Maple Helper for Windows](https://github.com/abilliontokens/maple-helper/releases/latest/download/MapleHelper-Setup.exe)**, run the installer, and follow the setup screens. The app updates itself and its game database in the background. A portable zip is on the [Releases page](https://github.com/abilliontokens/maple-helper/releases/latest).
 
-**[Download Maple Helper for macOS](https://github.com/Maple-Helper/maple-helper/releases/latest/download/MapleHelper-macOS.dmg)** (Apple Silicon), open it, and drag **Maple Helper** into Applications. See [First launch on macOS](#first-launch-on-macos). The game database updates itself; for a new app version, the app shows a notice and a download link in its menu bar menu.
+**[Download Maple Helper for macOS](https://github.com/abilliontokens/maple-helper/releases/latest/download/MapleHelper-macOS.dmg)** (Apple Silicon), open it, and drag **Maple Helper** into Applications. See [First launch on macOS](#first-launch-on-macos). The game database updates itself; for a new app version, the app shows a notice and a download link in its menu bar menu.
 
 ## Features
 
@@ -253,7 +253,7 @@ The app uses screen capture and its own overlay window. It does not read game me
 
 ## Install
 
-Download the latest release from the [Releases page](https://github.com/Maple-Helper/maple-helper/releases/latest):
+Download the latest release from the [Releases page](https://github.com/abilliontokens/maple-helper/releases/latest):
 
 - **`MapleHelper-Setup.exe`**: the installer. This is the recommended option and doesn't need admin rights.
 - **`MapleHelper-<version>-portable.zip`**: unzip it anywhere and run `Maple Helper.exe`.

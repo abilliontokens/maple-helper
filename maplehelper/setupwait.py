@@ -83,7 +83,7 @@ def _close_note() -> None:
             u32.PostMessageW(h, 0x0010, 0, 0)           # WM_CLOSE: the box ends as if OK was clicked
 
 
-DOWNLOAD_URL = "https://github.com/Maple-Helper/maple-helper/releases/latest/download/MapleHelper-Setup.exe"
+DOWNLOAD_URL = "https://github.com/abilliontokens/maple-helper/releases/latest/download/MapleHelper-Setup.exe"
 BROKEN_TEXT = {
     "he": "חלק מהקבצים של Maple Helper חסרים או פגומים: כנראה עדכון שנקטע, או אנטי-וירוס שחסם קובץ.\n\n"
           "להתקין מחדש? ההגדרות והדמויות שלכם יישמרו.",
@@ -123,9 +123,9 @@ def _language() -> str:
 # the app didn't start, so its "Report a problem" isn't there: the address itself, as report_saved_body gives it
 STARTUP_TEXT = {
     "he": "Maple Helper לא הצליח לעלות. הפרטים נשמרו בקובץ:\n%s\n\nאפשר לפתוח דיווח ב-GitHub ולצרף אליו את "
-          "הקובץ:\ngithub.com/Maple-Helper/maple-helper/issues\n\nאו לנסות להפעיל מחדש את המחשב.",
+          "הקובץ:\ngithub.com/abilliontokens/maple-helper/issues\n\nאו לנסות להפעיל מחדש את המחשב.",
     "en": "Maple Helper couldn't start. The details were saved to:\n%s\n\nYou can open an issue on GitHub and attach "
-          "this file:\ngithub.com/Maple-Helper/maple-helper/issues\n\nOr try restarting the PC.",
+          "this file:\ngithub.com/abilliontokens/maple-helper/issues\n\nOr try restarting the PC.",
 }
 # a release that fails at start never reaches its own update check: the way out is the latest installer
 STARTUP_NEWER_TEXT = {
@@ -134,7 +134,7 @@ STARTUP_NEWER_TEXT = {
 }
 
 
-RELEASES_URL = "https://github.com/Maple-Helper/maple-helper/releases/latest"
+RELEASES_URL = "https://github.com/abilliontokens/maple-helper/releases/latest"
 MAC_TEXT = {
     "startup": {"he": STARTUP_TEXT["he"].replace("המחשב", "ה-Mac"), "en": STARTUP_TEXT["en"].replace("the PC", "the Mac")},
     # written whole: an interrupted update or an antivirus (the Windows causes) don't fit a drag-installed Mac app

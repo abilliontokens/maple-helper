@@ -90,8 +90,9 @@ def _body(text: str) -> QLabel:
     return lb
 
 
-# where players report problems (the owner's choice, UX-8); the report toast names it too (report_saved_body)
-ISSUES_URL = "https://github.com/Maple-Helper/maple-helper/issues"
+# where players report problems (the owner's choice, UX-8): the fork this build comes from; the report toast names it
+# too (report_saved_body)
+ISSUES_URL = "https://github.com/abilliontokens/maple-helper/issues"
 
 
 def _field(text: str) -> QLabel:
@@ -1166,6 +1167,7 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
     patch_notes_requested = Signal()
     whats_new_requested = Signal()
     tour_requested = Signal()
+    look_previewed = Signal(str, str, float)    # (tint, accent, opacity) picked and not saved yet: shown live
 
     def __init__(self, settings: Settings, profiles: Profiles, kb: KnowledgeBase, stylesheet_fn):
         self.t = t = I18n(settings["language"] or "he")
@@ -1192,8 +1194,9 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
 
         # the look of the app's own windows (the windows over the game keep theirs, picked in the toolbar's ⚙ panel):
         # the glass colour as tiles of each tint and the accent as dots, the picked one ringed and named beside its
-        # label as in the ⚙ panel, and the glass's opacity on a slider at any whole percent. Saved with the rest on
-        # Save; until then they draw for this window's own glass (_look_edge), in the accent picked here
+        # label as in the ⚙ panel, and the glass's opacity on a slider at any whole percent. Each pick shows at once
+        # on the open windows (look_previewed, every percent of a drag); saved with the rest on Save, and closing
+        # without saving puts the saved look back (_put_look_back)
         sec = Section(t("appearance"), rtl)
         self._look_tint = settings["app_tint"] if settings["app_tint"] in theme.TINTS else DEFAULT_SETTINGS["app_tint"]
         self._look_accent = (settings["app_accent"] if settings["app_accent"] in theme.ACCENTS
@@ -1207,12 +1210,15 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         self.look_opacity.setProperty("focus_ring", True)
         self.look_opacity.set_value(settings["app_opacity"])
         self.look_opacity.changed.connect(self._show_opacity)
+        self.look_opacity.changed.connect(self._preview_look)
         self.look_opacity_value = self._look_row(sec, t("set_look_opacity"), self.look_opacity)
         hint = QLabel(objectName="RowHint")
         hint.setWordWrap(True)
         set_hint(hint, t("set_look_hint"), rtl)
         sec.add_widget(hint)
         self._show_look()
+        self._previewed = self._shown_look = (self._look_tint, self._look_accent, self.look_opacity.value())
+        self.rejected.connect(self._put_look_back)
         lay.addWidget(sec)
 
         # display: the text size and the language
@@ -1527,12 +1533,30 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         return w
 
     def _pick_look(self, kind: str, key: str) -> None:
-        """A tile or a dot clicked: picked, saved with the rest on Save."""
+        """A tile or a dot clicked: picked and shown at once, saved with the rest on Save."""
         if kind == "tint":
             self._look_tint = key
         else:
             self._look_accent = key
         self._show_look()
+        self._preview_look()
+
+    def _preview_look(self, _=None) -> None:
+        """The look picked here on the open windows now (look_previewed), when it is another one than they show; the
+        key box's own style sheet, built from the theme's colours, follows it."""
+        look = (self._look_tint, self._look_accent, self.look_opacity.value())
+        if look != self._previewed:
+            self._previewed = look
+            self.look_previewed.emit(*look)
+            self.toolbar_hotkey.set_accent(None)       # restyled only when the theme's colours changed
+
+    def _put_look_back(self) -> None:
+        """Closed without saving (the X's "don't save", reject): the saved look back on the open windows, once, if
+        a pick had shown another one."""
+        if self._previewed != self._shown_look:
+            self._previewed = self._shown_look
+            s = self.settings
+            self.look_previewed.emit(s["app_tint"], s["app_accent"], float(s["app_opacity"]))
 
     def _show_look(self) -> None:
         """The picked tile and dot checked (a click on the picked one had unchecked it) and named beside their

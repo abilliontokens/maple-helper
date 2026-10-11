@@ -22,7 +22,7 @@ import time
 import zipfile
 from pathlib import Path
 
-REPO = "Maple-Helper/maple-helper"
+REPO = "abilliontokens/maple-helper"
 CATEGORIES = ["monster", "item", "map", "quest", "npc", "skill", "class", "guide", "shop", "crafting", "formula"]
 MIN_KEEP_RATIO = 0.9   # an update may not lose more than 10% of the previous entities
 MAX_REMOVED = 25       # ...nor more than this many at once (a refresh drops only what left the sitemap)
