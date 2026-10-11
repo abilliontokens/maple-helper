@@ -73,6 +73,7 @@ _CHROME = ("minimap", "world")   # the window furniture ('MINI MAP' in any case/
 _TOP_BAND = 0.12    # ... nor is any line up here (the title bar): tight header crops misread WORLD as 'RLO'/'ORLD',
                     # which no text match would catch, but nothing below the bar ever sits this high (live headers
                     # centre on ~17-35% of the box height)
+STRIP_RATIO = 4    # a box over this many times wider than tall is a folded window's strip alone (its title anywhere)
 _HEADER_PAD = 70    # the learned header crop keeps this many rows below the header's last line: a tight crop reads
                     # worse, not faster (measured: a 100-row crop took 0.34 s and lost WORLD, a 160-row one 0.20 s),
                     # so the crop stays generous and the whole box is the fallback when it yields no name
@@ -1049,18 +1050,20 @@ class Locator:
         rows.sort(key=lambda r: r[1])
         return rows
 
-    def _header(self, rows: list[tuple[str, float, float]], height: int, panel_y0: int
+    def _header(self, rows: list[tuple[str, float, float]], height: int, panel_y0: int, strip: bool = False
                 ) -> tuple[tuple[str, str | None], float | None] | None:
         """The header's (map line, street line) from read rows. A collapsed window first: its one-line 'Street : Map'
         title sits up in the title bar (which the furniture rule drops; an unfolded window has only MINI MAP and
         WORLD there), and under a folded window the game itself shows, whose names and bubbles must not pass for a
-        header. Otherwise the window furniture dropped, anything at or below the map panel dropped, and of what stays
-        the map line is the last one down, the street the one over it. Also the header's bottom row, which the next
-        reads crop to (None for a folded title: unfolded, the header sits much lower). None when no header line
-        stays. Sets self._collapsed for the read."""
+        header; `strip`: the box is the folded window alone (found on its own, ui/minimapscan.py), its title
+        anywhere in it. Otherwise the window furniture dropped, anything at or below the map panel dropped, and of
+        what stays the map line is the last one down, the street the one over it. Also the header's bottom row, which
+        the next reads crop to (None for a folded title: unfolded, the header sits much lower). None when no header
+        line stays. Sets self._collapsed for the read."""
         streets = [m.street for m in self._graph.known.values()]
+        band = height if strip else _TOP_BAND * height
         for t, yc, _b in rows:
-            got = collapsed_title(t, streets) if yc < _TOP_BAND * height else None
+            got = collapsed_title(t, streets) if yc < band else None
             if got is not None and _candidates_for(self._graph, *got):
                 self._collapsed = True
                 return got, None
@@ -1108,18 +1111,19 @@ class Locator:
         that yields no header (a redrawn box heals the crop). Keeps the header's bottom (self._text_bottom, box
         pixels): no map shows above it, whatever the panel detection made of the box."""
         H = arr.shape[0]
+        strip = H * STRIP_RATIO < arr.shape[1]     # a box this much wider than tall: a folded window's strip alone
         self._text_bottom = None
         if self._header_rows is not None:
             rows = self._ocr_rows(arr[:max(_MIN_SIDE, min(H, self._header_rows))])
             if rows is not None:
-                got = self._header(rows, H, panel_y0)
+                got = self._header(rows, H, panel_y0, strip)
                 if got is not None:
                     self._text_bottom = got[1]
                     return got[0]
         rows = self._ocr_rows(arr)
         if rows is None:
             return None
-        got = self._header(rows, H, panel_y0)
+        got = self._header(rows, H, panel_y0, strip)
         if got is None:
             return None
         self._text_bottom = got[1]

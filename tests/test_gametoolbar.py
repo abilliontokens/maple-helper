@@ -1,10 +1,10 @@
 """The bar over the game (ui/gametoolbar.py): shown from its own setting, its NPCs-here button flipping the
 NPCs window's setting (the window follows the signal), its search buttons naming their search, the mode lit back
 on the button that opened it, the ✕ turning the bar off (and saying so, for the app's how-to-bring-it-back toast),
-and its place on the screen — above the drawn minimap box, at the saved spot, and the spot kept after a drag. Its
-width is the player's too: the buttons wrap into as many rows as the width leaves room for. Every button has its
-line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass tint, the accent,
-the transparency, icons instead of words, the bar's key, Reset) are written and followed live."""
+and its place on the screen — above the minimap's box (LOCATION.box) and with it, at the saved spot, and the spot
+kept after a drag. Its width is the player's too: the buttons wrap into as many rows as the width leaves room for.
+Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
+tint, the accent, the transparency, icons instead of words, the bar's key, Reset) are written and followed live."""
 import os
 
 import pytest
@@ -38,9 +38,13 @@ def _todays_look():
 @pytest.fixture
 def bar(qapp, isolated_store):
     from maplehelper.ui import gametoolbar
+    from maplehelper.ui.location import LOCATION
+    old, LOCATION.box = LOCATION.box, None
     s = isolated_store.Settings()
     w = gametoolbar.GameToolbar(s, I18n("en"))
     yield w, s
+    LOCATION.boxed.disconnect(w._box_moved)
+    LOCATION.box = old
     w.close()
     if w._panel is not None:
         w._panel.close()
@@ -683,13 +687,36 @@ def _spare_x(s):
     return screen.left() + room // 2
 
 
-def test_it_opens_just_above_the_drawn_minimap_box(bar):
+def test_it_opens_just_above_the_minimap_box(bar):
+    """Above LOCATION.box (the minimap window found, or the box the reads use), not the drawn box in the settings."""
     from maplehelper.ui import gametoolbar
+    from maplehelper.ui.location import LOCATION
     w, s = bar
     x = _spare_x(s)
-    s["minimap_region"] = {"x": x, "y": 300, "w": 200, "h": 200}      # 1:1 on the offscreen screen
+    s["minimap_region"] = {"x": x + 50, "y": 400, "w": 100, "h": 100}  # drawn: only the fallback
+    LOCATION.set_box({"x": x, "y": 300, "w": 200, "h": 200})          # 1:1 on the offscreen screen
     w.refresh()
     assert w.pos() == QPoint(x, 300 - w.height() - gametoolbar.GAP)   # its left edge lined up with the box's
+
+
+def test_a_box_found_later_moves_it_above_the_box_until_the_player_moves_it(bar):
+    """Opened before the minimap window was found (the screen's top centre), it moves above the box once it comes
+    and with the box when it moves; a bar the player dragged stays put, and so does one when the box goes."""
+    from maplehelper.ui import gametoolbar
+    from maplehelper.ui.location import LOCATION
+    w, s = bar
+    x = _spare_x(s)
+    w.refresh()
+    top = w.pos()
+    LOCATION.set_box({"x": x, "y": 300, "w": 200, "h": 200})
+    assert w.pos() == QPoint(x, 300 - w.height() - gametoolbar.GAP) != top
+    LOCATION.set_box({"x": x + 20, "y": 280, "w": 180, "h": 220})     # the next map's minimap, another size
+    assert w.pos() == QPoint(x + 20, 280 - w.height() - gametoolbar.GAP)
+    LOCATION.set_box(None)                                          # the minimap closed: it stays
+    assert w.pos() == QPoint(x + 20, 280 - w.height() - gametoolbar.GAP)
+    w.move(x, 70)                                                   # the player's place
+    LOCATION.set_box({"x": x, "y": 300, "w": 200, "h": 200})
+    assert w.pos() == QPoint(x, 70)
 
 
 def test_the_place_is_kept_when_moved_and_reopened_there(bar):

@@ -1,7 +1,7 @@
 """The toolbar's search window (ui/gamesearch.py): the search itself over the KB's monsters, NPCs, maps and items
 and where a monster lives, and its life as a window — opened in a mode (the same mode again a toggle), filled
-as the player types (each row its picture, its tag chips, its muted line, a price on its end; the maps and Safe
-to sell? listed before anything is typed, Safe to sell?'s switch narrowing it), a click opening the thing's own
+as the player types (each row its picture, its tag chips, its muted line, a price on its end; every search
+listed before anything is typed, Safe to sell?'s switch narrowing it), a click opening the thing's own
 page in the detail window beside it (a header card over titled blocks — an NPC: where it stands and the way there;
 a monster: its maps; an item: who drops and sells it; a map: its monsters; Safe to sell?: the verdict and what
 needs it), the history those pages push gone back through, the accent lighting the open page's row, and the
@@ -256,7 +256,7 @@ def test_open_shows_that_mode_and_the_same_mode_again_toggles_off(win):
     win.open("monster_npc")
     assert win.isVisible() and win._kind == "monster_npc"
     assert win._title.text() == "Find a monster or NPC" and win._box.placeholderText() == "Monster or NPC name…"
-    assert win._status.text() == "Type at least 2 letters" and not win._rows
+    assert win._rows                                           # its first rows at once, nothing typed yet
     win.open("monster_npc")                                    # the same mode again: off
     assert not win.isVisible()
     assert modes == ["monster_npc", ""]
@@ -746,6 +746,27 @@ def test_the_maps_are_listed_before_anything_is_typed_and_a_search_narrows_them(
     assert win._status.text() == ""
     win._rows[0].clicked.emit()
     assert opened == [("map", "map/100000999")]
+
+
+@pytest.mark.parametrize("kind", ["item", "monster_npc"])
+def test_items_and_monsters_and_npcs_are_listed_before_anything_is_typed(win, qapp, kb, kind):
+    """Like the maps, the first LIMIT rows as soon as it opens, no "type more" line: the items by name, the
+    monsters by level and then the NPCs; one letter typed still lists them (two narrow it, as before)."""
+    from maplehelper.ui import gamesearch
+    hits, total = gamesearch.search(kb, kind, "")
+    assert 0 < len(hits) == min(total, gamesearch.LIMIT)
+    if kind == "item":
+        assert [h.name.casefold() for h in hits] == sorted(h.name.casefold() for h in hits)
+    else:
+        monsters = [h for h in hits if h.kind == "monster"]
+        assert monsters and hits[:len(monsters)] == monsters                 # the monsters first...
+        assert [h.lv for h in monsters] == sorted(h.lv for h in monsters)     # ... by level
+    win.open(kind)
+    assert [r.name.text() for r in win._rows] == [h.name for h in hits]
+    assert win._status.text() in ("", f"and {total - len(hits):,} more — type more to narrow it down")
+    win._box.setText("s")
+    pump(qapp, 200)
+    assert [r.name.text() for r in win._rows] == [h.name for h in hits]
 
 
 def test_switching_modes_keeps_each_ones_query(win, qapp):

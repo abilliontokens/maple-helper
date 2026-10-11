@@ -1,5 +1,6 @@
-"""The minimap scanner (ui/minimapscan.py) and its Settings row: reads run on the interval, nothing runs without
-a box, a bad read is "unknown" (never a crash), and the interval saves like every other setting."""
+"""The minimap scanner (ui/minimapscan.py) and its Settings row: reads run on the interval whether or not a box was
+drawn (the minimap window is found at the game's top left, the drawn box is its fallback), the box read is
+published, a bad read is "unknown" (never a crash), and the interval saves like every other setting."""
 import logging
 import os
 import threading
@@ -36,10 +37,17 @@ def env(qapp, isolated_store, kb, monkeypatch):
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = None, "", None, None
+    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = None, "", None, None, None
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = old
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = old
+
+
+@pytest.fixture(autouse=True)
+def no_game(monkeypatch):
+    """The real screen is never looked at: no game window unless a test puts one there (_Screen)."""
+    from maplehelper import gamearea
+    monkeypatch.setattr(gamearea.GameArea, "find", lambda self: None)
 
 
 def _make_scanner(s, kb):
@@ -50,16 +58,24 @@ def _make_scanner(s, kb):
 BOX = {"x": 10, "y": 20, "w": 100, "h": 50}
 
 
-def test_no_box_scans_nothing(env, clean_location, qapp):
+def test_the_reads_run_without_a_drawn_box(env, clean_location, qapp, monkeypatch):
+    """The minimap window is found on its own (the drawn box is only its fallback): a restart with no box drawn
+    starts the reads and the follow all the same, and keeps the player where they were."""
+    from types import SimpleNamespace
+
     from maplehelper.minimap import Here
     s, _, kb = env
     sc = _make_scanner(s, kb)
     try:
         clean_location.set(Here("010001000", (0.5, 0.5)))
-        clean_location.set_state("unknown")
         sc.restart()
-        assert not sc._timer.isActive()
-        assert clean_location.here is None and clean_location.state == ""
+        assert sc._region is None and clean_location.here == Here("010001000", (0.5, 0.5))
+        assert sc._timer.isActive() and sc._timer.interval() == 1000 and sc._follow_timer.isActive()
+        made = []
+        monkeypatch.setattr(threading, "Thread",
+                            lambda target=None, args=(), **k: SimpleNamespace(start=lambda: made.append(args)))
+        sc._tick()
+        assert made == [(None,)]                # a read with no drawn box to fall back on
     finally:
         sc.stop()
 
@@ -207,6 +223,7 @@ def test_a_failed_read_logs_once_and_reads_unknown(env, clean_location, qapp, mo
             sc._read(dict(BOX))
             sc._read(dict(BOX))             # the same error again: logged once, not twice
             assert clean_location.here is None and clean_location.state == "unknown"
+            assert clean_location.box == BOX    # the box it was reading
         warnings = [r for r in caplog.records
                     if r.name == "maplehelper" and r.levelno == logging.WARNING and "boom" in r.getMessage()]
         assert len(warnings) == 1
@@ -272,6 +289,7 @@ def test_the_follow_runs_only_for_dots_and_a_loss_starts_one_read(env, clean_loc
         s["minimap_region"] = dict(BOX)
         sc.restart()
         assert sc._follow_timer.isActive()
+        sc._box = dict(BOX)                                 # the box the last read used: the follow grabs it
         spots = {"010003000": [(0.5, 0.5)]}
         sc._locator = _Locator(None)
         sc._graph = SimpleNamespace(hidden_spots=lambda m: spots.get(m, []), name=lambda m: m)
@@ -361,16 +379,16 @@ def test_a_placed_read_starts_the_follow_but_never_overrides_a_live_one(env, cle
         sc.restart()
         sc._graph = _Graph()
         read_view, live = View(1, 2, 30, 40, (0, 0, 100, 50)), View(9, 2, 30, 40, (0, 0, 100, 50))
-        sc._deliver(Here("010003000", (0.5, 0.5), read_view))
+        sc._deliver(Here("010003000", (0.5, 0.5), read_view), BOX)
         assert clean_location.follow == ("010003000", read_view)
         clean_location.set_follow(("010003000", live))
-        sc._deliver(Here("010003000", (0.5, 0.5), read_view))
+        sc._deliver(Here("010003000", (0.5, 0.5), read_view), BOX)
         assert clean_location.follow == ("010003000", live)
         clean_location.set_follow(("010003000", None))       # lost: the next placed read takes over
-        sc._deliver(Here("010003000", (0.5, 0.5), read_view))
+        sc._deliver(Here("010003000", (0.5, 0.5), read_view), BOX)
         assert clean_location.follow == ("010003000", read_view)
         clean_location.set_follow(None)
-        sc._deliver(Here("010003000", None))
+        sc._deliver(Here("010003000", None), BOX)
         assert clean_location.follow is None
     finally:
         sc.stop()
@@ -391,17 +409,17 @@ def test_a_known_map_is_never_dropped_for_unreadable_reads(env, clean_location, 
         now = [500.0]
         monkeypatch.setattr(minimapscan.time, "monotonic", lambda: now[0])
         perion = Here("010004000", (0.3, 0.4))
-        sc._deliver(perion)
-        sc._deliver(None)
+        sc._deliver(perion, BOX)
+        sc._deliver(None, BOX)
         assert clean_location.here == perion and clean_location.state == "" and sc._cooldown_until == 0.0
         now[0] = 503.0
-        sc._deliver(None)                      # past the grace: still Perion, reads slow a little
+        sc._deliver(None, BOX)                 # past the grace: still Perion, reads slow a little
         assert clean_location.here == perion and clean_location.state == ""
         assert sc._cooldown_until == 505.0
         now[0] = 900.0
-        sc._deliver(None)
+        sc._deliver(None, BOX)
         assert clean_location.here == perion and clean_location.state == ""
-        sc._deliver(perion)                    # read again: back to every interval
+        sc._deliver(perion, BOX)               # read again: back to every interval
         assert sc._cooldown_until == 0.0
     finally:
         sc.stop()
@@ -416,17 +434,17 @@ def test_another_map_needs_two_reads_in_a_row(env, clean_location, qapp, monkeyp
         s["minimap_region"] = dict(BOX)
         sc.restart()
         site, road, kerning = Here("010003010", (0.5, 0.5)), Here("088000000", None), Here("010003000", None)
-        sc._deliver(site)                      # the first map known counts at once
+        sc._deliver(site, BOX)                 # the first map known counts at once
         assert clean_location.here == site
-        sc._deliver(road)                      # a lone misread: ignored
+        sc._deliver(road, BOX)                 # a lone misread: ignored
         assert clean_location.here == site
-        sc._deliver(site)                      # back: the misread is forgotten
-        sc._deliver(road)
+        sc._deliver(site, BOX)                 # back: the misread is forgotten
+        sc._deliver(road, BOX)
         assert clean_location.here == site
-        sc._deliver(None)                      # a miss between doesn't count as a second read of it either
-        sc._deliver(kerning)
+        sc._deliver(None, BOX)                 # a miss between doesn't count as a second read of it either
+        sc._deliver(kerning, BOX)
         assert clean_location.here == site
-        sc._deliver(kerning)                   # two reads in a row: moved
+        sc._deliver(kerning, BOX)              # two reads in a row: moved
         assert clean_location.here == kerning
     finally:
         sc.stop()
@@ -442,10 +460,212 @@ def test_restart_clears_the_backoff_and_failures_back_off(env, clean_location, q
         sc.restart()
         now = [2000.0]
         monkeypatch.setattr(minimapscan.time, "monotonic", lambda: now[0])
-        sc._complain("RuntimeError: boom")    # a failing read backs off too
+        sc._complain("RuntimeError: boom", BOX)  # a failing read backs off too
         assert sc._cooldown_until == 2050.0 and clean_location.state == "unknown"
         sc.restart()                          # a new box or interval: read right away
         assert sc._cooldown_until == 0.0
+    finally:
+        sc.stop()
+
+
+# --- the minimap window, found on its own -------------------------------------------------------------------------
+
+
+class _Reader:
+    """A locator that keeps every picture a read gave it, and counts its resets (its lock dropped)."""
+
+    def __init__(self, answer):
+        self.answer = answer
+        self.images = []
+        self.resets = 0
+
+    def locate(self, img):
+        self.images.append(img)
+        return self.answer
+
+    def reset(self):
+        self.resets += 1
+
+
+class _Screen:
+    """A fake screen (the real one is never grabbed): the game's picture at `game` (None: no game window), the
+    minimap window at `window` in the grab of the game's corner (None: not there). Every grab is kept: noise, `scale`
+    times its size (a Retina grab has more pixels than points)."""
+
+    def __init__(self, monkeypatch, game=None, window=None, scale=1):
+        from maplehelper import gamearea
+        from maplehelper.ui import minimapscan
+        self.game, self.window, self.scale = game, window, scale
+        self.grabs, self.pictures, self.searched = [], [], []
+        monkeypatch.setattr(gamearea.GameArea, "find", lambda _area: self.game)
+        monkeypatch.setattr(minimapscan.capture, "grab_image", self.grab)
+        monkeypatch.setattr(minimapscan.minimapfind, "find_window", self.find_window)
+
+    def grab(self, x, y, w, h):
+        import numpy as np
+        from PIL import Image
+        noise = np.random.default_rng(len(self.grabs)).integers(0, 256, (h * self.scale, w * self.scale, 3),
+                                                                dtype=np.uint8)
+        self.grabs.append((x, y, w, h))
+        self.pictures.append(Image.fromarray(noise))
+        return self.pictures[-1]
+
+    def find_window(self, img):
+        self.searched.append(img)
+        return self.window
+
+
+GAME = (100, 50, 1000, 800)                         # the game's picture: its corner searched is (100, 50, 600, 600)
+WINDOW = {"x": 104, "y": 80, "w": 300, "h": 200}    # the minimap window found at (4, 30, 300, 200) in that corner
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+def test_the_minimap_window_is_found_at_the_games_top_left(env, clean_location, qapp, monkeypatch, scale):
+    """Each read grabs the top-left corner of the game's picture once (its left 60%, top 75%), finds the minimap
+    window in it and reads that crop. The window's box, in capture pixels (a Retina grab has twice the pixels), is
+    published and is what the fast follow grabs; it wins over a drawn box."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from maplehelper.minimap import Here
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        s["minimap_region"] = dict(BOX)
+        sc.restart()
+        screen = _Screen(monkeypatch, GAME, tuple(v * scale for v in (4, 30, 300, 200)), scale)
+        here = Here("010003000", (0.5, 0.5))
+        sc._locator = _Reader(here)
+        sc._graph = SimpleNamespace(hidden_spots=lambda m: [(0.5, 0.5)], name=lambda m: m)
+        sc._read(dict(BOX))
+        assert screen.grabs == [(100, 50, 600, 600)]                 # one grab: the corner, never the drawn box
+        assert len(screen.searched) == 1 and screen.searched[0] is screen.pictures[0]
+        [img] = sc._locator.images
+        assert img.size == (300 * scale, 200 * scale)
+        corner = np.asarray(screen.pictures[0])
+        assert np.array_equal(np.asarray(img), corner[30 * scale:230 * scale, 4 * scale:304 * scale])
+        assert clean_location.box == WINDOW and clean_location.here == here
+        started = []
+        monkeypatch.setattr(threading, "Thread", lambda target=None, args=(), **k:
+                            SimpleNamespace(start=lambda: started.append((target.__name__, args[1]))))
+        sc._follow_tick()
+        assert started == [("_follow", WINDOW)]
+    finally:
+        sc.stop()
+
+
+def test_without_a_minimap_window_the_drawn_box_is_read(env, clean_location, qapp, monkeypatch):
+    """No minimap window in the game's corner, or no game window at all: the drawn box is read as before (grabbed
+    alone) and published."""
+    from maplehelper.minimap import Here
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        s["minimap_region"] = dict(BOX)
+        sc.restart()
+        screen = _Screen(monkeypatch, GAME, None)
+        here = Here("010003000", (0.5, 0.5))
+        sc._locator, sc._graph = _Reader(here), _Graph()
+        sc._read(dict(BOX))
+        assert screen.grabs == [(100, 50, 600, 600), (10, 20, 100, 50)]
+        assert len(sc._locator.images) == 1 and sc._locator.images[0] is screen.pictures[1]
+        assert clean_location.box == BOX and clean_location.here == here
+        screen.game = None
+        sc._read(dict(BOX))
+        assert screen.grabs[2:] == [(10, 20, 100, 50)] and sc._locator.images[1] is screen.pictures[2]
+        assert clean_location.box == BOX and sc._box == BOX
+    finally:
+        sc.stop()
+
+
+def test_with_neither_nothing_is_read_and_no_box_is_published(env, clean_location, qapp, monkeypatch):
+    """No minimap window found and no box drawn: nothing is read and LOCATION.box goes back to None (nothing sits
+    over a box that isn't there). It is a miss: the known map stays, and with none known the tries back off to
+    max(5 s, 5 x interval); with no game open they grab nothing at all."""
+    from maplehelper.minimap import Here
+    from maplehelper.ui import minimapscan
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        sc.restart()
+        screen = _Screen(monkeypatch, GAME, (4, 30, 300, 200))
+        here = Here("010003000", (0.5, 0.5))
+        sc._locator, sc._graph = _Reader(here), _Graph()
+        sc._read(None)
+        assert clean_location.box == WINDOW and clean_location.here == here
+        screen.window = None                    # the game is there, its minimap window isn't
+        sc._read(None)
+        assert len(sc._locator.images) == 1 and clean_location.box is None and sc._box is None
+        assert clean_location.here == here      # a miss: the known map stays
+        clean_location.set(None)
+        screen.game = None                      # no game at all
+        now = [1000.0]
+        monkeypatch.setattr(minimapscan.time, "monotonic", lambda: now[0])
+        sc._read(None)
+        assert len(sc._locator.images) == 1 and len(screen.grabs) == 2 and clean_location.box is None
+        assert clean_location.state == "unknown" and sc._cooldown_until == 1005.0
+    finally:
+        sc.stop()
+
+
+def test_a_new_box_drops_the_locators_lock_once_and_the_same_box_keeps_it(env, clean_location, qapp, monkeypatch):
+    """The minimap window changes size with the map (and moves with the game): a read of another box than the last
+    one drops the locator's lock on the picture once, and the follow's placing, which was in the old box; the same
+    box read again keeps both (no reset every read)."""
+    from maplehelper.minimap import Here, View
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        sc.restart()
+        screen = _Screen(monkeypatch, GAME, (4, 30, 300, 200))
+        read_view, live = View(1, 2, 30, 40, (0, 0, 300, 200)), View(5, 2, 30, 40, (0, 0, 300, 200))
+        sc._locator, sc._graph = _Reader(Here("010003000", (0.5, 0.5), read_view)), _Graph()
+        sc._read(None)
+        assert sc._locator.resets == 1 and clean_location.follow == ("010003000", read_view)
+        clean_location.set_follow(("010003000", live))
+        sc._read(None)                          # the same box: the lock and the live follow stay
+        assert sc._locator.resets == 1 and clean_location.follow == ("010003000", live)
+        screen.window = (4, 30, 260, 180)       # another map's smaller window
+        sc._read(None)
+        assert sc._locator.resets == 2 and clean_location.box == {"x": 104, "y": 80, "w": 260, "h": 180}
+        assert clean_location.follow == ("010003000", read_view)     # the read's own placing, in the new box
+        sc._read(None)
+        assert sc._locator.resets == 2
+        screen.game = (120, 50, 1000, 800)      # the game moved: the same window elsewhere
+        sc._read(None)
+        assert sc._locator.resets == 3 and clean_location.box == {"x": 124, "y": 80, "w": 260, "h": 180}
+    finally:
+        sc.stop()
+
+
+def test_the_game_window_and_each_new_minimap_window_size_log_once(env, clean_location, qapp, monkeypatch, caplog):
+    """The reads run all the time and the log stays quiet: the game window appearing and going logs once each, the
+    minimap window once per size it is found at (a map change), never once a read."""
+    from maplehelper.minimap import Here
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        sc.restart()
+        screen = _Screen(monkeypatch, None, (4, 30, 300, 200))
+        sc._locator, sc._graph = _Reader(Here("010003000", (0.5, 0.5))), _Graph()
+        with caplog.at_level(logging.INFO, logger="maplehelper"):
+            sc._read(None)                      # no game yet: nothing to say
+            screen.game = GAME
+            sc._read(None)
+            sc._read(None)
+            screen.window = (4, 30, 260, 180)
+            sc._read(None)
+            sc._read(None)
+            screen.game = None
+            sc._read(None)
+            sc._read(None)
+        said = [r.getMessage() for r in caplog.records
+                if r.name == "maplehelper" and r.levelno == logging.INFO and "window" in r.getMessage()]
+        assert said == ["minimap: found the game's window, its picture at 100,50 (1000x800)",
+                        "minimap: found the minimap window at 104,80 (300x200)",
+                        "minimap: found the minimap window at 104,80 (260x180)",
+                        "minimap: the game's window is gone"]
     finally:
         sc.stop()
 

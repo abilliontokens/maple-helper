@@ -9,12 +9,12 @@ icons alone once the words would take more than WORD_LINES_MAX lines; the length
 colour: small beside the words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙
 beside the ✕ opens the panel with the look of every window over the game, the icons mode, the bar's show/hide key
 and Cabs & Teleports (_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the
-player left it is kept in game_toolbar_pos; with none saved it opens just above the drawn minimap box. Every colour
-is read from npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints,
-dark text on the white one."""
+player left it is kept in game_toolbar_pos; with none saved it opens just above the game's minimap window (found
+at the game's top left, else the box the player drew) and follows it until moved. Every colour is read from
+npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark text on the
+white one."""
 from __future__ import annotations
 
-import sys
 import time
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
@@ -50,6 +50,7 @@ from . import mapview, theme
 from .controls import FlowLayout, Switch
 from .glass import SHADOW, EdgeResize
 from .hotkeybox import HotkeyBox
+from .location import LOCATION
 from .npcoverlay import (
     ACCENTS,
     DARK,
@@ -67,10 +68,10 @@ from .npcoverlay import (
     accent_of,
     apply_look,
     keep_over_game,
+    minimap_box,
     palette,
     set_capturable,
 )
-from .regionpick import from_capture
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
 FLOW_GAP = 6                                              # between the buttons, and between the rows they wrap into
@@ -958,6 +959,7 @@ class GameToolbar(EdgeResize, QWidget):
         self.setLayoutDirection(Qt.RightToLeft if t.rtl else Qt.LeftToRight)
         self._opacity = OPACITY_DEFAULT
         self._placed = False                 # geometry applied at least once: there is a place to remember
+        self._default_at: QPoint | None = None   # where it opened by the minimap with no place saved, until moved
         self._mode = ""                      # the search window's mode, lit on its button ("" none)
         self._panel: _SettingsPanel | None = None   # the ⚙ panel, made on the first ask
         self._fitting = False                # our own fit of its size, not the player's drag to remember
@@ -972,6 +974,7 @@ class GameToolbar(EdgeResize, QWidget):
                              timeout=lambda: self._fit(self.height() if self._upright() else self.width()))
         self.setStyleSheet(qss(settings))
         self._build()
+        LOCATION.boxed.connect(self._box_moved)  # the game's minimap window found, or found elsewhere
 
     # ------------------------------------------------------------ the bar
 
@@ -1313,27 +1316,31 @@ class GameToolbar(EdgeResize, QWidget):
         unplugged: above the minimap box again)."""
         screens = [s.geometry() for s in QGuiApplication.screens()]
         spot = mapview.saved_spot(self._settings["game_toolbar_pos"], self.size(), screens)
-        self.setGeometry(QRect(spot if spot is not None else self._default_spot(), self.size()))
+        self._default_at = self._default_spot() if spot is None else None
+        self.setGeometry(QRect(spot if spot is not None else self._default_at, self.size()))
         self._placed = True
 
     def _default_spot(self) -> QPoint:
-        """Just above the drawn minimap box (the bar is about the map in it), left edges lined up; else the
-        primary screen's top centre."""
+        """Just above the game's minimap window (npcoverlay.minimap_box: the bar is about the map in it), left edges
+        lined up; else the primary screen's top centre."""
         screens = [(s.geometry(), s.devicePixelRatio()) for s in QGuiApplication.screens()]
-        region = self._settings["minimap_region"]
+        box = minimap_box(self._settings, screens)
         primary = QGuiApplication.primaryScreen().availableGeometry()
-        if isinstance(region, dict):
-            try:
-                box, _ = from_capture(region, screens, scale=sys.platform != "darwin")
-            except (KeyError, TypeError, ValueError):
-                box = None
-            if box is not None:
-                screen = next((g for g, _ in screens if g.intersects(box)), primary)
-                x = min(max(box.left(), screen.left()), screen.right() - self.width() + 1)
-                y = min(max(box.top() - self.height() - GAP, screen.top()),
-                        max(screen.top(), screen.bottom() - self.height() + 1))
-                return QPoint(x, y)
+        if box is not None:
+            screen = next((g for g, _ in screens if g.intersects(box)), primary)
+            x = min(max(box.left(), screen.left()), screen.right() - self.width() + 1)
+            y = min(max(box.top() - self.height() - GAP, screen.top()),
+                    max(screen.top(), screen.bottom() - self.height() + 1))
+            return QPoint(x, y)
         return QPoint(primary.center().x() - self.width() // 2, primary.top() + SHADOW + 4)
+
+    def _box_moved(self, box: dict | None) -> None:
+        """LOCATION.boxed: the game's minimap window found, or found elsewhere. Still where it opened by default
+        (the player hasn't moved it), the bar moves above the new box; a box gone (the minimap closed) leaves it
+        where it is."""
+        if box is not None and self.isVisible() and self._default_at is not None and self.pos() == self._default_at:
+            self._default_at = self._default_spot()
+            self.move(self._default_at)
 
     def moveEvent(self, e) -> None:
         self._geom.start()

@@ -61,11 +61,11 @@ def qapp():
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide)
-    LOCATION.here = LOCATION.follow = LOCATION.guide = None
+    old = (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box)
+    LOCATION.here = LOCATION.follow = LOCATION.guide = LOCATION.box = None
     LOCATION.state = ""
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = old
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = old
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +87,7 @@ def overlay(qapp, isolated_store, kb, clean_location, monkeypatch):
     yield w, s, clean_location
     clean_location.changed.disconnect(w.refresh)
     clean_location.status.disconnect(w.refresh)
+    clean_location.boxed.disconnect(w._box_moved)
     w.close()
 
 
@@ -414,12 +415,38 @@ def test_apply_language_retexts_and_mirrors(overlay):
 # ------------------------------------------------------------ its place on the screen
 
 
-def test_it_opens_just_right_of_the_drawn_minimap_box(overlay):
+def test_it_opens_just_right_of_the_minimap_box(overlay):
+    """Beside LOCATION.box (the minimap window found, or the box the reads use); the drawn box only while there is
+    none."""
     from maplehelper.ui import npcoverlay
     w, s, loc = overlay
-    s["minimap_region"] = {"x": 100, "y": 100, "w": 200, "h": 200}    # 1:1 on the offscreen screen
+    s["minimap_region"] = {"x": 50, "y": 40, "w": 100, "h": 100}       # drawn: the fallback
+    loc.set_box({"x": 100, "y": 100, "w": 200, "h": 200})              # 1:1 on the offscreen screen
     loc.set(_here())
     assert w.pos() == QPoint(100 + 200 + npcoverlay.GAP, 100)        # its top lined up with the box's
+    w.hide()
+    s["npc_overlay_geom"] = None                                     # (hiding kept the place)
+    loc.set_box(None)
+    w.refresh()
+    assert w.pos() == QPoint(50 + 100 + npcoverlay.GAP, 40)
+
+
+def test_a_box_found_later_moves_it_beside_the_box_until_the_player_moves_it(overlay):
+    """Opened before the minimap window was found (the screen's corner), it moves beside the box once it comes, and
+    with the box when it moves; a window the player dragged stays put, and so does one when the box goes."""
+    from maplehelper.ui import npcoverlay
+    w, _, loc = overlay
+    loc.set(_here())
+    corner = w.pos()
+    loc.set_box({"x": 100, "y": 100, "w": 200, "h": 200})
+    assert w.pos() == QPoint(100 + 200 + npcoverlay.GAP, 100) != corner
+    loc.set_box({"x": 120, "y": 90, "w": 180, "h": 220})            # the next map's minimap, another size
+    assert w.pos() == QPoint(120 + 180 + npcoverlay.GAP, 90)
+    loc.set_box(None)                                               # the minimap closed: it stays
+    assert w.pos() == QPoint(120 + 180 + npcoverlay.GAP, 90)
+    w.move(40, 50)                                                  # the player's place
+    loc.set_box({"x": 100, "y": 100, "w": 200, "h": 200})
+    assert w.pos() == QPoint(40, 50)
 
 
 def test_the_place_is_kept_when_moved_and_reopened_there(overlay):
@@ -855,10 +882,14 @@ def test_with_no_map_a_card_says_why_and_how_the_map_gets_known(overlay):
     w.refresh()
     assert w._empty.property("empty") is True and w._empty_icon.text() == npcoverlay.NO_MAP
     assert w._status.text() == "Your map isn't known yet"
-    assert w._hint.text().startswith("Maple Helper reads your map from the game's minimap. Select it")
-    s["minimap_region"] = {"x": 100, "y": 100, "w": 200, "h": 200}
-    loc.set_state("unknown")                        # the box drawn, its minimap not read yet
-    assert w._hint.text() == "Maple Helper finds it on the game's minimap: keep the minimap open inside the box you drew."
+    assert w._hint.text().startswith("Maple Helper looks for the game's minimap at the game's top left and didn't")
+    s["minimap_region"] = {"x": 100, "y": 100, "w": 200, "h": 200}  # drawn, not taken up by the reads: no LOCATION.box
+    w.refresh()
+    assert w._hint.text().startswith("Maple Helper looks for the game's minimap")
+    loc.set_box({"x": 100, "y": 100, "w": 200, "h": 200})
+    loc.set_state("unknown")                        # the minimap window found, its map not read yet
+    assert w._hint.text() == ("Maple Helper finds it on the game's minimap: keep the minimap open at the game's top "
+                              "left (or inside the box you drew).")
     assert w.height() < npcoverlay.MIN_H and w.height() >= w.layout().totalHeightForWidth(w.width())
 
 

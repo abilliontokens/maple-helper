@@ -1174,20 +1174,27 @@ STRINGS = {
     # where the player is, read from the game's minimap (ui/minimapscan.py, minimap.py)
     "minimap_select": {"he": "בחירת המיני-מפה", "en": "Select minimap"},
     "minimap_tip": {"he": "בחירת המיני-מפה: איפה אתם במשחק\n"
-                          "לחצו כאן, וגררו מסגרת סביב המיני-מפה של המשחק (הפינה עם שם המפה).\n"
-                          "מאותו רגע אני קורא אותה שוב ושוב (בהגדרות קובעים כל כמה זמן):\n"
+                          "אני מוצא לבד את המיני-מפה בפינה השמאלית העליונה של המשחק: השאירו אותה פתוחה שם.\n"
+                          "לא נמצאה? לחצו כאן וגררו מסגרת סביבה (הפינה עם שם המפה).\n"
+                          "מרגע שהיא נמצאה, אני קורא אותה שוב ושוב (בהגדרות קובעים כל כמה זמן):\n"
                           "• המפה שלכם מופיעה בכרטיס הזה, מתחת לרמה\n"
                           "• כפתור ◎ מראה את הדרך מהמפה שלכם, עם נקודה כחולה במקום שלכם\n"
                           "• \"איך מגיעים\" בכלי המשחק מתחיל מהמפה שלכם\n"
-                          "הזזתם את המיני-מפה או שיניתם את גודל החלון? לחצו שוב ובחרו מחדש.",
+                          "מסגרת שגררתם משמשת רק כשהמיני-מפה לא נמצאת. הזזתם את המשחק או שיניתם את גודלו? "
+                          "גררו אותה מחדש.",
                     "en": "Select minimap: where you are in the game\n"
-                          "Click here and drag a box around the game's minimap (the corner with the map's name).\n"
-                          "From then on, Maple Helper keeps reading it (Settings set how often):\n"
+                          "Maple Helper finds the game's minimap at the game's top left on its own: keep it open there.\n"
+                          "Not found? Click here and drag a box around it (the corner with the map's name).\n"
+                          "Once it's found, Maple Helper keeps reading it (Settings set how often):\n"
                           "• Your map shows on this card, under your level\n"
                           "• The ◎ button shows the way from your map, with a blue dot where you are\n"
                           "• \"How to get there\" in the Play tools starts from your map\n"
-                          "Moved the minimap or resized the game? Click again and draw a new box."},
-    "minimap_pick_hint": {"he": "גררו מסגרת סביב המיני-מפה במשחק.", "en": "Drag a box around the game's minimap."},
+                          "A box you drew is used only when the minimap isn't found. Moved or resized the game? "
+                          "Draw it again."},
+    "minimap_pick_hint": {"he": "גררו מסגרת סביב המיני-מפה במשחק. צריך את זה רק כש-Maple Helper לא מוצא אותה לבד "
+                                "בפינה השמאלית העליונה של המשחק.",
+                          "en": "Drag a box around the game's minimap. Only needed when Maple Helper doesn't find it "
+                                "at the game's top left on its own."},
     "minimap_scan_interval": {"he": "כל כמה זמן לקרוא את המיני-מפה", "en": "How often to read the minimap"},
     "scan_every_0_5": {"he": "חצי שנייה", "en": "Half a second"},
     "scan_every_1": {"he": "שנייה אחת", "en": "1 second"},
@@ -1213,16 +1220,19 @@ STRINGS = {
     "npc_overlay_close": {"he": "סגירה", "en": "Close"},
     "npc_overlay_clear": {"he": "ביטול הסימון", "en": "Stop guiding"},
     "npc_overlay_inside": {"he": "בתוך {place}", "en": "Inside {place}"},
-    # the empty list's card says why, and how the map gets known: the minimap box is drawn with the button beside ⟳
-    # on the chat's character card (minimap_select), and read while the game's minimap shows in it
-    "npc_overlay_unknown_nobox": {"he": "Maple Helper קורא את המפה שלכם מהמיני-מפה של המשחק. בחרו אותה בכפתור שליד ⟳ "
-                                        "בכרטיס הדמות בצ'אט.",
-                                  "en": "Maple Helper reads your map from the game's minimap. Select it with the button "
-                                        "beside ⟳ on the chat's character card."},
-    "npc_overlay_unknown_box": {"he": "Maple Helper מזהה אותה מהמיני-מפה של המשחק: השאירו את המיני-מפה פתוחה בתוך "
-                                      "המסגרת שסימנתם.",
-                                "en": "Maple Helper finds it on the game's minimap: keep the minimap open inside the "
-                                      "box you drew."},
+    # the empty list's card says why, and how the map gets known: the game's minimap window is found at the game's
+    # top left on its own (else the box drawn with the button beside ⟳ on the chat's character card, minimap_select),
+    # and read while it shows there. _nobox: no minimap window found (LOCATION.box None); _box: found, not read yet
+    "npc_overlay_unknown_nobox": {"he": "Maple Helper מחפש את המיני-מפה בפינה השמאלית העליונה של המשחק ולא מצא אותה "
+                                        "שם: פתחו אותה שם. עדיין לא נמצאה? סמנו אותה בעצמכם בכפתור שליד ⟳ בכרטיס "
+                                        "הדמות בצ'אט.",
+                                  "en": "Maple Helper looks for the game's minimap at the game's top left and didn't "
+                                        "find it there: open it there. Still not found? Select it yourself with the "
+                                        "button beside ⟳ on the chat's character card."},
+    "npc_overlay_unknown_box": {"he": "Maple Helper מזהה אותה מהמיני-מפה של המשחק: השאירו את המיני-מפה פתוחה בפינה "
+                                      "השמאלית העליונה של המשחק (או בתוך המסגרת שסימנתם).",
+                                "en": "Maple Helper finds it on the game's minimap: keep the minimap open at the "
+                                      "game's top left (or inside the box you drew)."},
     "npc_overlay_none_hint": {"he": "במאגר אין דמות במפה הזו או בבניין שנכנסים אליו ממנה.",
                               "en": "The database has no NPC on this map or in a building off it."},
     "npc_overlay_filter": {"he": "סינון: שם, תפקיד, בניין…", "en": "Filter: name, role, building…"},
@@ -1342,7 +1352,6 @@ STRINGS = {
     "search_item_ph": {"he": "שם החפץ…", "en": "Item name…"},
     "search_sell_title": {"he": "בטוח למכור?", "en": "Safe To Sell"},
     "search_sell_ph": {"he": "שם החפץ…", "en": "Item name…"},
-    "search_type_more": {"he": "הקלידו לפחות 2 אותיות", "en": "Type at least 2 letters"},
     "search_none": {"he": "לא נמצא דבר עבור „{q}”", "en": "Nothing found for “{q}”"},
     "search_more": {"he": "ועוד {n} — הקלידו עוד כדי לצמצם", "en": "and {n} more — type more to narrow it down"},
     "search_close": {"he": "סגירה", "en": "Close"},

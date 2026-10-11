@@ -332,14 +332,13 @@ def test_on_the_white_glass_the_window_turns_dark_on_light(page, card):
 def test_reads_follow_the_game_window_and_skip_a_covered_one(page, monkeypatch):
     """No box drawn: each read takes the messages box from the game's window as it is now (moved, resized), and
     reads nothing while another app's window covers it (its text was read live), saying so on the page."""
-    from maplehelper import capture
-    from maplehelper.ui import lootscan
+    from maplehelper import capture, gamearea
     d, _ = page
     scan = d.loot
     grabbed, cover = [], [False]
     windows = iter([(0, 0, 1922, 1112), (500, 300, 1368, 800), (500, 300, 1368, 800)])
-    monkeypatch.setattr(lootscan.GameArea, "find", lambda self: next(windows))
-    monkeypatch.setattr(lootscan.GameArea, "covered", lambda self, box: cover[0])
+    monkeypatch.setattr(gamearea.GameArea, "find", lambda self: next(windows))
+    monkeypatch.setattr(gamearea.GameArea, "covered", lambda self, box: cover[0])
     monkeypatch.setattr(capture, "grab_image", lambda x, y, w, h: grabbed.append((x, y, w, h)) or
                         __import__("PIL.Image", fromlist=["Image"]).new("RGB", (w, h)))
     monkeypatch.setattr(lootlog, "ocr_rows", lambda arr: [])
