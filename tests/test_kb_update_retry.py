@@ -232,7 +232,7 @@ def test_a_kb_update_reopens_the_open_kb_windows_but_not_the_one_in_use(qapp, mo
                            overlay=SimpleNamespace(show_scope=lambda: None, show_news=lambda: None, focus_keys=[],
                                                    set_tags=lambda keys: None),
                            _windows={"tools": tools, "guides": guides, "settings": settings},
-                           _reopen_call=lambda kind, dlg: lambda: reopened.append(kind))
+                           _reopen_call=lambda kind, dlg: lambda: reopened.append(kind), _ensure_routes=lambda: None)
     app.MapleHelperApp.reload_kb(fake)
     assert fake.overlay.kb == "new kb" and tools.closed and not guides.closed and not settings.closed
     for fn in shots:

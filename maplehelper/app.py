@@ -200,6 +200,7 @@ class MapleHelperApp:
         from .ui.portaldots import PortalDots
         self.portal_dots = PortalDots(self.kb, self.settings)
         self.portal_dots.refresh()
+        self._ensure_routes()      # an old KB's routes.json, without the hidden teleports: rebuilt from the site
         # the "NPCs on this map" window over the game itself (ui/npcoverlay.py), shown from its own setting; the
         # guide it sets is what the ring above draws on the game's minimap. Before any of the windows over the
         # game are made: the glass tint they all paint is taken from the settings (the ⚙ panel re-takes it live).
@@ -1469,6 +1470,34 @@ class MapleHelperApp:
             if again:                       # none: no way to bring it back as it is, leave it open
                 dlg.close()
                 QTimer.singleShot(0, again)
+        self._ensure_routes()               # the new KB's routes.json may predate the hidden teleports too
+
+    def _ensure_routes(self) -> None:
+        """A downloaded KB built before routes.json carried the hidden teleports (0.18.0's, on every platform) gave
+        no portal dots and no shop room frames: the file is rebuilt from NiaMeowDB's map data (mapdata.refresh) off
+        the GUI thread, then the KB loaded again so every window takes it. Only the downloaded KB is touched (never
+        the copy bundled in the app); offline, it is tried again on the next start or KB load."""
+        from pathlib import Path
+
+        from . import mapdata
+        from .store import USER_KB
+        root = Path(self.kb.root)
+        if getattr(self, "_routes_checking", False) or root.resolve() != USER_KB.resolve() \
+                or not mapdata.needs_refresh(root):
+            return
+        self._routes_checking = True
+
+        def work():
+            try:
+                done = mapdata.refresh(root)
+            except Exception:          # noqa: BLE001 - a read-only folder, a full disk: the dots wait, the app goes on
+                report.log.exception("routes: rebuilding routes.json failed")
+                done = False
+            self._routes_checking = False
+            if done:
+                self.main_thread.call.emit(lambda: self.reload_kb() if Path(self.kb.root) == root
+                                           and not getattr(self, "_kb_updating", False) else None)
+        threading.Thread(target=work, daemon=True, name="routes-refresh").start()
 
     def shutdown(self):
         telemetry.flush()
