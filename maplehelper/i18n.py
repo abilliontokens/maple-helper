@@ -488,9 +488,9 @@ STRINGS = {
     # where to send it: the project's GitHub Issues (UX-8, the owner's choice); "whoever helps you" named no one
     # (the file and the link each on a line of their own: inside a Hebrew sentence they wrapped in pieces)
     "report_saved_body": {"he": "פתחו דיווח ב-GitHub וצרפו אליו את הקובץ. אין בו שיחות, צילומי מסך או פרטים אישיים.\n"
-                                "{name}\ngithub.com/Maple-Helper/maple-helper/issues",
+                                "{name}\ngithub.com/abilliontokens/maple-helper/issues",
                           "en": "Open an issue on GitHub and attach the file. It has no chats, screenshots or personal "
-                                "details.\n{name}\ngithub.com/Maple-Helper/maple-helper/issues"},
+                                "details.\n{name}\ngithub.com/abilliontokens/maple-helper/issues"},
     "report_github": {"he": "פתיחת דיווח ב-GitHub", "en": "Open an issue on GitHub"},
     "update_kb": {"he": "עדכון המאגר", "en": "Update database"},
     "kb_checking": {"he": "בודק אם יש עדכון למאגר…", "en": "Checking for a database update…"},

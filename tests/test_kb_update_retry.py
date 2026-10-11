@@ -26,7 +26,7 @@ def test_a_failed_swap_says_why_in_the_log(tmp_path, monkeypatch, caplog):
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("index.json", '[{"key": "monster/1", "category": "monster"}]')
     data = buf.getvalue()
-    url = "https://github.com/Maple-Helper/maple-helper/releases/download/v1/kb.zip"
+    url = "https://github.com/abilliontokens/maple-helper/releases/download/v1/kb.zip"
     manifest = f'{{"version": "2026.02.01.0000", "url": "{url}", "sha256": "{hashlib.sha256(data).hexdigest()}"}}'
     net = {"m": manifest.encode(), url: data}
     monkeypatch.setattr(updater, "USER_KB", user_kb)
@@ -61,7 +61,7 @@ def test_a_table_build_holds_off_the_swap_and_none_starts_during_it(tmp_path, mo
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("index.json", '[{"key": "monster/1", "category": "monster"}]')
     data = buf.getvalue()
-    url = "https://github.com/Maple-Helper/maple-helper/releases/download/v1/kb.zip"
+    url = "https://github.com/abilliontokens/maple-helper/releases/download/v1/kb.zip"
     manifest = f'{{"version": "2026.02.01.0000", "url": "{url}", "sha256": "{hashlib.sha256(data).hexdigest()}"}}'
     net = {"m": manifest.encode(), url: data}
     monkeypatch.setattr(updater, "USER_KB", user_kb)

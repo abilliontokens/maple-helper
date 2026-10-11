@@ -140,10 +140,10 @@ def test_report_points_to_github_issues(env, monkeypatch):
     from maplehelper import osapi
     from maplehelper.i18n import I18n
     from maplehelper.ui import dialogs
-    assert dialogs.ISSUES_URL == "https://github.com/Maple-Helper/maple-helper/issues"
+    assert dialogs.ISSUES_URL == "https://github.com/abilliontokens/maple-helper/issues"
     for lang in ("he", "en"):
         body = I18n(lang)("report_saved_body", name="report.zip")
-        assert "github.com/Maple-Helper/maple-helper/issues" in body and "report.zip" in body
+        assert "github.com/abilliontokens/maple-helper/issues" in body and "report.zip" in body
     opened = []
     monkeypatch.setattr(osapi, "open_url", lambda url: opened.append(url) or True)
     s, profiles, kb = env

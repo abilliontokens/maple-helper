@@ -82,6 +82,11 @@ def _look_of(settings) -> tuple:
             settings["font_size"])
 
 
+def _app_look(settings) -> tuple:
+    """The saved look of the app's own windows: (tint, accent, opacity), as theme.set_look takes it."""
+    return settings["app_tint"], settings["app_accent"], settings["app_opacity"]
+
+
 class _MainThread(QObject):
     """Background checks emit here; Qt delivers the call on the GUI thread (queued connection).
 
@@ -113,14 +118,17 @@ class MapleHelperApp:
     # ------------------------------------------------------------------ startup
 
     def style(self, opacity: float | None = None) -> str:
-        theme.set_look(self.settings["app_tint"], self.settings["app_accent"], self.settings["app_opacity"])
+        # a look Settings shows and hasn't saved yet (preview_look) wins: a window opened meanwhile, the X's question
+        # among them, is built in the look the player sees (the saved one had flipped every window back under it)
+        theme.set_look(*(self.__dict__.get("_preview") or _app_look(self.settings)))
         lang = self.settings["language"] or system_language()
         self.qapp.setLayoutDirection(Qt.RightToLeft if I18n(lang).rtl else Qt.LeftToRight)
         qt_texts(self.qapp, lang)
         css = theme.stylesheet(self.font_family, self.settings["font_size"])
         # restyling the app re-polishes every open widget (the chat with its answers too): only when it changed,
-        # not each time a window opens, which held "Play tools" back for a second
-        if css != self.qapp.styleSheet():
+        # not each time a window opens, which held "Play tools" back for a second. A look Settings only shows keeps
+        # the app's own as it is (preview_look): a window built meanwhile carries the shown one itself
+        if css != self.qapp.styleSheet() and self.__dict__.get("_preview_css") is None:
             self.qapp.setStyleSheet(css)
         return css
 
@@ -716,6 +724,7 @@ class MapleHelperApp:
         def make():
             dlg = SettingsDialog(self.settings, self.profiles, self.kb, self.style)
             dlg.changed.connect(self.on_settings_changed)
+            dlg.look_previewed.connect(self.preview_look)
             dlg.update_kb_requested.connect(self.update_kb_interactive)
             dlg.history_cleared.connect(self.on_history_cleared)
             dlg.report_requested.connect(self.make_report)
@@ -776,6 +785,35 @@ class MapleHelperApp:
             self._picker_overlay_open = False
             if not self.overlay.isVisible():
                 self.overlay.show()
+
+    def preview_look(self, tint: str, accent: str, opacity: float) -> None:
+        """A look Settings shows before it is saved (look_previewed), on the open windows as the player tries it;
+        closing Settings without saving sends the saved look back here. The settings file and self._look stay as
+        they are, so Save still runs the whole restyle (on_settings_changed: the app's style sheet, texts, reopened
+        windows). A new tint or accent restyles each visible window's own copy of the style sheet (the chat,
+        Settings) and the toasts; the opacity alone only repaints (theme.set_look), every percent of a drag."""
+        from .ui.toast import Toast
+        saved = _app_look(self.settings)
+        shown = self.__dict__.get("_preview") or saved
+        look = (tint, accent, opacity)
+        self._preview = None if look == saved else look
+        theme.set_look(tint, accent, opacity)
+        if (tint, accent) != shown[:2]:
+            # not the app's own style sheet: setting it re-polishes every widget of every window, hidden ones too
+            # (0.27 s of a tile's 0.36 s with 4 answers in the chat, 0.66 of 0.9 s with 30); Save sets it
+            old = self.__dict__.get("_preview_css") or self.qapp.styleSheet()
+            css = theme.stylesheet(self.font_family, self.settings["font_size"])
+            self._preview_css = None if css == self.qapp.styleSheet() else css
+            if old and css != old:
+                for w in QApplication.topLevelWidgets():
+                    sheet = w.styleSheet()
+                    if w.isVisible() and sheet.startswith(old):     # built with style(): in the look shown till now
+                        w.setStyleSheet(css + sheet[len(old):])
+            for toast in list(Toast._live):
+                toast.restyle()
+        for w in QApplication.topLevelWidgets():
+            if w.isVisible():
+                w.update()                  # paint_glass reads the tint and the opacity as it paints
 
     def _reopen_windows_in_new_look(self):
         """A language or look change: the other open windows (tools, guides, history...) were built in the old one
@@ -936,6 +974,7 @@ class MapleHelperApp:
         threading.Thread(target=self.brain.prewarm, daemon=True).start()
 
     def on_settings_changed(self):
+        self._preview = self._preview_css = None    # a look Settings showed (preview_look) is saved now: style() sets it
         telemetry.set_enabled(self.settings["telemetry"])
         presence.set_enabled(self.settings["presence"])
         from .ui import terms

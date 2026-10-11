@@ -9,7 +9,7 @@ import pytest
 from maplehelper import updater
 
 MANIFEST = "https://example.test/kb-manifest.json"
-ZIP_URL = "https://github.com/Maple-Helper/maple-helper/releases/download/kb-2026.02.01/kb.zip"
+ZIP_URL = "https://github.com/abilliontokens/maple-helper/releases/download/kb-2026.02.01/kb.zip"
 
 
 def make_zip(files: dict[str, str]) -> bytes:
@@ -104,12 +104,12 @@ def test_manifest_url_uses_latest_release():
 
 # ---------------------------------------------------------------- app self-update
 
-API = "https://api.github.com/repos/Maple-Helper/maple-helper/releases/latest"
+API = "https://api.github.com/repos/abilliontokens/maple-helper/releases/latest"
 SETUP = b"MZ fake installer bytes"
 
 
 def dl(tag: str, name: str) -> str:
-    return f"https://github.com/Maple-Helper/maple-helper/releases/download/{tag}/{name}"
+    return f"https://github.com/abilliontokens/maple-helper/releases/download/{tag}/{name}"
 
 
 @pytest.fixture
@@ -199,8 +199,8 @@ def test_sums_line_with_binary_marker(app_env):
 
 def test_mac_update_notice_names_the_new_release(app_env):
     _, _, publish = app_env
-    publish(tag="v0.4.0", html_url="https://github.com/Maple-Helper/maple-helper/releases/tag/v0.4.0")
-    assert updater.newer_release("0.3.0") == ("0.4.0", "https://github.com/Maple-Helper/maple-helper/releases/tag/v0.4.0")
+    publish(tag="v0.4.0", html_url="https://github.com/abilliontokens/maple-helper/releases/tag/v0.4.0")
+    assert updater.newer_release("0.3.0") == ("0.4.0", "https://github.com/abilliontokens/maple-helper/releases/tag/v0.4.0")
 
 
 @pytest.mark.parametrize("kwargs", [{"tag": "v0.3.0"}, {"tag": "v0.4.0", "prerelease": True}])
@@ -305,7 +305,7 @@ def test_only_an_installed_copy_self_updates(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("kwargs", [
     {"setup_url": "https://evil.example/MapleHelper-Setup.exe"},                    # not this repository
-    {"setup_url": "http://github.com/Maple-Helper/maple-helper/releases/download/v0.2.0/MapleHelper-Setup.exe"},
+    {"setup_url": "http://github.com/abilliontokens/maple-helper/releases/download/v0.2.0/MapleHelper-Setup.exe"},
     {"setup_url": "https://github.com/someone/fork/releases/download/v0.2.0/MapleHelper-Setup.exe"},
     {"setup_url": dl("v0.1.5", "MapleHelper-Setup.exe")},                          # another release's file
     {"size": len(SETUP) + 1},                                                     # GitHub lists another size
@@ -338,7 +338,7 @@ def test_never_a_downgrade_even_from_a_cached_installer(app_env):
 
 @pytest.mark.parametrize("change", [
     {"url": "https://evil.example/kb.zip"},
-    {"url": "http://github.com/Maple-Helper/maple-helper/releases/download/kb-2026.02.01/kb.zip"},
+    {"url": "http://github.com/abilliontokens/maple-helper/releases/download/kb-2026.02.01/kb.zip"},
     {"sha": "not-a-hash"},
     {"version": "2099.01.01/../x"},
 ])
@@ -355,15 +355,16 @@ def test_kb_only_from_this_repository_with_a_real_checksum(env, change):
 
 
 def test_release_url_check():
-    ok = "https://github.com/Maple-Helper/maple-helper/releases/download/v1.2.3/MapleHelper-Setup.exe"
+    ok = "https://github.com/abilliontokens/maple-helper/releases/download/v1.2.3/MapleHelper-Setup.exe"
     assert updater.release_url_ok(ok, "v1.2.3", "MapleHelper-Setup.exe")
     assert not updater.release_url_ok(ok, "v1.2.4", "MapleHelper-Setup.exe")
     assert not updater.release_url_ok(ok + "?x=1")
     assert not updater.release_url_ok(None)
 
 
-def test_a_manifest_naming_the_repository_before_it_moved_is_accepted():
+def test_a_manifest_naming_the_official_or_the_first_repository_is_accepted():
     from maplehelper import updater
+    assert updater.release_url_ok("https://github.com/abilliontokens/maple-helper/releases/latest/download/kb.zip")
     assert updater.release_url_ok("https://github.com/Maple-Helper/maple-helper/releases/latest/download/kb.zip")
     assert updater.release_url_ok("https://github.com/Amitaflalo1995/maple-helper/releases/latest/download/kb.zip")
     assert not updater.release_url_ok("https://github.com/someone-else/maple-helper/releases/latest/download/kb.zip")

@@ -365,7 +365,7 @@ def test_minimap_label_doesnt_repeat_the_unit():
 def test_startup_failure_names_the_issues_address():
     from maplehelper import setupwait
     for lang in ("he", "en"):
-        assert "github.com/Maple-Helper/maple-helper/issues" in setupwait.STARTUP_TEXT[lang]
+        assert "github.com/abilliontokens/maple-helper/issues" in setupwait.STARTUP_TEXT[lang]
         assert "%s" in setupwait.STARTUP_TEXT[lang]
     assert "Report a problem" not in setupwait.STARTUP_TEXT["en"]
     assert "issues" in setupwait.MAC_TEXT["startup"]["en"] and "Mac" in setupwait.MAC_TEXT["startup"]["en"]

@@ -1,5 +1,24 @@
 [
  {
+  "version": "0.19.0",
+  "he": [
+   "סרגל כלים מעל המשחק: דמויות כאן, חיפוש מפלצות ודמויות, מפות, חפצים ו\"בטוח למכור?\", יומן השלל, וכפתור \"כלים\" עם תכנון מגילות, שדרוג ציוד וקראפטינג. גוררים את הקצוות כדי לשנות את האורך, ואפשר להעמיד אותו כטור.",
+   "חלונות מעל המשחק: הדמויות במפה שלכם עם טבעת על המיני-מפה של המשחק לדמות שבחרתם, ונקודות כחולות על המיני-מפה במקומות של פורטלים נסתרים.",
+   "תכנון מגילות, יועץ שדרוג ציוד ויועץ קראפטינג עם תוכנית Forge: מה להכין, מה לפארם ובאיזה סדר.",
+   "המיני-מפה נמצאת לבד בפינה השמאלית העליונה של המשחק, גם כשמזיזים את חלון המשחק או משנים רזולוציה. מסגרת שגוררים נחוצה רק כשהיא לא נמצאת.",
+   "מראה משלכם: בהגדרות > מראה בוחרים לחלונות של Maple Helper צבע זכוכית (גם לבן), צבע הדגשה ואטימות, ורואים את השינוי מיד. לסרגל ולחלונות שמעל המשחק יש מראה משלהם בכפתור גלגל השיניים.",
+   "החיפושים מציגים את 50 התוצאות הראשונות עוד לפני שמקלידים, והעדכונים מגיעים מעכשיו מהגרסה הזאת של Maple Helper (abilliontokens)."
+  ],
+  "en": [
+   "A toolbar over the game: NPCs Here, the Monsters & NPCs, Maps, Items and Safe To Sell searches, the Loot Log, and a Tools button with the Scroll Planner, Gear Upgrades and Crafting. Drag its ends to change its length, or stand it upright as a column.",
+   "Windows over the game: the NPCs on your map, with a ring on the game's minimap around the one you picked, and blue dots on the minimap where hidden portals are.",
+   "Scroll Planner, Gear Upgrade advisor and Crafting advisor with a Forge plan: what to make, what to farm and in which order.",
+   "The minimap is found on its own at the game's top left, also after you move the game window or change the resolution. A box you draw is only needed when it isn't found.",
+   "Your own look: Settings > Appearance picks Maple Helper's glass colour (White too), accent colour and opacity, and you see each change right away. The toolbar and the windows over the game keep their own look, set from its gear button.",
+   "The searches list their first 50 results before you type, and updates now come from this edition of Maple Helper (abilliontokens)."
+  ]
+ },
+ {
   "version": "0.17.0",
   "he": [
    "מחיר פריט: מחירי Free Market אמיתיים, מכירות שבוצעו בפועל בחנויות של שחקנים (MesoWatch): מחיר מכירה רגיל, מכירה אחרונה וכמה מכירות היו. \"כל הפרטים\" פותח חלון עם איפה לקנות (מהזול ליקר, עם הדמות של בעל החנות) ומכירות אחרונות.",
