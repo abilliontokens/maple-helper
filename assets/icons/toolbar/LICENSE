@@ -1,7 +1,8 @@
 The icons in this folder are Lucide icons (https://lucide.dev, https://github.com/lucide-icons/lucide), copied
 unchanged as SVG files named as in Lucide: users, ghost, map, backpack, coins, car-taxi-front, scroll-text, sparkles,
-shield, hammer, settings, x, grip-vertical, rotate-ccw and check. Maple Helper recolours them when it draws them
-(maplehelper/ui/gametoolbar.py). Lucide's license follows; x and check are among the icons Lucide derives from Feather,
+shield, hammer, settings, x, grip-vertical, grip-horizontal, circle, rotate-ccw and check. Maple Helper recolours them
+when it draws them (maplehelper/ui/gametoolbar.py). Lucide's license follows; x and check are among the icons Lucide
+derives from Feather,
 whose MIT license is below it.
 
 ISC License
