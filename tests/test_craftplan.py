@@ -397,6 +397,15 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def default_look():
+    """Every test ends on today's dark glass (apply_look is module state every window over the game reads)."""
+    yield
+    from maplehelper.ui import npcoverlay
+
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture
 def settings(isolated_store):
     return isolated_store.Settings()
@@ -600,6 +609,43 @@ def test_window_follows_the_accent_in_both_windows(qapp, settings, win):
     win.refresh()
     for w in (win, plan):
         assert "#3D8BD6" in w.styleSheet() and "#2E9E5B" not in w.styleSheet()
+
+
+def test_window_follows_the_white_glass_in_both_windows(qapp, settings, win):
+    """On the white glass both windows' every text is dark — the sheet, the stage badges and the red (ink), a step's
+    muted aside written into its html — and back on the dark glass today's light text returns."""
+    from PySide6.QtWidgets import QLabel
+
+    from maplehelper.ui import npcoverlay
+    from maplehelper.ui.craftadvisor import BADGE_COLORS, LOSS
+
+    def asides(plan) -> str:
+        """The shown steps' names with a muted aside (a redraw's old rows linger hidden until deleted)."""
+        steps = plan.findChildren(QLabel, "StepName")
+        return " ".join(lb.text() for lb in steps if "<span" in lb.text() and lb.isVisibleTo(plan))
+
+    settings["craft_advisor"] = True
+    win.refresh()
+    plan = win.plan_window
+    assert npcoverlay.DARK.text in win.styleSheet() and npcoverlay.DARK.muted in asides(plan)
+    settings["overlay_tint"] = "white"
+    npcoverlay.apply_look(settings)
+    win.refresh()  # as the app does after the ⚙ panel's pick
+    _pump(qapp)  # the plan's redrawn rows shown
+    sheet = win.styleSheet()
+    assert plan.styleSheet() == sheet
+    assert f"color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.LIGHT.muted in sheet
+    assert npcoverlay.DARK.text not in sheet and "255,255,255" not in sheet and "235,235,245" not in sheet
+    for colour in (*BADGE_COLORS.values(), LOSS):
+        assert f"color: {npcoverlay.ink(colour)};" in sheet and f"color: {colour};" not in sheet
+    assert npcoverlay.LIGHT.muted in asides(plan) and npcoverlay.DARK.muted not in asides(plan)
+    settings["overlay_tint"] = "dark"
+    npcoverlay.apply_look(settings)
+    win.refresh()
+    _pump(qapp)
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
+    assert plan.styleSheet() == sheet and npcoverlay.DARK.muted in asides(plan)
 
 
 def test_window_bag_and_exp_edits_are_saved(qapp, settings, win, profiles):

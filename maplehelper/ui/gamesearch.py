@@ -29,8 +29,8 @@ from . import mapview, theme
 from .controls import FlowLayout, Segmented
 from .glass import SHADOW, EdgeResize
 from .location import LOCATION
-from .npcoverlay import (BOTTOM, FILL1, FILL2, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TEXT, TOP,
-                         _Header, _flags, _paint_glass, accent_of, direction, dock_beside, set_capturable)
+from .npcoverlay import (BOTTOM, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TOP, Palette, _Header, _flags,
+                         _paint_glass, accent_of, direction, dock_beside, ink, palette, set_capturable)
 from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
@@ -52,42 +52,54 @@ MAP_PIC = (44, 30)                 # a map row's picture: its minimap, wider tha
 HEAD_PIC = 52                      # the page's header picture
 HEAD_MAP = (80, 52)                # ...a map's
 SRC_CAP = 12                       # droppers, sellers, quests and recipes listed, then "and N more"
-SCROLLBAR_W = 8                    # the body's scrollbar (QSS below): pictures stay clear of it
+SCROLLBAR_W = 8                    # the body's scrollbar (glass_qss below): pictures stay clear of it
 BLOCK_PAD = 6                      # a page block's inside margin, left and right: its pictures stay clear of it
 NO_NUM = "\u2014"                  # an end number the KB doesn't have (no NPC buys it): a muted dash, why on hover
-# the chips' colours, each readable on every glass tint (the accent only lights what is picked): a monster amber, a
-# boss red, an NPC blue; why to keep an item — its quests violet, its recipes blue, a quest that comes back grey —
-# or safe to sell green
+# the chips' colours, each readable on every dark glass tint (on the white one npcoverlay.ink darkens them; the accent
+# only lights what is picked): a monster amber, a boss red, an NPC blue; why to keep an item — its quests violet, its
+# recipes blue, a quest that comes back grey — or safe to sell green
 TONES = {"monster": "#FFB066", "boss": "#FF8A80", "npc": "#64B5FF", "quest": "#C9A0FF", "craft": "#64B5FF",
          "repeat": "#B8BCC6", "safe": "#4CD07D", "keep": "#FFB066"}
 
-# the same dark glass as the NPCs window (its own panel, whatever theme the app's windows are in); the other windows
-# over the game build on it (qss below adds this window's own rows, chips and blocks)
-QSS = f"""
-#Title {{ color: {TEXT}; font-weight: 600; }}
-#Status {{ color: {MUTED}; }}
-#Lives {{ color: {MUTED}; font-size: 11px; font-weight: 600; padding: 6px 2px 0 2px; }}
-#GuideLine {{ color: {TEXT}; }}
-#StepMap {{ color: {TEXT}; font-weight: 700; padding: 6px 2px 0 2px; }}
-#DetailName {{ color: {TEXT}; font-weight: 700; font-size: 15px; }}
-QLineEdit {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px; padding: 6px 10px; }}
-QLineEdit:focus {{ background: {FILL2}; }}
-QFrame#Row {{ background: {FILL1}; border: none; border-radius: 8px; }}
-QFrame#Row:hover {{ background: {FILL2}; }}
-#Name {{ background: transparent; color: {TEXT}; font-weight: 600; }}
-#Sub {{ background: transparent; color: {MUTED}; }}
-QPushButton {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px;
+
+def rim(alpha: float, p: Palette | None = None) -> str:
+    """The glass's own line colour (white on the dark tints, black on the white one: Palette.rim) at this opacity,
+    for what is drawn faintly on it: a scrollbar's handle, a block's card, a dashed outline."""
+    r, g, b = (p or palette()).rim
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def glass_qss(p: Palette | None = None) -> str:
+    """The NPCs window's own glass look, which every other window over the game builds on (qss below adds this
+    window's own rows, chips and blocks): its texts, typing box, rows, buttons and scrollbar, in the colours of the
+    glass under them now (npcoverlay.palette(); `p`: those of another). Built again whenever a window restyles,
+    never kept: the white glass takes dark text."""
+    p = p or palette()
+    return f"""
+#Title {{ color: {p.text}; font-weight: 600; }}
+#Status {{ color: {p.muted}; }}
+#Lives {{ color: {p.muted}; font-size: 11px; font-weight: 600; padding: 6px 2px 0 2px; }}
+#GuideLine {{ color: {p.text}; }}
+#StepMap {{ color: {p.text}; font-weight: 700; padding: 6px 2px 0 2px; }}
+#DetailName {{ color: {p.text}; font-weight: 700; font-size: 15px; }}
+QLineEdit {{ background: {p.fill1}; color: {p.text}; border: none; border-radius: 8px; padding: 6px 10px; }}
+QLineEdit:focus {{ background: {p.fill2}; }}
+QFrame#Row {{ background: {p.fill1}; border: none; border-radius: 8px; }}
+QFrame#Row:hover {{ background: {p.fill2}; }}
+#Name {{ background: transparent; color: {p.text}; font-weight: 600; }}
+#Sub {{ background: transparent; color: {p.muted}; }}
+QPushButton {{ background: {p.fill1}; color: {p.text}; border: none; border-radius: 8px;
               padding: 6px 10px; text-align: left; }}
-QPushButton:hover {{ background: {FILL2}; }}
-QPushButton#Back {{ background: transparent; color: {MUTED}; padding: 2px 4px; }}
-QPushButton#Back:hover {{ background: {FILL2}; color: {TEXT}; }}
-QToolButton {{ background: transparent; color: {MUTED}; border: none; border-radius: 6px;
+QPushButton:hover {{ background: {p.fill2}; }}
+QPushButton#Back {{ background: transparent; color: {p.muted}; padding: 2px 4px; }}
+QPushButton#Back:hover {{ background: {p.fill2}; color: {p.text}; }}
+QToolButton {{ background: transparent; color: {p.muted}; border: none; border-radius: 6px;
               padding: 2px 7px; font-size: 13px; }}
-QToolButton:hover {{ background: {FILL2}; color: {TEXT}; }}
+QToolButton:hover {{ background: {p.fill2}; color: {p.text}; }}
 QScrollArea {{ background: transparent; border: none; }}
 #Rows {{ background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR_W}px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: rgba(255,255,255,0.25); border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: {rim(0.25, p)}; border-radius: 4px; min-height: 30px; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 """
@@ -100,36 +112,38 @@ def _rgba(color: str, alpha: float) -> str:
 
 
 def qss(settings) -> str:
-    """Both windows' own style: the glass's (QSS), then the rows, chips, header card and blocks, the picked row and
-    the switch's lit segment in the accent the settings pick (npcoverlay.ACCENTS; the glass itself is painted in the
-    tint by _paint_glass). Built again whenever the accent is picked, so both windows follow."""
+    """Both windows' own style: the glass's (glass_qss), then the rows, chips, header card and blocks, the picked row
+    and the switch's lit segment in the accent the settings pick (npcoverlay.ACCENTS; the glass itself is painted in
+    the tint by _paint_glass), all in the colours of the glass under them (npcoverlay.palette(); the chips' through
+    ink). Built again whenever the look is picked, so both windows follow."""
+    p = palette()
     fill, on_fill = accent_of(settings)
     tones = "\n".join(f'QLabel#Chip[tone="{k}"], QLabel#Verdict[tone="{k}"] {{ color: {c}; '
-                      f'background: {_rgba(c, 0.16)}; }}' for k, c in TONES.items())
-    return QSS + f"""
+                      f'background: {_rgba(c, 0.16)}; }}' for k, c in ((k, ink(c)) for k, c in TONES.items()))
+    return glass_qss(p) + f"""
 QLabel {{ background: transparent; }}
 QFrame#Row {{ border-radius: 10px; }}
 QFrame#Row[flat="true"] {{ background: transparent; }}
-QFrame#Row[flat="true"]:hover {{ background: {FILL1}; }}
+QFrame#Row[flat="true"]:hover {{ background: {p.fill1}; }}
 QFrame#Row[sel="true"] {{ background: {_rgba(fill, 0.26)}; }}
 QFrame#Row[sel="true"]:hover {{ background: {_rgba(fill, 0.34)}; }}
 #Name {{ font-size: 13px; }}
 #Sub {{ font-size: 12px; }}
-QLabel#Chip {{ color: {TEXT}; background: {FILL2}; border-radius: 6px; padding: 1px 6px; font-size: 11px;
+QLabel#Chip {{ color: {p.text}; background: {p.fill2}; border-radius: 6px; padding: 1px 6px; font-size: 11px;
               font-weight: 700; }}
 {tones}
-#Num {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#NoNum {{ color: {MUTED}; font-size: 13px; }}
-#Unit {{ color: {MUTED}; font-size: 10px; }}
-QFrame#HeadCard {{ background: {FILL1}; border: none; border-radius: 12px; }}
-QFrame#Block {{ background: rgba(255,255,255,0.05); border: none; border-radius: 12px; }}
-#BlockTitle {{ color: {TEXT}; font-size: 12px; font-weight: 700; padding: 0 4px 2px 4px; }}
-#BlockNote {{ color: {MUTED}; padding: 0 4px; }}
+#Num {{ color: {p.text}; font-size: 13px; font-weight: 700; }}
+#NoNum {{ color: {p.muted}; font-size: 13px; }}
+#Unit {{ color: {p.muted}; font-size: 10px; }}
+QFrame#HeadCard {{ background: {p.fill1}; border: none; border-radius: 12px; }}
+QFrame#Block {{ background: {rim(0.05, p)}; border: none; border-radius: 12px; }}
+#BlockTitle {{ color: {p.text}; font-size: 12px; font-weight: 700; padding: 0 4px 2px 4px; }}
+#BlockNote {{ color: {p.muted}; padding: 0 4px; }}
 QLabel#Verdict {{ border-radius: 10px; padding: 5px 14px; font-size: 15px; font-weight: 700; }}
-#Segmented {{ background: {FILL1}; border: none; border-radius: 10px; }}
-QPushButton#Segment {{ background: transparent; color: {MUTED}; border: none; border-radius: 8px; min-height: 26px;
+#Segmented {{ background: {p.fill1}; border: none; border-radius: 10px; }}
+QPushButton#Segment {{ background: transparent; color: {p.muted}; border: none; border-radius: 8px; min-height: 26px;
                        max-height: 26px; padding: 0 10px; font-size: 12px; font-weight: 600; text-align: center; }}
-QPushButton#Segment:hover:!checked {{ background: {FILL2}; color: {TEXT}; }}
+QPushButton#Segment:hover:!checked {{ background: {p.fill2}; color: {p.text}; }}
 QPushButton#Segment:checked {{ background: {fill}; color: {on_fill}; font-weight: 700; }}
 """
 
@@ -1220,7 +1234,7 @@ class DetailWindow(EdgeResize, QWidget):
 
 
 class GameSearch(EdgeResize, QWidget):
-    """The search window itself: over the game, in the NPCs window's dark glass, but taking the keyboard (the
+    """The search window itself: over the game, in the NPCs window's glass, but taking the keyboard (the
     player types in it; Esc or the ✕ gives it back). The toolbar opens it in a mode — the same mode again is a
     toggle off — and each mode keeps its last query (Safe to sell? its switch too). A click opens the thing's own
     page in the detail window beside this one, the results still listed and the clicked row lit in the accent
@@ -1314,8 +1328,9 @@ class GameSearch(EdgeResize, QWidget):
         _paint_glass(self, self._opacity)
 
     def _restyle(self) -> None:
-        """The accent the settings pick, in both windows' style sheets (their glass is painted in the tint by
-        _paint_glass); set again only when it changed — a restyle re-polishes every row."""
+        """The accent the settings pick and the glass's colours (npcoverlay.palette(): dark text on the white glass),
+        in both windows' style sheets (their glass is painted in the tint by _paint_glass); set again only when it
+        changed — a restyle re-polishes every row."""
         sheet = qss(self._settings)
         for w in (self, self._detail):
             if sheet != w.styleSheet():
@@ -1345,8 +1360,8 @@ class GameSearch(EdgeResize, QWidget):
 
     def _read_opacity(self) -> None:
         """The look the ⚙ panel and Settings pick, taken again on every open and by the app whenever it changes:
-        the NPCs window's opacity for the glass (the same dark glass, as see-through as the player asked), and the
-        accent in both windows' style sheets."""
+        the NPCs window's opacity for the glass (the same glass, as see-through as the player asked), and the
+        accent and the glass's colours (npcoverlay.palette()) in both windows' style sheets."""
         try:
             self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, float(self._settings["npc_overlay_opacity"])))
         except (TypeError, ValueError):

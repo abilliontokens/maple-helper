@@ -88,20 +88,27 @@ def test_refresh_keeps_the_button_in_step_with_the_setting(bar):
     assert w._npcs.isChecked() is False
 
 
-def test_the_cabs_and_teleports_button_is_its_setting_off_at_first(bar):
-    """Off on a new install: the way to a found NPC walks until the player turns cabs and NPC teleports on."""
+def test_cabs_and_teleports_is_a_switch_in_the_gear_panel_off_at_first(bar):
+    """Off on a new install: the way to a found NPC walks until the player turns cabs and NPC teleports on, in the ⚙
+    panel's Directions (no button on the bar any more); each flip is written and said with the bar's rides_toggled,
+    which the app follows."""
     w, s = bar
     w.refresh()
+    assert "tb_rides" not in [key for _, key in w._buttons()]
     seen = []
     w.rides_toggled.connect(lambda: seen.append(s["game_rides"]))
-    # "&&" shows as "&": a lone "&" was Qt's shortcut mark, the label read "Cabs _Teleports" (render, 2026-10-10)
-    assert w._rides.text() == "Cabs && Teleports" and w._rides.isChecked() is False and s["game_rides"] is False
-    w._rides.click()
-    w._rides.click()
+    w._gear.click()
+    p = w._panel
+    assert p._way_head.text() == "DIRECTIONS" and p._rides_label.text() == "Cabs & Teleports"
+    assert p._rides.isChecked() is False and s["game_rides"] is False
+    p._rides.click()
+    p._rides.click()
     assert seen == [True, False]
-    s["game_rides"] = True              # a setting kept from last time: the button opens on
+    s["game_rides"], s["overlay_accent"] = True, "pink"     # kept from last time: the switch opens on
     w.refresh()
-    assert w._rides.isChecked() is True
+    assert p._rides.isChecked() is True and p._reset.isEnabled()
+    p._reset.click()                    # no look: Reset leaves it
+    assert s["game_rides"] is True and s["overlay_accent"] == "green"
 
 
 # ------------------------------------------------------------ the searches
@@ -147,10 +154,11 @@ def test_the_loot_log_button_is_the_loot_windows_setting(bar):
     assert w._loot.isChecked()
 
 
-@pytest.mark.parametrize("key,text", [("scroll_planner", "Scrolls"), ("gear_advisor", "Gear")])
-def test_each_tool_button_is_its_windows_setting(bar, key, text):
-    """Scrolls and Gear, after Loot Log: each flips its window's setting and names it in tool_toggled, and refresh
-    follows the setting (the window's ✕ turned it off)."""
+@pytest.mark.parametrize("key,text", [("scroll_planner", "Scrolls"), ("gear_advisor", "Gear"),
+                                      ("craft_advisor", "Crafting")])
+def test_each_tool_in_the_tools_card_is_its_windows_setting(bar, key, text):
+    """Scrolls, Gear and Crafting, in the Tools card: each flips its window's setting and names it in tool_toggled,
+    and refresh follows the setting (the window's ✕ turned it off)."""
     w, s = bar
     w.refresh()
     seen = []
@@ -163,6 +171,72 @@ def test_each_tool_button_is_its_windows_setting(bar, key, text):
     w.refresh()
     assert w._tools[key].isChecked()
     assert [k for k in w._tools if w._tools[k].isChecked()] == [key]     # the other ones stay off
+
+
+def test_tools_opens_its_card_under_the_bar_and_a_pick_tools_again_or_a_move_closes_it(bar):
+    """Tools, after Loot Log, lit while its card is up; the card under the lying bar holds the three tools. It goes
+    on a pick (the window opening), on Tools again, and when the bar is dragged away."""
+    from maplehelper.ui import gametoolbar
+    w, s = bar
+    w.refresh()
+    keys = [key for _, key in w._buttons()]
+    assert keys[keys.index("tb_loot") + 1] == "tb_tools" and w._tools_btn.text() == "Tools"
+    assert [b.text() for b in w._tools.values()] == ["Scrolls", "Gear", "Crafting"] and not w._menu.isVisible()
+    w._tools_btn.click()
+    m = w._menu
+    assert m.isVisible() and w._tools_btn.property("on") is True
+    assert m.y() + gametoolbar.SHADOW > w.y() + w.height() - gametoolbar.SHADOW     # its glass below the bar's
+    w._tools["gear_advisor"].click()
+    assert not m.isVisible() and s["gear_advisor"] is True and w._tools_btn.property("on") is False
+    w._tools_btn.click()
+    w._tools_btn.click()
+    assert not m.isVisible()
+    w._tools_btn.click()
+    w.move(w.x() + 5, w.y())
+    assert not m.isVisible()
+
+
+def test_the_tools_card_stands_beside_an_upright_bar(bar):
+    from maplehelper.ui import gametoolbar
+    w, s = bar
+    s["game_toolbar_vertical"] = True
+    w.refresh()
+    w._tools_btn.click()
+    m = w._menu
+    assert m.x() + gametoolbar.SHADOW > w.x() + w.width() - gametoolbar.SHADOW      # at its side, not under it
+    assert abs(m.y() + gametoolbar.SHADOW - w._tools_btn.mapToGlobal(QPoint(0, 0)).y()) <= 8
+
+
+def test_the_tools_card_goes_once_the_mouse_has_been_away_a_second(bar, monkeypatch):
+    """It takes no focus to lose: the mouse off the card and the Tools button for AWAY_MS closes it, and the mouse
+    back over either before that keeps it."""
+    from types import SimpleNamespace
+
+    from maplehelper.ui import gametoolbar
+    w, _ = bar
+    w.refresh()
+    w._tools_btn.click()
+    m = w._menu
+    clock, where = [100.0], [m.frameGeometry().center()]
+    monkeypatch.setattr(gametoolbar, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(gametoolbar, "QCursor", SimpleNamespace(pos=lambda: where[0]))
+    m._check_away()
+    where[0] = QPoint(-5000, -5000)
+    m._check_away()
+    clock[0] += 0.9
+    m._check_away()
+    assert m.isVisible()
+    where[0] = w._tools_btn.mapToGlobal(QPoint(2, 2))           # back over the button: the wait starts over
+    m._check_away()
+    where[0] = QPoint(-5000, -5000)
+    clock[0] += 0.5
+    m._check_away()
+    clock[0] += 0.9
+    m._check_away()
+    assert m.isVisible()
+    clock[0] += gametoolbar.AWAY_MS / 1000
+    m._check_away()
+    assert not m.isVisible() and w._tools_btn.property("on") is False
 
 
 def test_the_x_turns_the_setting_off_hides_and_says_so(bar):
@@ -386,7 +460,7 @@ def test_every_button_has_its_line_icon_in_its_texts_colours(bar):
         assert not b.icon().isNull() and b.text(), key
     size = QSize(gametoolbar.WORD_ICON_PX, gametoolbar.WORD_ICON_PX)
     _, on_fill = npcoverlay.accent_of(s)
-    assert npcoverlay.TEXT.lower() in _colours(w._search["map"].icon(), size, QIcon.Off)
+    assert npcoverlay.DARK.text.lower() in _colours(w._search["map"].icon(), size, QIcon.Off)
     assert on_fill.lower() in _colours(w._search["map"].icon(), size, QIcon.On)
     w.set_search_mode("map")                   # lit by its mode, not checked
     assert _colours(w._search["map"].icon(), size, QIcon.Off) == {on_fill.lower()}
@@ -421,21 +495,52 @@ def test_the_icons_choice_shows_each_icon_alone_with_its_name_in_the_tooltip(bar
     assert w.width() > icons_wide              # the words take more room
 
 
-def test_the_transparency_slider_lands_on_a_step_and_writes_the_shared_setting(bar):
-    """The slider runs over the steps the windows over the game share (OPACITY_STEPS): a click lands on the
-    nearest one, written to npc_overlay_opacity and on the bar's and the panel's glass at once, its % beside it."""
-    from maplehelper.ui import npcoverlay
+def test_the_transparency_slider_takes_any_percent_and_writes_the_shared_setting(bar):
+    """No steps: a click anywhere on the track sets the whole percent under it, written to npc_overlay_opacity and
+    on the bar's and the panel's glass at once, its % beside it; every other window follows once the mouse lets go
+    (look_changed), not at each percent of a drag."""
     w, s = bar
+    seen = []
+    w.look_changed.connect(lambda: seen.append(s["npc_overlay_opacity"]))
     w.refresh()
     w._gear.click()
     p = w._panel
     sl = p._slider
-    assert sl._n == len(npcoverlay.OPACITY_STEPS) and sl.index() == npcoverlay.OPACITY_STEPS.index(0.85)
-    QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(round(sl._x(1)) + 3, sl.height() // 2))
-    assert s["npc_overlay_opacity"] == npcoverlay.OPACITY_STEPS[1] == 0.5
-    assert w._opacity == 0.5 and p._opacity == 0.5 and p._opacity_value.text() == "50%"
+    assert sl.value() == 0.85
+    at = QPoint(round(sl._x(0.57)), sl.height() // 2)
+    QTest.mousePress(sl, Qt.LeftButton, pos=at)
+    assert s["npc_overlay_opacity"] == 0.57 and seen == []
+    assert w._opacity == 0.57 and p._opacity == 0.57 and p._opacity_value.text() == "57%"
+    QTest.mouseRelease(sl, Qt.LeftButton, pos=at)
+    assert seen == [0.57]
     QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(sl.width() - 1, sl.height() // 2))
-    assert s["npc_overlay_opacity"] == 1.0 and p._opacity_value.text() == "100%"
+    assert s["npc_overlay_opacity"] == 1.0 and p._opacity_value.text() == "100%" and seen == [0.57, 1.0]
+
+
+def test_the_white_glass_turns_the_bar_its_card_and_the_panel_dark_on_light_and_back(bar):
+    """White picked: the bar's, the Tools card's, the panel's and its key box's styles in the light palette's dark
+    text, none of the dark glass's light text or white fills left, the icons drawn dark, the white tile's check
+    dark on it; dark picked again, all of it back."""
+    from maplehelper.ui import gametoolbar, npcoverlay
+    w, s = bar
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    size = QSize(gametoolbar.WORD_ICON_PX, gametoolbar.WORD_ICON_PX)
+    sheets = lambda: (w.styleSheet(), w._menu.styleSheet(), p.styleSheet(), p._hotkey.styleSheet())  # noqa: E731
+    light, dark = npcoverlay.LIGHT, npcoverlay.DARK
+    p._pick_tint("white")
+    assert npcoverlay.current_tint() == npcoverlay.TINTS["white"][1] and npcoverlay.palette() is light
+    for sheet in sheets():
+        assert light.text in sheet and dark.text not in sheet and "255,255,255" not in sheet
+    for icon in (w._search["map"].icon(), w._tools["gear_advisor"].icon()):
+        assert light.text.lower() in _colours(icon, size, QIcon.Off)
+    white = next(b for b in p._tints.findChildren(QPushButton) if b.property("key") == "white")
+    assert _colours(white._check, QSize(16, 16), QIcon.Off) == {light.text.lower()}
+    p._pick_tint("dark")
+    for sheet in sheets():
+        assert dark.text in sheet and light.text not in sheet
+    assert dark.text.lower() in _colours(w._search["map"].icon(), size, QIcon.Off)
 
 
 def test_each_look_choice_is_written_and_followed_live(bar):
@@ -474,7 +579,8 @@ def test_reset_puts_the_default_look_back_and_keeps_the_key(bar):
     p._reset.click()
     assert {k: s[k] for k in gametoolbar.LOOK_KEYS} == {k: DEFAULT_SETTINGS[k] for k in gametoolbar.LOOK_KEYS}
     assert s["game_toolbar_hotkey"] == "Ctrl+Alt+T"                      # the key is no look
-    assert npcoverlay.current_tint() == npcoverlay.PANEL and w._npcs.text() == "NPCs Here" and w._opacity == 0.85
+    assert npcoverlay.current_tint() == npcoverlay.TINTS["dark"][1] and w._npcs.text() == "NPCs Here"
+    assert w._opacity == 0.85
     assert not p._reset.isEnabled()                                        # nothing left to put back
 
 
@@ -535,7 +641,7 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
         w._gear.click()
         p = w._panel
         assert p.width() == gametoolbar.PANEL_W and p.layoutDirection() == Qt.RightToLeft
-        assert p._slider._x(0) > p._slider._x(p._slider._n - 1)      # the most see-through step on the right
+        assert p._slider._x(0.3) > p._slider._x(1.0)                  # the most see-through end on the right
         tiles = p._tints.findChildren(QPushButton)
         assert tiles[0].x() > tiles[-1].x()                            # the tiles run from the right
         assert p._tint_name.text() == bidi.plain("כהה", True)
@@ -559,7 +665,7 @@ def test_the_default_look_is_todays(bar):
     from maplehelper.ui import npcoverlay
     w, _ = bar
     w.refresh()
-    assert npcoverlay.current_tint() == npcoverlay.PANEL
+    assert npcoverlay.current_tint() == npcoverlay.TINTS["dark"][1]
     assert npcoverlay.ACCENTS["green"][1] in w.styleSheet()
     assert w._npcs.text() == "NPCs Here"
 

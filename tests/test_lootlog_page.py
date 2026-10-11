@@ -29,6 +29,14 @@ def kb():
     return KnowledgeBase(REAL_KB)
 
 
+@pytest.fixture(autouse=True)
+def default_look():
+    """Every test ends on today's dark glass (apply_look is module state every window over the game reads)."""
+    yield
+    from maplehelper.ui import npcoverlay
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture
 def page(isolated_store, kb):
     from maplehelper.ui.tools import ToolsDialog
@@ -289,6 +297,36 @@ def test_the_windows_state_chip_follows_start_stop_and_the_accent(page, card):
     assert not card._status.isVisibleTo(card)
     card._fold.click()
     assert not card._dot.isVisibleTo(card) and card._title.text() == "Loot Log · 70 made"
+
+
+def test_on_the_white_glass_the_window_turns_dark_on_light(page, card):
+    """The ⚙ panel's white glass: the window's text and fills flip to the light palette, its figures' and Stop's
+    colours darkened by ink to read on it; the dark glass brings today's look back."""
+    from PySide6.QtGui import QPalette
+    from maplehelper.ui import npcoverlay
+    from maplehelper.ui.lootoverlay import STAT_COLORS, STOP
+    d, s = page
+    s["loot_overlay"] = True
+    card.sync()
+    card._start.click()
+    d.loot._log.add([lootlog.Event(time.time(), "exp", 21), lootlog.Event(time.time(), "mesos", 27)])
+    s["overlay_tint"] = "white"
+    npcoverlay.apply_look(s)
+    card.refresh()                                  # as the app does after the ⚙ panel's pick
+    sheet = card.styleSheet()
+    assert f"#Title {{ color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.LIGHT.muted in sheet
+    assert npcoverlay.DARK.text not in sheet and "255,255,255" not in sheet and "235,235,245" not in sheet
+    for key, colour in STAT_COLORS.items():
+        assert f"#TileName_{key} {{ color: {npcoverlay.ink(colour)};" in sheet
+    assert f"color: {npcoverlay.ink(STOP)};" in sheet and f"color: {STOP};" not in sheet
+    assert card._title.palette().color(QPalette.WindowText).name() == npcoverlay.LIGHT.text.lower()
+    s["overlay_tint"] = "dark"
+    npcoverlay.apply_look(s)
+    card.refresh()
+    sheet = card.styleSheet()
+    assert f"#Title {{ color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
+    assert f"QPushButton#Stop {{ background: rgba(255,138,128,0.16); color: {STOP}; }}" in sheet
+    assert card._title.palette().color(QPalette.WindowText).name() == npcoverlay.DARK.text.lower()
 
 
 def test_reads_follow_the_game_window_and_skip_a_covered_one(page, monkeypatch):

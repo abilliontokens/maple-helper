@@ -14,7 +14,7 @@ the plan needs, the final items), every number from the KB's tables or the playe
 crafted moves its mats and products into the bag. It opens by itself once the plan has something to make, follows
 the main window, hides with it, and its ✕ hides only the plan ("Show plan" brings it back).
 
-Built like the bar's other windows: the NPCs window's dark glass at the opacity and in the colours the ⚙ panel
+Built like the bar's other windows: the NPCs window's glass at the opacity and in the colours the ⚙ panel
 picks, a title row that drags each, the main window's place kept in craft_advisor_geom and the plan's size in
 craft_plan_size. The main window takes the keyboard while its boxes are used (Esc or the ✕ gives it back), shows
 while settings["craft_advisor"] is on, and its ✕ turns that off."""
@@ -48,25 +48,23 @@ from ..kb import KnowledgeBase
 from ..store import Character, Profiles, Settings
 from . import mapview, theme
 from .controls import Segmented
-from .gamesearch import QSS as _GLASS_QSS, SCROLLBAR_W, _SearchBox
+from .gamesearch import SCROLLBAR_W, _SearchBox, glass_qss, rim
 from .glass import EdgeResize
 from .npcoverlay import (
     BOTTOM,
-    FILL1,
-    FILL2,
     GEOM_DEBOUNCE_MS,
-    MUTED,
     OPACITY_DEFAULT,
     OPACITY_MAX,
     OPACITY_MIN,
     SIDE,
-    TEXT,
     TOP,
     _flags,
     _Header,
     _paint_glass,
     accent_of,
     dock_beside,
+    ink,
+    palette,
     set_capturable,
 )
 from .npcoverlay import keep_over_game
@@ -111,99 +109,103 @@ KIND_KEYS = {
 }
 MODE_KEYS = (("least", "cp_mode_least"), ("cheapest", "cp_mode_cheapest"), ("highest", "cp_mode_highest"))
 BADGE_KEYS = {"prep": "cp_badge_prep", "level": "cp_badge_level", "final": "cp_badge_final"}
-LOSS = "#FF8A80"  # crafting dearer than the shop: a warm red that reads on every glass tint
-# the stage kinds' badges, readable on the dark glass whatever accent is picked (the accent lights what is chosen)
+LOSS = "#FF8A80"  # crafting dearer than the shop: a warm red that reads on every glass tint (ink: darker on white)
+# the stage kinds' badges, readable on every glass whatever accent is picked (the accent lights what is chosen)
 BADGE_COLORS = {"prep": "#64B5FF", "level": "#FFB066", "final": "#4CD07D"}
 
 
 def _rgba(color: str, alpha: float) -> str:
-    """A "#RRGGBB" colour at this opacity, for a tinted fill."""
-    c = color.lstrip("#")
-    return f"rgba({int(c[0:2], 16)},{int(c[2:4], 16)},{int(c[4:6], 16)},{alpha})"
+    """A colour ("#RRGGBB" or "rgba(...)") at this opacity, for a tinted fill."""
+    c = theme.qcolor(color)
+    return f"rgba({c.red()},{c.green()},{c.blue()},{alpha})"
 
 
 def qss(settings) -> str:
-    """Both windows' own style at the accent the settings pick: the lit tab and mode, the picked table rows, the
-    savings, the ticked boxes (npcoverlay.ACCENTS; the glass itself is painted in the tint by _paint_glass).
-    Rebuilt whenever the accent is picked, so the windows follow with no more code of their own."""
+    """Both windows' own style at the accent the settings pick on the glass's palette (npcoverlay.palette: light
+    text on the dark tints, dark on the white one): the lit tab and mode, the picked table rows, the savings, the
+    ticked boxes (npcoverlay.ACCENTS; the glass itself is painted in the tint by _paint_glass). Rebuilt whenever
+    the look is picked, so the windows follow with no more code of their own."""
     fill, on_fill = accent_of(settings)
+    pal = palette()
+    text, muted, fill1, fill2 = pal.text, pal.muted, pal.fill1, pal.fill2
+    lit, loss = ink(fill), ink(LOSS)  # the accent and the red as text: darkened on the white glass
     badges = "\n".join(
-        f"#Kind{kind.title()} {{ color: {c}; background: {_rgba(c, 0.16)}; border-radius: 6px; padding: 1px 7px;"
+        f"#Kind{kind.title()} {{ color: {ink(c)}; background: {_rgba(c, 0.16)}; border-radius: 6px; padding: 1px 7px;"
         f" font-size: 11px; font-weight: 700; }}"
         for kind, c in BADGE_COLORS.items()
     )
     return (
-        _GLASS_QSS
+        glass_qss()
         + f"""
 QLabel {{ background: transparent; }}
-#Sub {{ color: {MUTED}; font-size: 12px; }}
-#Note {{ color: {MUTED}; font-size: 11px; }}
-#Summary {{ color: {TEXT}; font-size: 12px; }}
-#Section {{ color: {TEXT}; font-size: 15px; font-weight: 700; padding-top: 6px; }}
-QPushButton#PlanBtn {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px; padding: 5px 12px;
+#Sub {{ color: {muted}; font-size: 12px; }}
+#Note {{ color: {muted}; font-size: 11px; }}
+#Summary {{ color: {text}; font-size: 12px; }}
+#Section {{ color: {text}; font-size: 15px; font-weight: 700; padding-top: 6px; }}
+QPushButton#PlanBtn {{ background: {fill1}; color: {text}; border: none; border-radius: 8px; padding: 5px 12px;
                        font-size: 12px; font-weight: 600; text-align: center; }}
-QPushButton#PlanBtn:hover {{ background: {FILL2}; }}
-#Segmented {{ background: {FILL1}; border: none; border-radius: 10px; }}
-QPushButton#Segment {{ background: transparent; color: {MUTED}; border: none; border-radius: 8px; min-height: 28px;
+QPushButton#PlanBtn:hover {{ background: {fill2}; }}
+#Segmented {{ background: {fill1}; border: none; border-radius: 10px; }}
+QPushButton#Segment {{ background: transparent; color: {muted}; border: none; border-radius: 8px; min-height: 28px;
                        max-height: 28px; padding: 0 10px; font-size: 13px; font-weight: 600; text-align: center; }}
-QPushButton#Segment:hover:!checked {{ background: {FILL2}; color: {TEXT}; }}
+QPushButton#Segment:hover:!checked {{ background: {fill2}; color: {text}; }}
 QPushButton#Segment:checked {{ background: {fill}; color: {on_fill}; font-weight: 700; }}
-#ColHead {{ color: {MUTED}; font-size: 11px; font-weight: 600; }}
+#ColHead {{ color: {muted}; font-size: 11px; font-weight: 600; }}
 QFrame#ItemRow, QFrame#BagRow {{ background: transparent; border: none; border-radius: 8px; }}
-QFrame#ItemRow:hover, QFrame#BagRow:hover {{ background: {FILL1}; }}
+QFrame#ItemRow:hover, QFrame#BagRow:hover {{ background: {fill1}; }}
 QFrame#ItemRow[picked="true"] {{ background: {_rgba(fill, 0.16)}; }}
-#ItemName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-#ItemType {{ color: {MUTED}; font-size: 11px; }}
-#Cell {{ color: {TEXT}; font-size: 13px; }}
-#CellMuted {{ color: {MUTED}; font-size: 13px; }}
-#Recipe {{ color: {TEXT}; font-size: 12px; }}
-#Saves {{ color: {fill}; font-size: 13px; font-weight: 700; }}
-#SavesWord {{ color: {fill}; font-size: 11px; }}
-#Loses {{ color: {LOSS}; font-size: 13px; font-weight: 700; }}
-#LosesWord {{ color: {LOSS}; font-size: 11px; }}
-#NotSold {{ color: {MUTED}; font-size: 11px; }}
-#GroupName {{ color: {TEXT}; font-size: 13px; font-weight: 700; padding-top: 6px; }}
-#GroupMeta {{ color: {MUTED}; font-size: 11px; padding-top: 6px; }}
-#InPlan {{ color: {fill}; border: 1px solid {fill}; border-radius: 6px; padding: 0 6px; font-size: 11px; font-weight: 600; }}
+#ItemName {{ color: {text}; font-size: 13px; font-weight: 600; }}
+#ItemType {{ color: {muted}; font-size: 11px; }}
+#Cell {{ color: {text}; font-size: 13px; }}
+#CellMuted {{ color: {muted}; font-size: 13px; }}
+#Recipe {{ color: {text}; font-size: 12px; }}
+#Saves {{ color: {lit}; font-size: 13px; font-weight: 700; }}
+#SavesWord {{ color: {lit}; font-size: 11px; }}
+#Loses {{ color: {loss}; font-size: 13px; font-weight: 700; }}
+#LosesWord {{ color: {loss}; font-size: 11px; }}
+#NotSold {{ color: {muted}; font-size: 11px; }}
+#GroupName {{ color: {text}; font-size: 13px; font-weight: 700; padding-top: 6px; }}
+#GroupMeta {{ color: {muted}; font-size: 11px; padding-top: 6px; }}
+#InPlan {{ color: {lit}; border: 1px solid {lit}; border-radius: 6px; padding: 0 6px; font-size: 11px; font-weight: 600; }}
 QLineEdit#Num {{ padding: 4px 6px; }}
-QFrame#ProfCard {{ background: {FILL1}; border: none; border-radius: 10px; }}
-#ProfName {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#FieldName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-#FieldLabel {{ color: {MUTED}; font-size: 11px; font-weight: 600; }}
-QFrame#FoldHead {{ background: {FILL1}; border: none; border-radius: 8px; }}
-QFrame#FoldHead:hover {{ background: {FILL2}; }}
-#FoldTitle {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#FoldMark {{ color: {MUTED}; font-size: 13px; font-weight: 700; }}
-#Mine {{ color: {fill}; font-size: 11px; font-weight: 600; }}
-#Stepper {{ background: {FILL1}; border: none; border-radius: 8px; }}
-QToolButton#StepBtn {{ background: transparent; color: {TEXT}; border: none; border-radius: 6px; padding: 0;
+QFrame#ProfCard {{ background: {fill1}; border: none; border-radius: 10px; }}
+#ProfName {{ color: {text}; font-size: 13px; font-weight: 700; }}
+#FieldName {{ color: {text}; font-size: 13px; font-weight: 600; }}
+#FieldLabel {{ color: {muted}; font-size: 11px; font-weight: 600; }}
+QFrame#FoldHead {{ background: {fill1}; border: none; border-radius: 8px; }}
+QFrame#FoldHead:hover {{ background: {fill2}; }}
+#FoldTitle {{ color: {text}; font-size: 13px; font-weight: 700; }}
+#FoldMark {{ color: {muted}; font-size: 13px; font-weight: 700; }}
+#Mine {{ color: {lit}; font-size: 11px; font-weight: 600; }}
+#Stepper {{ background: {fill1}; border: none; border-radius: 8px; }}
+QToolButton#StepBtn {{ background: transparent; color: {text}; border: none; border-radius: 6px; padding: 0;
                        min-width: 18px; max-width: 18px; min-height: 22px; max-height: 22px; font-size: 14px;
                        font-weight: 600; }}
-QToolButton#StepBtn:hover {{ background: {FILL2}; }}
-QToolButton#StepBtn:disabled {{ color: rgba(235,235,245,0.28); }}
-#StepNum {{ color: {TEXT}; font-size: 13px; font-weight: 700; min-width: 16px; }}
-#HeadBadge {{ color: {MUTED}; font-size: 12px; }}
-QFrame#StatCard {{ background: {FILL1}; border: none; border-radius: 10px; }}
-#BigNum {{ color: {TEXT}; font-size: 20px; font-weight: 700; }}
-#CardLabel {{ color: {MUTED}; font-size: 11px; }}
-QFrame#FarmRow {{ background: {FILL1}; border: none; border-radius: 10px; }}
-#Kind {{ color: {MUTED}; font-size: 11px; }}
-#FarmCount {{ color: {TEXT}; font-size: 18px; font-weight: 700; }}
-#Muted {{ color: {MUTED}; font-size: 12px; }}
-QFrame#Stage {{ background: {FILL1}; border: none; border-radius: 12px; }}
-#StageNo {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
-#StageMeta {{ color: {MUTED}; font-size: 12px; }}
-#StageTitle {{ color: {TEXT}; font-size: 14px; font-weight: 700; }}
+QToolButton#StepBtn:hover {{ background: {fill2}; }}
+QToolButton#StepBtn:disabled {{ color: {_rgba(muted, 0.28)}; }}
+#StepNum {{ color: {text}; font-size: 13px; font-weight: 700; min-width: 16px; }}
+#HeadBadge {{ color: {muted}; font-size: 12px; }}
+QFrame#StatCard {{ background: {fill1}; border: none; border-radius: 10px; }}
+#BigNum {{ color: {text}; font-size: 20px; font-weight: 700; }}
+#CardLabel {{ color: {muted}; font-size: 11px; }}
+QFrame#FarmRow {{ background: {fill1}; border: none; border-radius: 10px; }}
+#Kind {{ color: {muted}; font-size: 11px; }}
+#FarmCount {{ color: {text}; font-size: 18px; font-weight: 700; }}
+#Muted {{ color: {muted}; font-size: 12px; }}
+QFrame#Stage {{ background: {fill1}; border: none; border-radius: 12px; }}
+#StageNo {{ color: {muted}; font-size: 11px; font-weight: 700; }}
+#StageMeta {{ color: {muted}; font-size: 12px; }}
+#StageTitle {{ color: {text}; font-size: 14px; font-weight: 700; }}
 {badges}
-QFrame#Step {{ background: transparent; border: none; border-top: 1px solid rgba(255,255,255,0.07); }}
-#StepNo {{ color: {MUTED}; font-size: 12px; font-weight: 600; }}
-#StepName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
-#Fee {{ color: {TEXT}; font-size: 12px; font-weight: 600; }}
-QPushButton#Swap {{ background: {FILL1}; color: {MUTED}; border: none; border-radius: 6px; padding: 2px 8px;
+QFrame#Step {{ background: transparent; border: none; border-top: 1px solid {rim(0.07)}; }}
+#StepNo {{ color: {muted}; font-size: 12px; font-weight: 600; }}
+#StepName {{ color: {text}; font-size: 13px; font-weight: 600; }}
+#Fee {{ color: {text}; font-size: 12px; font-weight: 600; }}
+QPushButton#Swap {{ background: {fill1}; color: {muted}; border: none; border-radius: 6px; padding: 2px 8px;
                    font-size: 11px; text-align: center; }}
-QPushButton#Swap:hover {{ background: {FILL2}; color: {TEXT}; }}
-QCheckBox {{ background: transparent; color: {TEXT}; spacing: 0; }}
-QCheckBox::indicator {{ background: {FILL1}; border: 1px solid rgba(255,255,255,0.25); border-radius: 5px;
+QPushButton#Swap:hover {{ background: {fill2}; color: {text}; }}
+QCheckBox {{ background: transparent; color: {text}; spacing: 0; }}
+QCheckBox::indicator {{ background: {fill1}; border: 1px solid {rim(0.25)}; border-radius: 5px;
                         width: 14px; height: 14px; }}
 QCheckBox::indicator:checked {{ background: {fill}; border-color: {fill}; }}
 """
@@ -1344,6 +1346,7 @@ class ForgePlanWindow(EdgeResize, QWidget):
         self._owner = owner
         self._fit_size = QSize()  # the size the window last gave itself (a resize to it isn't the player's)
         self._sized = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._resized)
+        self._drawn_in = palette()  # the palette the plan was last drawn in (a step's muted aside is in its html)
         self.setLayoutDirection(owner.layoutDirection())
         self.setStyleSheet(owner.styleSheet())
         col = QVBoxLayout(self)
@@ -1399,6 +1402,8 @@ class ForgePlanWindow(EdgeResize, QWidget):
     def restyle(self, sheet: str) -> None:
         if sheet != self.styleSheet():
             self.setStyleSheet(sheet)
+        if self._drawn_in != palette():
+            self.redraw()  # another glass: the steps' muted asides, written into their html, drawn again in it
         self.update()  # the tint
 
     def apply_language(self, t: I18n) -> None:
@@ -1425,6 +1430,7 @@ class ForgePlanWindow(EdgeResize, QWidget):
         return self._add(_label(bidi.plain(text, self._owner.t.rtl), name, wrap=True))
 
     def _draw(self) -> None:
+        self._drawn_in = palette()
         o = self._owner
         t = o.t
         c, plan = o._c, o._plan
@@ -1622,7 +1628,7 @@ class ForgePlanWindow(EdgeResize, QWidget):
         name = escape(bidi.ltr_name(f"{s.crafts}× {s.name}", rtl))
         if s.makes > 1:
             aside = escape(bidi.plain(f"({t('cp_makes', n=s.makes)})", rtl))
-            name += f' <span style="color:{MUTED}; font-size:12px; font-weight:400">{aside}</span>'
+            name += f' <span style="color:{palette().muted}; font-size:12px; font-weight:400">{aside}</span>'
         title = _label(name, "StepName", wrap=True)
         title.setTextFormat(Qt.RichText)
         mid.addWidget(title)

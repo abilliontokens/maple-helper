@@ -438,6 +438,14 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def default_look():
+    """Every test ends on today's dark glass (apply_look is module state every window over the game reads)."""
+    yield
+    from maplehelper.ui import npcoverlay
+    npcoverlay.apply_look(None)
+
+
 @pytest.fixture
 def settings(isolated_store):
     return isolated_store.Settings()
@@ -733,6 +741,41 @@ def test_window_follows_the_accent(qapp, settings, win):
     assert win._cards and all(c.chart._accent == QColor(blue) for c in win._cards)
     pick_stat(win, "HP")                                           # new cards take it too
     assert all(c.chart._accent == QColor(blue) for c in win._cards)
+
+
+def _strongest(icon) -> tuple[int, int, int]:
+    """The most opaque pixel's colour in an icon (its glyph's own colour, away from its anti-aliased edge)."""
+    img = icon.pixmap(12, 12).toImage()
+    best = max((img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height())),
+               key=lambda c: c.alpha())
+    return best.red(), best.green(), best.blue()
+
+
+def test_window_follows_the_white_glass(qapp, settings, win):
+    """On the white glass every text is dark — the sheet, the risk badges (ink), the pencil — and back on the dark
+    glass today's light text returns."""
+    from maplehelper.ui import npcoverlay
+    from maplehelper.ui.scrollplanner import RISK_COLORS
+    settings["scroll_planner"] = True
+    win.refresh()
+    win.open_item("item/1000")
+    assert npcoverlay.DARK.text in win.styleSheet()
+    settings["overlay_tint"] = "white"
+    npcoverlay.apply_look(settings)
+    win.refresh()                                                  # as the app does after the ⚙ panel's pick
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.LIGHT.text};" in sheet and npcoverlay.LIGHT.muted in sheet
+    assert npcoverlay.DARK.text not in sheet and "255,255,255" not in sheet and "235,235,245" not in sheet
+    for colour in RISK_COLORS.values():
+        assert f"color: {npcoverlay.ink(colour)};" in sheet and f"color: {colour};" not in sheet
+    assert win._cards and all(max(_strongest(c.price_btn.icon())) < 128 for c in win._cards)   # a dark pencil
+    settings["overlay_tint"] = "dark"
+    npcoverlay.apply_look(settings)
+    win.refresh()
+    sheet = win.styleSheet()
+    assert f"color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
+    assert all(f"color: {colour};" in sheet for colour in RISK_COLORS.values())
+    assert all(min(_strongest(c.price_btn.icon())) > 128 for c in win._cards)                  # light again
 
 
 def test_window_x_turns_the_setting_off(qapp, settings, win):

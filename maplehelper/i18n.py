@@ -1253,10 +1253,12 @@ STRINGS = {
     "npc_guide_unplaced": {"he": "המקום של {name} לא ידוע במפה הזו", "en": "Where {name} stands isn't known on this map"},
     # the in-game toolbar (ui/gametoolbar.py)
     "game_toolbar": {"he": "סרגל כלים במשחק", "en": "In-game toolbar"},
-    "game_toolbar_hint": {"he": "סרגל קטן מעל המשחק: דמויות כאן, החיפושים, מוניות וטלפורטים, יומן השלל וחלונות הכלים. "
-                                "בכפתור גלגל השיניים שלו בוחרים את המראה של כל החלונות שמעל המשחק.",
-                          "en": "A small bar over the game: NPCs Here, the searches, Cabs & Teleports, the Loot Log and "
-                                "the tool windows. Its gear button sets the look of every window over the game."},
+    "game_toolbar_hint": {"he": "סרגל קטן מעל המשחק: דמויות כאן, החיפושים, יומן השלל והכלים (מגילות, ציוד, קראפטינג). "
+                                "בכפתור גלגל השיניים שלו בוחרים את המראה של כל החלונות שמעל המשחק ומפעילים מוניות "
+                                "וטלפורטים.",
+                          "en": "A small bar over the game: NPCs Here, the searches, the Loot Log and Tools (Scrolls, "
+                                "Gear, Crafting). Its gear button sets the look of every window over the game and "
+                                "turns Cabs & Teleports on or off."},
     "tb_npcs_here": {"he": "דמויות כאן", "en": "NPCs Here"},
     "tb_npcs_here_tip": {"he": "הצגה או הסתרה של חלון הדמויות במפה שלכם", "en": "Show or hide the NPCs on your map"},
     "tb_monster_npc": {"he": "מפלצות ודמויות", "en": "Monsters & NPCs"},
@@ -1283,6 +1285,9 @@ STRINGS = {
     "tb_craft": {"he": "קראפטינג", "en": "Crafting"},
     "tb_craft_tip": {"he": "חלון יועץ הקראפטינג מעל המשחק: בוחרים מה להכין, ורואים מה לפארם, באיזה סדר להכין ומה יעלה",
                      "en": "The Crafting Advisor window over the game: pick what to make and see what to farm, what to craft in which order, and what it costs"},
+    "tb_tools": {"he": "כלים", "en": "Tools"},
+    "tb_tools_tip": {"he": "חלונות הכלים מעל המשחק: מגילות, ציוד וקראפטינג",
+                     "en": "The tool windows over the game: Scrolls, Gear and Crafting"},
     "tb_move": {"he": "גררו כדי להזיז", "en": "Drag to move"},
     "tb_vertical": {"he": "להעמיד את הסרגל (טור)", "en": "Stand the toolbar upright"},
     "tb_horizontal": {"he": "להשכיב את הסרגל (שורה)", "en": "Lay the toolbar flat"},
@@ -1388,8 +1393,9 @@ STRINGS = {
     "lk_way_walk": {"he": "הדרך מכאן ברגל", "en": "The way from here on foot"},
     "lk_way_rides": {"he": "הדרך מכאן במונית ובטלפורט", "en": "The way from here by cab and teleport"},
     "lk_way_none": {"he": "לא ידועה דרך מהמפה שלכם", "en": "No way from your map is known"},
-    "lk_way_none_walk": {"he": "לא ידועה דרך ברגל מהמפה שלכם. נסו את הכפתור מוניות וטלפורטים בסרגל",
-                         "en": "No way on foot from your map is known. Try the toolbar's Cabs & Teleports"},
+    "lk_way_none_walk": {"he": "לא ידועה דרך ברגל מהמפה שלכם. נסו להפעיל מוניות וטלפורטים בהגדרות הסרגל (גלגל השיניים)",
+                         "en": "No way on foot from your map is known. Try turning on Cabs & Teleports in the "
+                               "toolbar's settings (its gear button)"},
     "lk_way_unknown_here": {"he": "המפה שלכם עוד לא ידועה, אז אין דרך מכאן",
                             "en": "Your map isn't known yet, so there's no way from here"},
     "lk_here": {"he": "אתם במפה הזו", "en": "You're on this map"},
@@ -2361,12 +2367,14 @@ STRINGS = {
     "tbs_opacity_head": {"he": "שקיפות", "en": "Transparency"},
     "tbs_opacity": {"he": "אטימות הזכוכית", "en": "Glass opacity"},
     "tbs_bar": {"he": "הסרגל", "en": "Toolbar"},
+    "tbs_way": {"he": "איך מגיעים", "en": "Directions"},
     "tbs_reset": {"he": "חזרה למראה ברירת המחדל", "en": "Reset to default look"},
     "tbs_tint_dark": {"he": "כהה", "en": "Dark"},
     "tbs_tint_midnight": {"he": "כחול חצות", "en": "Midnight blue"},
     "tbs_tint_forest": {"he": "ירוק יער", "en": "Forest"},
     "tbs_tint_wine": {"he": "בורדו", "en": "Wine"},
     "tbs_tint_slate": {"he": "אפור-כחול", "en": "Slate"},
+    "tbs_tint_white": {"he": "לבן", "en": "White"},
     "tbs_accent_green": {"he": "ירוק", "en": "Green"},
     "tbs_accent_blue": {"he": "כחול", "en": "Blue"},
     "tbs_accent_purple": {"he": "סגול", "en": "Purple"},

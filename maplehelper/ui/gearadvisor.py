@@ -26,7 +26,7 @@ import re
 import threading
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
+from PySide6.QtGui import QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QSizePolicy, QStyle, QStyleOptionComboBox, QToolButton, QVBoxLayout, QWidget)
 
@@ -37,10 +37,10 @@ from ..kb import KnowledgeBase
 from ..store import Character, Profiles, Settings
 from . import mapview, theme
 from .controls import FlowLayout, Segmented
-from .gamesearch import QSS as _GLASS_QSS, _SearchBox
+from .gamesearch import _SearchBox, glass_qss, rim
 from .glass import EdgeResize
-from .npcoverlay import (BOTTOM, FILL1, FILL2, GEOM_DEBOUNCE_MS, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN,
-                         SIDE, TEXT, TOP, _Header, _paint_glass, accent_of, set_capturable)
+from .npcoverlay import (BOTTOM, GEOM_DEBOUNCE_MS, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TOP, _Header,
+                         _paint_glass, accent_of, ink, palette, set_capturable)
 from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
@@ -60,7 +60,7 @@ TILE_PIC, CARD_PIC, ROW_PIC = 36, 40, 30   # the pictures: the grid's, the cards
 BADGE = 16                          # the tile's upgrade-count badge
 VIEWS = ("slot", "all")             # the panel: the picked slot, or every slot's best upgrade
 GENDERS = ("", "Male", "Female")    # what a player can say about their character ("" = not said)
-GAIN, LOSS = "#4CD07D", "#FF8A80"   # a stat gained / given up: readable on every glass tint, whatever the accent
+GAIN, LOSS = "#4CD07D", "#FF8A80"   # a stat gained / given up: readable on every dark glass tint (ink: on the white)
 # where to get it, as an icon-like tag before the line: an NPC sells it, the Free Market, monsters drop it
 SHOP, MARKET, DROPPED = "\U0001F6D2", "\U0001F3F7\ufe0f", "\u2694\ufe0f"
 # the grid's order, the game's equip window's read in rows: what is held, the head and the back, then the body top
@@ -78,67 +78,71 @@ def _rgba(color: str, alpha: float) -> str:
 def qss(settings) -> str:
     """The window's own style at the accent the settings pick: the picked tile's ring, the badges, the lit view
     switch, the answer and the best card, the Plan scrolls buttons (npcoverlay.ACCENTS; the glass itself is painted
-    in the tint by _paint_glass). Built again whenever the accent is picked, so the window follows with no code of
-    its own."""
+    in the tint by _paint_glass), all in the colours of the glass under them (npcoverlay.palette(): dark text on the
+    white glass; the accent's and the stat chips' text through ink). Built again whenever the look is picked, so the
+    window follows with no code of its own."""
+    p = palette()
     fill, on_fill = accent_of(settings)
+    fill_ink, gain, loss = ink(fill), ink(GAIN), ink(LOSS)
+    popup = "#FFFFFF" if p.light else "#242427"      # the drop-down's list: a window of its own, opaque
     chip = "border-radius: 6px; padding: 1px 6px; font-size: 11px; font-weight: 700;"
-    return _GLASS_QSS + f"""
+    return glass_qss(p) + f"""
 QLabel {{ background: transparent; }}
-#Char {{ color: {TEXT}; font-weight: 600; }}
-#Hint, #Note {{ color: {MUTED}; font-size: 11px; }}
-#StatsHead {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
-#StatsLine {{ color: {TEXT}; font-size: 12px; }}
-#StatName {{ color: {MUTED}; font-size: 11px; font-weight: 600; }}
+#Char {{ color: {p.text}; font-weight: 600; }}
+#Hint, #Note {{ color: {p.muted}; font-size: 11px; }}
+#StatsHead {{ color: {p.muted}; font-size: 11px; font-weight: 700; }}
+#StatsLine {{ color: {p.text}; font-size: 12px; }}
+#StatName {{ color: {p.muted}; font-size: 11px; font-weight: 600; }}
 QLineEdit#Stat {{ padding: 5px 4px; }}
-QComboBox {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px; padding: 4px 10px;
+QComboBox {{ background: {p.fill1}; color: {p.text}; border: none; border-radius: 8px; padding: 4px 10px;
              min-height: 20px; }}
-QComboBox:hover {{ background: {FILL2}; }}
+QComboBox:hover {{ background: {p.fill2}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox::down-arrow {{ image: none; border: none; width: 0; height: 0; }}
-QComboBox QAbstractItemView {{ background: #242427; color: {TEXT}; selection-background-color: {FILL2};
+QComboBox QAbstractItemView {{ background: {popup}; color: {p.text}; selection-background-color: {p.fill2};
                               border-radius: 8px; outline: none; }}
-QPushButton#Small {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 7px; padding: 3px 10px;
+QPushButton#Small {{ background: {p.fill1}; color: {p.text}; border: none; border-radius: 7px; padding: 3px 10px;
                     font-size: 12px; font-weight: 600; text-align: center; }}
-QPushButton#Small:hover {{ background: {FILL2}; }}
-QPushButton#Plan, QPushButton#Act {{ background: transparent; color: {fill}; border: 1px solid {fill};
+QPushButton#Small:hover {{ background: {p.fill2}; }}
+QPushButton#Plan, QPushButton#Act {{ background: transparent; color: {fill_ink}; border: 1px solid {fill};
                                      border-radius: 7px; padding: 3px 10px; font-size: 12px; font-weight: 700;
                                      text-align: center; }}
 QPushButton#Plan:hover, QPushButton#Act:hover {{ background: {_rgba(fill, 0.18)}; }}
-QFrame#Tile {{ background: {FILL1}; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; }}
-QFrame#Tile:hover {{ background: {FILL2}; }}
-QFrame#Tile[empty="true"] {{ background: transparent; border: 1px dashed rgba(255,255,255,0.30); }}
-QFrame#Tile[empty="true"]:hover {{ background: {FILL1}; }}
+QFrame#Tile {{ background: {p.fill1}; border: 1px solid {rim(0.10, p)}; border-radius: 10px; }}
+QFrame#Tile:hover {{ background: {p.fill2}; }}
+QFrame#Tile[empty="true"] {{ background: transparent; border: 1px dashed {rim(0.30, p)}; }}
+QFrame#Tile[empty="true"]:hover {{ background: {p.fill1}; }}
 QFrame#Tile[sel="true"] {{ border: 2px solid {fill}; background: {_rgba(fill, 0.14)}; }}
-#TileWord {{ color: {MUTED}; font-size: 10px; font-weight: 600; }}
+#TileWord {{ color: {p.muted}; font-size: 10px; font-weight: 600; }}
 #Badge {{ background: {fill}; color: {on_fill}; border-radius: {BADGE // 2}px; padding: 0 4px; font-size: 10px;
           font-weight: 700; }}
-#Segmented {{ background: {FILL1}; border: none; border-radius: 10px; }}
-QPushButton#Segment {{ background: transparent; color: {MUTED}; border: none; border-radius: 8px; min-height: 26px;
+#Segmented {{ background: {p.fill1}; border: none; border-radius: 10px; }}
+QPushButton#Segment {{ background: transparent; color: {p.muted}; border: none; border-radius: 8px; min-height: 26px;
                        max-height: 26px; padding: 0 10px; font-size: 13px; font-weight: 600; text-align: center; }}
-QPushButton#Segment:hover:!checked {{ background: {FILL2}; color: {TEXT}; }}
+QPushButton#Segment:hover:!checked {{ background: {p.fill2}; color: {p.text}; }}
 QPushButton#Segment:checked {{ background: {fill}; color: {on_fill}; font-weight: 700; }}
-#Answer {{ background: {_rgba(fill, 0.16)}; color: {TEXT}; border-radius: 10px; padding: 8px 10px;
+#Answer {{ background: {_rgba(fill, 0.16)}; color: {p.text}; border-radius: 10px; padding: 8px 10px;
            font-size: 13px; }}
-QFrame#Card {{ background: {FILL1}; border: 1px solid transparent; border-radius: 12px; }}
+QFrame#Card {{ background: {p.fill1}; border: 1px solid transparent; border-radius: 12px; }}
 QFrame#Card[best="true"] {{ background: {_rgba(fill, 0.10)}; border: 1px solid {fill}; }}
-#Caption {{ color: {MUTED}; font-size: 10px; font-weight: 700; }}
-#BestCaption {{ color: {fill}; font-size: 10px; font-weight: 700; }}
-#ItemName {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#ItemMuted {{ color: {MUTED}; font-size: 13px; }}
-#Chip, #ChipLv {{ color: {TEXT}; background: rgba(255,255,255,0.10); {chip} }}
-#ChipSoon {{ color: {MUTED}; background: transparent; border: 1px solid rgba(255,255,255,0.22); {chip} }}
-#ChipGain {{ color: {GAIN}; background: {_rgba(GAIN, 0.15)}; {chip} }}
-#ChipLoss {{ color: {LOSS}; background: {_rgba(LOSS, 0.15)}; {chip} }}
-#ChipSame {{ color: {MUTED}; background: rgba(255,255,255,0.06); {chip} }}
-#Where {{ color: {TEXT}; font-size: 12px; }}
-#WhereMuted {{ color: {MUTED}; font-size: 12px; }}
-#SoonHead {{ color: {TEXT}; font-size: 13px; font-weight: 700; }}
-#SoonSub {{ color: {MUTED}; font-size: 11px; }}
-#EmptyPic {{ border: 1px dashed rgba(255,255,255,0.30); border-radius: 8px; }}
+#Caption {{ color: {p.muted}; font-size: 10px; font-weight: 700; }}
+#BestCaption {{ color: {fill_ink}; font-size: 10px; font-weight: 700; }}
+#ItemName {{ color: {p.text}; font-size: 13px; font-weight: 700; }}
+#ItemMuted {{ color: {p.muted}; font-size: 13px; }}
+#Chip, #ChipLv {{ color: {p.text}; background: {rim(0.10, p)}; {chip} }}
+#ChipSoon {{ color: {p.muted}; background: transparent; border: 1px solid {rim(0.22, p)}; {chip} }}
+#ChipGain {{ color: {gain}; background: {_rgba(gain, 0.15)}; {chip} }}
+#ChipLoss {{ color: {loss}; background: {_rgba(loss, 0.15)}; {chip} }}
+#ChipSame {{ color: {p.muted}; background: {rim(0.06, p)}; {chip} }}
+#Where {{ color: {p.text}; font-size: 12px; }}
+#WhereMuted {{ color: {p.muted}; font-size: 12px; }}
+#SoonHead {{ color: {p.text}; font-size: 13px; font-weight: 700; }}
+#SoonSub {{ color: {p.muted}; font-size: 11px; }}
+#EmptyPic {{ border: 1px dashed {rim(0.30, p)}; border-radius: 8px; }}
 QFrame#Row[worn="true"] {{ background: {_rgba(fill, 0.18)}; }}
-QFrame#AllRow {{ background: {FILL1}; border: none; border-radius: 10px; }}
-QFrame#AllRow:hover {{ background: {FILL2}; }}
-#AllSlot {{ color: {MUTED}; font-size: 11px; font-weight: 700; }}
+QFrame#AllRow {{ background: {p.fill1}; border: none; border-radius: 10px; }}
+QFrame#AllRow:hover {{ background: {p.fill2}; }}
+#AllSlot {{ color: {p.muted}; font-size: 11px; font-weight: 700; }}
 """
 
 
@@ -278,7 +282,7 @@ class _Combo(QComboBox):
         x, y = r.center().x() - 1, r.center().y() + 1
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(235, 235, 245, 163), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))     # MUTED
+        p.setPen(QPen(theme.qcolor(palette().muted), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.drawPolyline([QPointF(x - 4, y - 2), QPointF(x, y + 2), QPointF(x + 4, y - 2)])
         p.end()
 
