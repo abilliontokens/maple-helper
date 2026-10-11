@@ -316,7 +316,7 @@ Open PowerShell (Windows) or Terminal (macOS) in the repository folder. On macOS
 | **Accent-coloured ?** | Hover it to see what a game term means. |
 | **System tray menu** | Show the overlay, open settings, or quit the app. |
 
-In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the look (**Settings > Look**: the glass colour (Dark, Midnight blue, Forest, Wine, Slate or White), the accent colour, and the opacity), language, font size, answer length, starting with Windows, and whether voice questions are sent immediately. The in-game toolbar keeps a look of its own, set from its gear button.
+In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the look (**Settings > Appearance**: the glass colour (Dark, Midnight blue, Forest, Wine, Slate or White), the accent colour, and the opacity), language, font size, answer length, starting with Windows, and whether voice questions are sent immediately. The in-game toolbar keeps a look of its own, set from its gear button.
 
 The speech model downloads on first use, so the first voice request takes longer. Transcription uses CUDA when available and falls back to the CPU (always the CPU on macOS).
 
