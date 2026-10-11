@@ -21,6 +21,8 @@ machine first and check for regressions: see [EVALS.md](EVALS.md). CI never runs
    git tag v0.2.0
    git push origin v0.2.0
    ```
+   A fork runs no push-triggered workflows until its owner clicks *Enable workflows* on its Actions tab; until then
+   start the Release by hand on the pushed tag: `gh workflow run release.yml --ref v0.2.0`.
 3. Watch **Actions → Release**. When it's green, the release is live. Every installed copy downloads
    it in the background, checks its SHA-256 against `SHA256SUMS.txt`, and installs it when the player
    closes the app.
