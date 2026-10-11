@@ -75,6 +75,13 @@ def load_kb() -> KnowledgeBase:
         return KnowledgeBase(BUNDLED_KB)
 
 
+def _look_of(settings) -> tuple:
+    """What the app's own windows are built in: the language, the look Settings picks (the glass's tint, the accent,
+    the glass's opacity) and the text size. A Save that changes any of it restyles them (on_settings_changed)."""
+    return (settings["language"], settings["app_tint"], settings["app_accent"], settings["app_opacity"],
+            settings["font_size"])
+
+
 class _MainThread(QObject):
     """Background checks emit here; Qt delivers the call on the GUI thread (queued connection).
 
@@ -100,13 +107,13 @@ class MapleHelperApp:
         qapp.setWindowIcon(QIcon(str(ASSETS / "brand" / APP_ICON)))
         qapp.setQuitOnLastWindowClosed(False)
         self.main_thread = _MainThread()
-        self._look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        self._look = _look_of(self.settings)
         self._look_provider = self.settings["provider"]
 
     # ------------------------------------------------------------------ startup
 
     def style(self, opacity: float | None = None) -> str:
-        theme.set_mode(self.settings["appearance"])
+        theme.set_look(self.settings["app_tint"], self.settings["app_accent"], self.settings["app_opacity"])
         lang = self.settings["language"] or system_language()
         self.qapp.setLayoutDirection(Qt.RightToLeft if I18n(lang).rtl else Qt.LeftToRight)
         qt_texts(self.qapp, lang)
@@ -163,7 +170,7 @@ class MapleHelperApp:
         self.overlay = Overlay(self.settings, self.profiles, self.kb, self.brain)
         self.overlay.setStyleSheet(self.style())
         # the look the chat is built in (the first-run setup may have picked the language since __init__)
-        self._look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        self._look = _look_of(self.settings)
         self._look_provider = self.settings["provider"]
         self.overlay.setWindowOpacity(1.0)
         self.overlay.shot_provider = self.capture
@@ -771,9 +778,9 @@ class MapleHelperApp:
                 self.overlay.show()
 
     def _reopen_windows_in_new_look(self):
-        """A language or appearance change: the other open windows (tools, guides, history...) were built in the
-        old one (the tools window stayed Hebrew after a switch to English, seen live). Reopen them."""
-        look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        """A language or look change: the other open windows (tools, guides, history...) were built in the old one
+        (the tools window stayed Hebrew after a switch to English, seen live). Reopen them."""
+        look = _look_of(self.settings)
         if getattr(self, "_look", look) == look:
             self._look = look
             return
@@ -932,9 +939,9 @@ class MapleHelperApp:
         telemetry.set_enabled(self.settings["telemetry"])
         presence.set_enabled(self.settings["presence"])
         from .ui import terms
-        look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
-        # only a new language, appearance or text size restyles the chat: with a long chat that took ~1.6 s on
-        # every Save (the microphone, saver mode...), and a theme switch ~4 s (PERF-02)
+        look = _look_of(self.settings)
+        # only a new language, look (tint, accent, opacity) or text size restyles the chat: with a long chat that
+        # took ~1.6 s on every Save (the microphone, saver mode...), and a theme switch ~4 s (PERF-02)
         if look != getattr(self, "_look", None):
             QApplication.setOverrideCursor(Qt.WaitCursor)     # a few seconds with a long chat: not a hang
             try:
@@ -960,6 +967,11 @@ class MapleHelperApp:
                 from .ui.toast import Toast
                 for toast in list(Toast._live):
                     toast.restyle()              # a toast up during the switch: old text colors on the new glass
+                # every window still open repaints its glass in the new tint and opacity (paint_glass reads them as it
+                # paints): a new opacity alone leaves the app's style sheet as it was, and no restyle repaints them
+                for w in QApplication.topLevelWidgets():
+                    if w.isVisible():
+                        w.update()
             finally:
                 QApplication.restoreOverrideCursor()
         elif self.settings["provider"] != getattr(self, "_look_provider", None):

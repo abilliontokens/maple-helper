@@ -96,7 +96,7 @@ def face_pixmap(path, px: int = AVATAR) -> QPixmap | None:
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(255, 149, 51, 38))
+    p.setBrush(theme.qcolor(theme.accent_rgba(0.15)))
     p.drawEllipse(QRectF(0, 0, size, size))
     clip = QPainterPath()       # a picture with its own background stays round too; the figure is whole inside
     clip.addEllipse(QRectF(0, 0, size, size))
@@ -181,14 +181,14 @@ class MarketDetailsDialog(GlassDialog):
     def _style() -> str:
         c = theme.P()
         ot = theme.accent_text()
-        tile = "rgba(255,255,255,0.05)" if theme.MODE == "dark" else "#FFF8EE"
+        tile = "rgba(255,255,255,0.05)" if theme.MODE == "dark" else theme.accent_rgba(0.07)
         return f"""
         #MwName {{ font-size: 19px; font-weight: 700; color: {c['text']}; }}
         #MwSub {{ font-size: 14px; color: {c['muted']}; }}
         #MwPrice {{ font-size: 30px; font-weight: 700; letter-spacing: -0.5px; color: {c['text']}; }}
         #MwPriceLabel {{ font-size: 15px; color: {c['muted']}; }}
         #MwRange {{ font-size: 14px; color: {c['muted']}; }}
-        QFrame#MwTile {{ background: {tile}; border: 1px solid rgba(255,149,51,0.35); border-radius: 12px; }}
+        QFrame#MwTile {{ background: {tile}; border: 1px solid {theme.accent_rgba(0.35)}; border-radius: 12px; }}
         #MwTileValue {{ font-size: 19px; font-weight: 700; color: {c['text']}; }}
         #MwTileGlyph {{ font-family: "{theme.ICON_FONT}"; font-size: 15px; color: {ot}; }}
         #MwTileLabel {{ font-size: 13px; font-weight: 600; letter-spacing: 0.4px; color: {c['muted']}; }}
@@ -198,7 +198,7 @@ class MarketDetailsDialog(GlassDialog):
         #MwRowSub {{ font-size: 14px; color: {c['muted']}; }}
         #MwRowPrice {{ font-size: 16px; font-weight: 700; color: {c['text']}; }}
         #MwRowUnit {{ font-size: 13px; color: {c['muted']}; }}
-        #MwAvatar {{ background: rgba(255,149,51,0.16); color: {ot}; border-radius: 20px; font-size: 15px;
+        #MwAvatar {{ background: {theme.accent_rgba(0.16)}; color: {ot}; border-radius: 20px; font-size: 15px;
                      font-weight: 700; min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px; }}
         #TagWarn, #Tag {{ font-size: 13px; padding: 3px 9px; }}
         #MwFoot {{ font-size: 14px; color: {c['faint']}; }}

@@ -176,8 +176,8 @@ def test_a_save_in_settings_binds_the_key_picked_there():
     from maplehelper import app as app_mod
     fake = MagicMock()
     fake.settings = {"language": "en", "provider": "claude", "telemetry": False, "presence": False,
-                     "saver_mode": False, "appearance": "dark", "font_size": 14}
-    fake._look, fake._look_provider = ("en", "dark", 14), "claude"
+                     "saver_mode": False, "app_tint": "dark", "app_accent": "orange", "app_opacity": 1.0, "font_size": 14}
+    fake._look, fake._look_provider = ("en", "dark", "orange", 1.0, 14), "claude"
     app_mod.MapleHelperApp.on_settings_changed(fake)
     assert fake.register_toolbar_hotkey.called
 

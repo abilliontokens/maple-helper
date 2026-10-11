@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 OUT = sys.argv[1]
 MODE = sys.argv[2] if len(sys.argv) > 2 else "light"
+TINT = "white" if MODE == "light" else "dark"     # the app's look in that glass (theme.TINTS), as Settings stores it
 LANG = os.environ.get("SHOT_LANG", "he")
 SUF = "" if LANG == "he" else "-" + LANG
 os.makedirs(OUT, exist_ok=True)
@@ -31,7 +32,7 @@ for f in ("SegoeIcons.ttf", "segmdl2.ttf", "seguiemj.ttf", "seguisym.ttf", "sego
     QFontDatabase.addApplicationFont("C:/Windows/Fonts/" + f)   # offscreen Qt sees no system fonts
 fam = theme.load_fonts()
 theme.FONT_FAMILY = fam
-theme.set_mode(MODE)
+theme.set_look(TINT, "orange", 1.0)
 app.setLayoutDirection(Qt.RightToLeft if LANG == "he" else Qt.LeftToRight)
 css = theme.stylesheet(fam, 14)
 app.setStyleSheet(css)
@@ -40,7 +41,7 @@ from maplehelper.store import Settings, Profiles  # noqa: E402
 
 s = Settings()
 s["language"] = LANG
-s["appearance"] = MODE
+s["app_tint"] = TINT
 p = Profiles()
 if not p.active:
     p.add("Kiwi", "Thief", "Assassin", 34)

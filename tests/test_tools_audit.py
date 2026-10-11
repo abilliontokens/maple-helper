@@ -59,14 +59,14 @@ def _texts(layout):
 
 @needs_kb
 def test_build_page_of_a_beginner_says_there_is_no_plan(tools):
-    # TL1-2: "The plan ... from the guide. The orange row is where you are now." over "No build tables", in a box
+    # TL1-2: "The plan ... from the guide. The highlighted row is where you are now." over "No build tables", in a
     # too short for its one line
     d = tools("Beginner", "Beginner", 5, page="build")
-    assert "No build tables" in d.build_head.text() and "orange row" not in d.build_head.text()
+    assert "No build tables" in d.build_head.text() and "highlighted row" not in d.build_head.text()
     assert d.build_view.isHidden()
     d.profiles.active.base_class, d.profiles.active.job, d.profiles.active.level = "Warrior", "Fighter", 35
     d.refresh("build")
-    assert not d.build_view.isHidden() and "orange row" in d.build_head.text()
+    assert not d.build_view.isHidden() and "highlighted row" in d.build_head.text()
 
 
 @needs_kb

@@ -256,8 +256,19 @@ def title(key: str, fallback: str, lang: str) -> str:
 
 IMAGES = TRANSLATIONS / "img"
 _ICON = re.compile(r"\[\[img:([\w.-]+)\]\]")
-NOTE_COLORS = {"light": {"note": "#FFF4E6", "head": "#F2F2F7", "line": "#E5E5EA", "link": "#C9620A"},
-               "dark": {"note": "#3A2C1E", "head": "#2C2C2E", "line": "#3A3A3C", "link": "#FF9F43"}}
+
+
+def note_colors() -> dict:
+    """The reader's colours for the look now (theme): a note's fill (a faint tint of the accent), a table's heading
+    fill and lines (neutral), and a link (the accent as text), each opaque on the glass, as rich text can't read
+    rgba(). Read when a page is built, never kept: they change with the look."""
+    from .ui import theme
+    c = theme.P()
+
+    def on_glass(css: str) -> str:
+        return theme._hex(theme._over(css, theme.TINT))
+    return {"note": on_glass(theme.accent_rgba(0.14)), "head": on_glass(c["fill2"]), "line": on_glass(c["stroke"]),
+            "link": theme.accent_text()}
 
 
 def _load(path) -> dict | None:
@@ -324,11 +335,11 @@ def has_book(slug: str) -> bool:
     return (TRANSLATIONS / "en" / f"{slug}.json").is_file()
 
 
-def book_html(b: dict, mode: str = "light", rtl_ui: bool = False) -> str:
+def book_html(b: dict, rtl_ui: bool = False) -> str:
     """The reader's HTML (QTextBrowser): headings, paragraphs, notes, lists, tables, pictures,
-    links to other guides (href="guide:<slug>")."""
+    links to other guides (href="guide:<slug>"), in the look's colours (note_colors)."""
     he = b.get("lang") != "en"
-    col = NOTE_COLORS.get(mode, NOTE_COLORS["light"])
+    col = note_colors()
 
     def rtl_of(text: str) -> bool:
         return he and bool(bidi._RTL.search(text))

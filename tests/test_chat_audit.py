@@ -667,16 +667,12 @@ def test_toast_floats_over_a_fullscreen_game(monkeypatch):
 
 def test_toast_follows_a_theme_switch():
     from maplehelper.ui import theme, toast
-    old = theme.MODE
-    try:
-        theme.set_mode("dark")
-        t = toast.Toast("t", "b", False, "Segoe UI")
-        theme.set_mode("light")
-        t.restyle()
-        assert theme.P()["text"] in t.styleSheet()
-        t.close()
-    finally:
-        theme.set_mode(old)
+    theme.set_look("dark", "orange", 1.0)
+    t = toast.Toast("t", "b", False, "Segoe UI")
+    theme.set_look("white", "orange", 1.0)
+    t.restyle()
+    assert theme.P()["text"] in t.styleSheet()
+    t.close()
 
 
 def test_patch_notes_count_each_page_once_over_several_updates():
@@ -732,7 +728,7 @@ def test_a_menu_row_left_by_the_mouse_shows_its_text_again():
     from maplehelper.ui.widgets import SplitMenu
     app = QApplication.instance()
     old = app.styleSheet()
-    theme.set_mode("light")
+    theme.set_look("white", "orange", 1.0)
     app.setStyleSheet(theme.stylesheet("Rubik", 14))
     try:
         menu = SplitMenu()
@@ -745,12 +741,12 @@ def test_a_menu_row_left_by_the_mouse_shows_its_text_again():
         menu.hovered.emit(a)
         app.sendEvent(rows[0], QEnterEvent(rows[0].rect().center(), rows[0].rect().center(),
                                            rows[0].rect().center()))
-        assert label.palette().color(label.foregroundRole()) == QColor(theme.ON_ORANGE)
+        assert label.palette().color(label.foregroundRole()) == QColor(theme.ON_ACCENT)
         app.sendEvent(rows[0], QEvent(QEvent.Leave))
         menu.hovered.emit(b)
         app.sendEvent(rows[1], QEnterEvent(rows[1].rect().center(), rows[1].rect().center(),
                                            rows[1].rect().center()))
-        assert label.palette().color(label.foregroundRole()) != QColor(theme.ON_ORANGE)
+        assert label.palette().color(label.foregroundRole()) != QColor(theme.ON_ACCENT)
         menu.close()
     finally:
         app.setStyleSheet(old)

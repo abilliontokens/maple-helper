@@ -187,7 +187,7 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
   </picture>
 </p>
 <h3 align="center">Make it yours</h3>
-<p align="center">Light or dark appearance, language, font size, answer length, and your AI (Claude, ChatGPT, Gemini or Grok) with its account and plan usage.</p>
+<p align="center">Your own look (glass colour, accent colour and opacity), language, font size, answer length, and your AI (Claude, ChatGPT, Gemini or Grok) with its account and plan usage.</p>
 
 ## Download
 
@@ -229,7 +229,7 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
   - **Pets** (a tab of the Cash Shop page): lifespan, hunger, commands to level 30 and the fastest command at each stage, Cash Shop prices, and the pet skills.
 - **News:** MapleStory Classic news with the full articles in the app, in English and Hebrew.
 - **Sources on every number:** a tag says where each value comes from (community reports, the COT1 / COT2 test builds, MSEA, or official game data once it's out).
-- **Game terms explained:** An orange **?** beside terms like ACC, Avoid or AP shows what they mean on hover.
+- **Game terms explained:** A **?** in your accent colour beside terms like ACC, Avoid or AP shows what they mean on hover.
 - **Tracked items:** Star an item to keep a list of what you hunt, with who drops it and where.
 - **Hebrew and English:** Use either language, including mixed text with English game names.
 - **Local speech recognition:** Transcribe voice input on your computer using ivrit.ai Whisper models.
@@ -313,10 +313,10 @@ Open PowerShell (Windows) or Terminal (macOS) in the repository folder. On macOS
 | **Camera button** | Take a fresh screenshot of the game window. |
 | **Tools button** | Open the play tools (grind spots, grind tracker, farm, quests, crafting, citizenship, build, hit & damage, item price, sell or keep, how to get there, pets). |
 | **Character card** | Open its menu to switch, edit, delete, add or copy characters; **What now?** asks for the best next step. |
-| **Orange ?** | Hover it to see what a game term means. |
+| **Accent-coloured ?** | Hover it to see what a game term means. |
 | **System tray menu** | Show the overlay, open settings, or quit the app. |
 
-In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the appearance (light or dark), language, font size, answer length, starting with Windows, and whether voice questions are sent immediately.
+In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the look (**Settings > Look**: the glass colour (Dark, Midnight blue, Forest, Wine, Slate or White), the accent colour, and the opacity), language, font size, answer length, starting with Windows, and whether voice questions are sent immediately. The in-game toolbar keeps a look of its own, set from its gear button.
 
 The speech model downloads on first use, so the first voice request takes longer. Transcription uses CUDA when available and falls back to the CPU (always the CPU on macOS).
 

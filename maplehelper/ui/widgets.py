@@ -70,8 +70,8 @@ def soft_breaks(text: str, run: int = 30, every: int = 20, links: bool = True) -
 THINKING = set(STRINGS["thinking"].values())
 
 
-def _solid(css: str) -> str:
-    """A see-through palette color as the opaque color it shows on the chat (Qt's rich text can't read rgba())."""
+def solid(css: str) -> str:
+    """A see-through palette color as the opaque color it shows on the glass (Qt's rich text can't read rgba())."""
     from PySide6.QtGui import QColor
     from . import theme
     c, bg = theme.qcolor(css), QColor(*theme.P()["glass"])
@@ -169,7 +169,7 @@ class Waiting(QObject):
         note = t("thinking_hedge") if self.hedged else t("thinking_tools") if self.stage == "tools" else ""
         if note:
             size = max(9, self.bubble.label.fontInfo().pixelSize() - 2)
-            out += bidi.paragraph_html(note, d, style=f"margin:0; color:{_solid(theme.P()['muted'])};"
+            out += bidi.paragraph_html(note, d, style=f"margin:0; color:{solid(theme.P()['muted'])};"
                                                        f" font-size:{size}px;")
         return out
 
@@ -250,7 +250,7 @@ class Bubble(QFrame):
             from .. import glossary
             # an answer's links in the app's link color (not Qt's default blue), opened in the browser (terms.watch)
             body = body.replace('<a href="', f'<a style="color:{theme.accent_text()};" href="')
-            body = glossary.annotate(body, terms.LANG, limit=4)
+            body = glossary.annotate(body, terms.LANG, color=theme.accent_text(deep=True), limit=4)
             if not getattr(self, "_terms", False):
                 terms.watch(self.label, terms.LANG)
                 # watch() leaves only the "?" links clickable: the answer's text stays selectable too (Ctrl+C,
@@ -473,7 +473,7 @@ class ElideLink(QPushButton):
 
 
 class NoticeCard(QFrame):
-    """An orange note in the conversation with one action (e.g. "what changed?")."""
+    """An accent-tinted note in the conversation with one action (e.g. "what changed?")."""
 
     clicked = Signal()
     clicked2 = Signal()        # the second action, when there is one
@@ -989,7 +989,7 @@ def map_where_button(kb, key: str, t):
 
 
 class Selectable:
-    """Mixin: a tap selects this entity (orange border); every selectable follows the shared selection."""
+    """Mixin: a tap selects this entity (accent border); every selectable follows the shared selection."""
 
     def _init_selectable(self, key: str, name: str = ""):
         self.key = key
@@ -1212,7 +1212,7 @@ class EntityCard(Selectable, QFrame):
         self.style().polish(self)
         pm = on_solid_background(self.grab(), 14)
         self._buttons.setVisible(True)
-        # still tagged for the question: its orange border comes back (it stayed off until the next tag change)
+        # still tagged for the question: its accent border comes back (it stayed off until the next tag change)
         self.setProperty("selected", was)
         self.style().unpolish(self)
         self.style().polish(self)
@@ -1467,7 +1467,7 @@ class SplitMenu(QMenu):
         row.setProperty("panel", True)
         row.setCursor(Qt.PointingHandCursor)
         row.setEnabled(enabled)
-        row.installEventFilter(theme.menu_row_hover())     # its label turns white on the orange hover
+        row.installEventFilter(theme.menu_row_hover())     # its label turns ON_ACCENT on the accent hover
         lay = QHBoxLayout(row)
         lay.setContentsMargins(12, 6, 12, 6)
         lay.setSpacing(10)

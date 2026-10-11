@@ -1,7 +1,7 @@
 """The "?" beside game terms: hovering (or clicking) it shows what the term means. From the keyboard, Tab reaches
 each "?" and Enter or Space opens it.
 
-The badge is a small orange circle with a "?" (an image, so it's big enough to notice and to hit).
+The badge is a small circle in the look's accent with a "?" (an image, so it's big enough to notice and to hit).
 The explanation is our own popup, always on top: Qt's tooltip opens behind the chat and the tools
 window, which stay on top of the game."""
 from __future__ import annotations
@@ -21,7 +21,8 @@ BADGE_PX = 15
 
 
 def _badge_uri(color: str | None = None, size_px: int | None = None) -> str | None:
-    """Draw the "?" badge once (needs a running Qt app) and hand it to the glossary's links as a data: URI.
+    """Draw the "?" badge (needs a running Qt app), in the look's accent unless `color` is given, and hand it to the
+    glossary's links as a data: URI.
 
     Kept in memory, never in a file: a shared temp file was redrawn or deleted by another process (a test
     run, a second copy) and every "?" in the open app became an empty dot or a broken-page icon."""
@@ -34,13 +35,13 @@ def _badge_uri(color: str | None = None, size_px: int | None = None) -> str | No
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(color or theme.ORANGE))
+    p.setBrush(QColor(color or theme.ACCENT))
     p.drawEllipse(0, 0, size, size)
     f = QFont("Arial")
     f.setBold(True)
     f.setPixelSize(int(size * 0.72))
     p.setFont(f)
-    p.setPen(QColor("white"))
+    p.setPen(QColor("white" if color else theme.ON_ACCENT))
     p.drawText(QRect(0, 0, size, size), Qt.AlignCenter, "?")
     p.end()
     data = QByteArray()
@@ -57,7 +58,7 @@ def hint_badge_html(px: int = 13) -> str:
 
 
 def setup():
-    """Use the image badge in every annotated text from now on."""
+    """Use the image badge in every annotated text from now on; again after a look change, for the new accent."""
     uri = _badge_uri()
     if uri:
         glossary.MARK = (f"<img src='{uri}' width='{BADGE_PX}' height='{BADGE_PX}' "
@@ -81,7 +82,7 @@ class _Popup(QLabel):
         label's reading start (its right edge in Hebrew); else beside the mouse."""
         c = theme.P()
         bg = "#2C2C2E" if theme.MODE == "dark" else "#FFFFFF"
-        self.setStyleSheet(f"QLabel {{ background: {bg}; color: {c['text']}; border: 1px solid {theme.ORANGE};"
+        self.setStyleSheet(f"QLabel {{ background: {bg}; color: {c['text']}; border: 1px solid {theme.ACCENT};"
                            f" border-radius: 10px; padding: 9px 11px; font-size: 13px; }}")
         self.setText(body)
         self.adjustSize()
@@ -237,6 +238,6 @@ def watch(label: QLabel, lang: str | None = None) -> QLabel:
 
 
 def label(text_html: str, lang: str, obj: str = "RowLabel") -> QLabel:
-    lb = QLabel(glossary.annotate(text_html, lang), objectName=obj)
+    lb = QLabel(glossary.annotate(text_html, lang, color=theme.accent_text(deep=True)), objectName=obj)
     lb.setWordWrap(True)
     return watch(lb, lang)

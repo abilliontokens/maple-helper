@@ -30,6 +30,7 @@ from .controls import FlowLayout
 from .glass import SHADOW, EdgeResize
 from .location import LOCATION
 from .regionpick import from_capture
+from .theme import ACCENTS, LIGHT_TINTS, TINTS
 from .widgets import fit_picture, zoom_on_hover
 
 log = logging.getLogger("maplehelper")
@@ -70,22 +71,6 @@ KINDS = {"Job Instructor": "job", "Transport": "transport", "Storage": "storage"
 # white one (the accent lights the pick)
 KIND_COLORS = {"job": "#FF8A80", "transport": "#4DD0C8", "storage": "#C39BFF", "shop": "#64B5FF",
                "quest": "#FFC857", "object": "#D9B98C", "townsfolk": "#B7BBC5"}
-
-# the colours every window over the game follows (the bar's ⚙ panel picks them): the glass tints (dark ones under
-# light text, the white one under dark text: palette_of), and the accents that light a lit or selected button, each
-# with the text colour that reads on it. "dark"/"green" are today's look, the ones a stale setting falls back to.
-TINTS = {"dark": ("tbs_tint_dark", (24, 24, 27)),
-         "midnight": ("tbs_tint_midnight", (17, 24, 43)),
-         "forest": ("tbs_tint_forest", (13, 31, 22)),
-         "wine": ("tbs_tint_wine", (38, 17, 27)),
-         "slate": ("tbs_tint_slate", (36, 39, 44)),
-         "white": ("tbs_tint_white", (246, 246, 248))}
-ACCENTS = {"green": ("tbs_accent_green", "#2E9E5B", "#07230F"),
-           "blue": ("tbs_accent_blue", "#3D8BD6", "#082138"),
-           "purple": ("tbs_accent_purple", "#8265D6", "#180C2C"),
-           "orange": ("tbs_accent_orange", "#E08A3C", "#2F1706"),
-           "pink": ("tbs_accent_pink", "#D65C8E", "#2F081A"),
-           "teal": ("tbs_accent_teal", "#2FA8A0", "#062623")}
 
 
 def _picked(settings, key: str):
@@ -132,7 +117,6 @@ DARK = Palette(False, "#F5F5F7", "rgba(235,235,245,0.64)", "rgba(255,255,255,0.0
                (255, 255, 255), "rgba(255,255,255,0.08)")
 LIGHT = Palette(True, "#1D1D1F", "rgba(60,60,67,0.68)", "rgba(0,0,0,0.06)", "rgba(0,0,0,0.11)", (0, 0, 0),
                 "rgba(0,0,0,0.10)")
-LIGHT_TINTS = {"white"}     # the glass colours whose text is dark (TINTS)
 
 
 def palette_of(settings) -> Palette:

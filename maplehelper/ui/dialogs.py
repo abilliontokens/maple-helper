@@ -8,7 +8,7 @@ import sys
 import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QProgressBar, QPushButton,
                                QScrollArea, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
@@ -18,11 +18,12 @@ from ..providers.base import login_failed, login_waiting, stop_login
 from .controls import AdaptiveRow, FlowLayout, Section, Segmented, Select, Stepper, Switch, rtl_buttons
 from .glass import GlassDialog, no_default_buttons
 from .hotkeybox import HotkeyBox
+from .lookpick import Slider, Swatch
 from .patchnotes import gutter
 from ..i18n import I18n, system_language
 from ..jobs import JOBS, job_label, open_jobs        # the job tree: base class -> [(job, min level)], checked against the KB
 from ..kb import KnowledgeBase
-from ..store import ASSETS, History, Profiles, Settings
+from ..store import ASSETS, DEFAULT_SETTINGS, History, Profiles, Settings
 from . import theme
 
 log = logging.getLogger(__name__)
@@ -1138,6 +1139,14 @@ class ConfirmDialog(GlassDialog):
         no.setFocus()
 
 
+def _look_edge(alpha: int) -> QColor:
+    """The look pickers' hairline or faint fill (lookpick's `edge`) on Settings' own glass now: white on the dark
+    tints, black on the white one, a little less of it (black reads stronger on white than white on dark)."""
+    if theme.MODE == "light":
+        return QColor(0, 0, 0, round(alpha * 0.8))
+    return QColor(255, 255, 255, alpha)
+
+
 class SettingsDialog(_ApiKeyEntry, GlassDialog):
     changed = Signal()
     update_kb_requested = Signal()
@@ -1171,11 +1180,33 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
 
-        # appearance
+        # the look of the app's own windows (the windows over the game keep theirs, picked in the toolbar's ⚙ panel):
+        # the glass colour as tiles of each tint and the accent as dots, the picked one ringed and named beside its
+        # label as in the ⚙ panel, and the glass's opacity on a slider at any whole percent. Saved with the rest on
+        # Save; until then they draw for this window's own glass (_look_edge), in the accent picked here
+        sec = Section(t("appearance"), rtl)
+        self._look_tint = settings["app_tint"] if settings["app_tint"] in theme.TINTS else DEFAULT_SETTINGS["app_tint"]
+        self._look_accent = (settings["app_accent"] if settings["app_accent"] in theme.ACCENTS
+                             else DEFAULT_SETTINGS["app_accent"])        # a name the catalog doesn't know: the default
+        self.look_tints = self._swatch_row("tint")
+        self.look_tint_name = self._look_row(sec, t("set_look_tint"), self.look_tints)
+        self.look_accents = self._swatch_row("accent")
+        self.look_accent_name = self._look_row(sec, t("set_look_accent"), self.look_accents)
+        self.look_opacity = Slider(theme.OPACITY_MIN, theme.OPACITY_MAX, _look_edge, lambda: theme.MODE == "light")
+        self.look_opacity.setFocusPolicy(Qt.StrongFocus)       # the arrow keys move it (the ⚙ panel's takes no keys)
+        self.look_opacity.setProperty("focus_ring", True)
+        self.look_opacity.set_value(settings["app_opacity"])
+        self.look_opacity.changed.connect(self._show_opacity)
+        self.look_opacity_value = self._look_row(sec, t("set_look_opacity"), self.look_opacity)
+        hint = QLabel(objectName="RowHint")
+        hint.setWordWrap(True)
+        set_hint(hint, t("set_look_hint"), rtl)
+        sec.add_widget(hint)
+        self._show_look()
+        lay.addWidget(sec)
+
+        # display: the text size and the language
         sec = Section(t("sec_appearance"), rtl)
-        self.appearance = Segmented([(t("appearance_dark_short"), "dark"), (t("appearance_light_short"), "light")],
-                                    settings["appearance"], rtl)
-        sec.add_row(t("appearance"), self.appearance)
         self.font = Segmented([("A", 13), ("A", 14), ("A", 16)], settings["font_size"], rtl)
         # small / medium / large "A" (the stylesheet wins over setFont, so size it there)
         for i, b in enumerate(self.font.group.buttons()):
@@ -1417,6 +1448,76 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         self._initial = self._values()          # the X asks before dropping changes from here on
         self.close_btn.clicked.disconnect()
         self.close_btn.clicked.connect(self._close_clicked)
+
+    # the look ------------------------------------------------------------
+
+    def _look_row(self, sec: Section, label: str, control: QWidget) -> QLabel:
+        """A look row as the ⚙ panel lays it out: its label at the leading edge and what it is set to at the trailing
+        one, the control under both, across the card. Returns the label of what it is set to."""
+        row = QWidget()
+        col = QVBoxLayout(row)
+        col.setContentsMargins(0, 8, 0, 10)
+        col.setSpacing(8)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(QLabel(bidi.plain(label, self.t.rtl), objectName="RowLabel"), 1)
+        value = QLabel(objectName="RowValue")
+        head.addWidget(value)
+        col.addLayout(head)
+        col.addWidget(control)
+        control.setAccessibleName(label)       # a screen reader names the tiles, the dots or the slider by it
+        sec.add_widget(row)
+        return value
+
+    def _swatch_row(self, kind: str) -> QWidget:
+        """The glass tints as tiles side by side across the card ("tint"), or the accents as dots spread evenly
+        ("accent"), from the leading edge (the right in Hebrew), each named in its tooltip and to a screen reader.
+        A tile's check is in the text colour that reads on that tile, a dot's in its accent's own text colour."""
+        presets = theme.TINTS if kind == "tint" else theme.ACCENTS
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6 if kind == "tint" else 0)
+        for i, (key, entry) in enumerate(presets.items()):
+            if kind == "tint":
+                colour = "#{:02x}{:02x}{:02x}".format(*entry[1])
+                check = theme.PALETTES["light" if key in theme.LIGHT_TINTS else "dark"]["text"]
+            else:
+                colour, check = entry[1], entry[2]
+                if i:
+                    row.addStretch(1)
+            b = Swatch(kind, key, colour, check, _look_edge)
+            b.setFocusPolicy(Qt.StrongFocus)            # Tab reaches it and Space picks it (the ⚙ panel's take no keys)
+            b.setToolTip(self.t(entry[0]))
+            b.setAccessibleName(self.t(entry[0]))
+            b.clicked.connect(lambda _=False, k=key: self._pick_look(kind, k))
+            row.addWidget(b)
+        return w
+
+    def _pick_look(self, kind: str, key: str) -> None:
+        """A tile or a dot clicked: picked, saved with the rest on Save."""
+        if kind == "tint":
+            self._look_tint = key
+        else:
+            self._look_accent = key
+        self._show_look()
+
+    def _show_look(self) -> None:
+        """The picked tile and dot checked (a click on the picked one had unchecked it) and named beside their
+        labels; the tiles ringed and the slider lit in the picked accent, a dot ringed in its own colour."""
+        t, fill = self.t, theme.ACCENTS[self._look_accent][1]
+        for row, chosen in ((self.look_tints, self._look_tint), (self.look_accents, self._look_accent)):
+            for b in row.findChildren(Swatch):
+                b.setChecked(b.property("key") == chosen)
+                b.set_ring(fill if row is self.look_tints else b.property("colour"))
+        self.look_tint_name.setText(bidi.plain(t(theme.TINTS[self._look_tint][0]), t.rtl))
+        self.look_accent_name.setText(bidi.plain(t(theme.ACCENTS[self._look_accent][0]), t.rtl))
+        self.look_opacity.set_accent(fill)
+        self._show_opacity()
+
+    def _show_opacity(self, _=None) -> None:
+        """The slider's whole percent beside its label."""
+        self.look_opacity_value.setText(bidi.ltr_block(f"{round(self.look_opacity.value() * 100)}%", self.t.rtl))
 
     # AI account ----------------------------------------------------------
 
@@ -1854,7 +1955,9 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
             "provider": self._provider,
             **{p.model_setting: self._model_of(p) for p in providers.PROVIDERS.values()},
             "language": self.lang.value(),
-            "appearance": self.appearance.value(),
+            "app_tint": self._look_tint,
+            "app_accent": self._look_accent,
+            "app_opacity": self.look_opacity.value(),
             "font_size": self.font.value(),
             "voice_send_immediately": self.voice_send.isChecked(),
             "microphone": self._mic_value(),

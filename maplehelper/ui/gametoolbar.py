@@ -17,27 +17,19 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
     QGuiApplication,
-    QIcon,
-    QIconEngine,
-    QImage,
-    QLinearGradient,
     QPainter,
-    QPen,
-    QPixmap,
 )
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QLayout,
     QPushButton,
-    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -45,23 +37,21 @@ from PySide6.QtWidgets import (
 
 from .. import bidi
 from ..i18n import I18n
-from ..store import ASSETS, DEFAULT_SETTINGS, Settings
+from ..store import DEFAULT_SETTINGS, Settings
 from . import mapview, theme
 from .controls import FlowLayout, Switch
 from .glass import SHADOW, EdgeResize
 from .hotkeybox import HotkeyBox
 from .location import LOCATION
+from .lookpick import Slider, Swatch, line_icon
 from .npcoverlay import (
-    ACCENTS,
     DARK,
     GAP,
     GEOM_DEBOUNCE_MS,
     LIGHT,
-    LIGHT_TINTS,
     OPACITY_DEFAULT,
     OPACITY_MAX,
     OPACITY_MIN,
-    TINTS,
     _flags,
     _Header,
     _paint_glass,
@@ -72,6 +62,7 @@ from .npcoverlay import (
     palette,
     set_capturable,
 )
+from .theme import ACCENTS, LIGHT_TINTS, TINTS
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
 FLOW_GAP = 6                                              # between the buttons, and between the rows they wrap into
@@ -82,7 +73,6 @@ KINDS = {"monster_npc": "tb_monster_npc", "map": "tb_maps", "item": "tb_items", 
 # the tool windows the Tools card shows and hides: each button is its window's setting -> its i18n key
 TOOLS = {"scroll_planner": "tb_scrolls", "gear_advisor": "tb_gear", "craft_advisor": "tb_craft"}
 # each button's line icon, by its i18n key: assets/icons/toolbar/<name>.svg (Lucide's, its LICENSE beside them)
-ICON_DIR = ASSETS / "icons" / "toolbar"
 ICONS = {"tb_npcs_here": "users", "tb_monster_npc": "ghost", "tb_maps": "map", "tb_items": "backpack",
          "tb_sell": "coins", "tb_loot": "scroll-text", "tb_tools": "toolbox", "tb_scrolls": "sparkles",
          "tb_gear": "shield", "tb_craft": "hammer"}
@@ -96,70 +86,6 @@ PANEL_SIDE = SHADOW + 16
 FOLLOW_MS = 80         # a transparency drag: every other window over the game follows at most this often
 # what "Reset to default look" puts back (the hotkey is no look: it stays)
 LOOK_KEYS = ("overlay_tint", "overlay_accent", "npc_overlay_opacity", "game_toolbar_icons")
-
-
-# ---------------------------------------------------------------- the line icons
-
-_SVGS: dict[str, bytes] = {}
-
-
-def _svg(name: str) -> bytes:
-    if name not in _SVGS:
-        _SVGS[name] = (ICON_DIR / f"{name}.svg").read_bytes()
-    return _SVGS[name]
-
-
-class _LineIcon(QIconEngine):
-    """One of the bar's line icons drawn in a colour of the text around it, at the pixels the screen asks for (crisp
-    at 125 % and 150 %): `colour` as it is, `on` on a lit (checked) button, `hover` under the mouse (a tool button's
-    Active mode), faded when disabled."""
-
-    def __init__(self, name: str, colour: str, on: str | None = None, hover: str | None = None):
-        super().__init__()
-        self._name = name
-        self._colours = (colour, on or colour, hover or colour)
-        self._cache: dict = {}
-
-    def _colour(self, mode, state) -> QColor:
-        normal, on, hover = self._colours
-        c = theme.qcolor(on if state == QIcon.On else hover if mode == QIcon.Active else normal)
-        if mode == QIcon.Disabled:
-            c.setAlphaF(c.alphaF() * 0.4)
-        return c
-
-    def scaledPixmap(self, size, mode, state, scale):
-        key = (size.width(), size.height(), mode, state, scale)
-        pm = self._cache.get(key)
-        if pm is None:
-            c = self._colour(mode, state)
-            px = QSize(max(1, round(size.width() * scale)), max(1, round(size.height() * scale)))
-            img = QImage(px, QImage.Format_ARGB32_Premultiplied)
-            img.fill(Qt.transparent)
-            p = QPainter(img)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setOpacity(c.alphaF())
-            QSvgRenderer(QByteArray(_svg(self._name).replace(b"currentColor", c.name().encode()))).render(
-                p, QRectF(0, 0, px.width(), px.height()))
-            p.end()
-            pm = QPixmap.fromImage(img)
-            pm.setDevicePixelRatio(scale)
-            self._cache[key] = pm
-        return pm
-
-    def pixmap(self, size, mode, state):
-        return self.scaledPixmap(size, mode, state, 1.0)
-
-    def paint(self, painter, rect, mode, state):
-        dpr = painter.device().devicePixelRatioF() if painter.device() is not None else 1.0
-        painter.drawPixmap(rect, self.scaledPixmap(rect.size(), mode, state, dpr))
-
-    def clone(self):
-        return _LineIcon(self._name, *self._colours)
-
-
-def line_icon(name: str, colour: str, on: str | None = None, hover: str | None = None) -> QIcon:
-    """assets/icons/toolbar/<name>.svg as an icon in these colours (see _LineIcon)."""
-    return QIcon(_LineIcon(name, colour, on, hover))
 
 
 def qss(settings) -> str:
@@ -325,169 +251,6 @@ def _edge(alpha: int) -> QColor:
     return QColor(r, g, b, round(alpha * 0.8) if palette().light else alpha)
 
 
-class _Swatch(QPushButton):
-    """One colour to pick: a glass tint as a small tile of that glass, an accent as a dot of it. The chosen one is
-    ringed in the accent (an accent's own dot: in itself), with a check."""
-
-    def __init__(self, kind: str, key: str, colour: str, check: str):
-        super().__init__(checkable=True)
-        self._kind = kind
-        self._fill, self._ring = QColor(colour), QColor(colour)
-        self._check = line_icon("check", check)
-        self.setProperty("key", key)
-        self.setProperty("colour", colour)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        if kind == "tint":
-            self.setMinimumSize(36, 36)                 # six tiles and their gaps across the panel's 268 px
-            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        else:
-            self.setFixedSize(32, 32)
-
-    def sizeHint(self):
-        return QSize(48, 36) if self._kind == "tint" else QSize(32, 32)
-
-    def set_ring(self, colour: str) -> None:
-        if QColor(colour) != self._ring:
-            self._ring = QColor(colour)
-            self.update()
-
-    def enterEvent(self, e):
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e):
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        on, hover = self.isChecked(), self.underMouse()
-        r = QRectF(self.rect())
-        if self._kind == "tint":
-            if on:
-                p.setPen(QPen(self._ring, 2))
-                p.setBrush(Qt.NoBrush)
-                p.drawRoundedRect(r.adjusted(1, 1, -1, -1), 10, 10)
-            tile = r.adjusted(4, 4, -4, -4)
-            p.setPen(Qt.NoPen)
-            p.setBrush(self._fill)
-            p.drawRoundedRect(tile, 7, 7)
-            sheen = QLinearGradient(tile.topLeft(), tile.bottomLeft())      # the glass's own light at its top
-            sheen.setColorAt(0.0, QColor(255, 255, 255, 34))
-            sheen.setColorAt(0.55, QColor(255, 255, 255, 0))
-            p.setBrush(sheen)
-            p.drawRoundedRect(tile, 7, 7)
-            p.setPen(QPen(_edge(115 if hover and not on else 46), 1))   # the white tile still edged on white glass
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), 6.5, 6.5)
-            mark = 16
-        else:
-            d = min(r.width(), r.height())
-            c = r.center()
-            if on:
-                p.setPen(QPen(self._ring, 2))
-                p.setBrush(Qt.NoBrush)
-                p.drawEllipse(c, d / 2 - 1, d / 2 - 1)
-            elif hover:
-                p.setPen(QPen(_edge(90), 1.5))
-                p.setBrush(Qt.NoBrush)
-                p.drawEllipse(c, d / 2 - 1, d / 2 - 1)
-            p.setPen(Qt.NoPen)
-            p.setBrush(self._fill)
-            p.drawEllipse(c, d / 2 - 4.5, d / 2 - 4.5)
-            mark = 14
-        if on:
-            self._check.paint(p, QRect(round(r.center().x() - mark / 2), round(r.center().y() - mark / 2), mark, mark))
-
-
-class _Slider(QWidget):
-    """The transparency as a slider from `lo` to `hi`, at any whole percent: the track lit in the accent from its
-    start up to the knob; a click or a drag puts the knob there (mirrored in Hebrew: the start on the right).
-    changed(value) on every percent it moves to, released() when the mouse lets go."""
-
-    changed = Signal(float)
-    released = Signal()
-    KNOB = 16
-
-    def __init__(self, lo: float, hi: float):
-        super().__init__()
-        self._lo, self._hi = lo, hi
-        self._v = hi
-        self._accent = QColor(DARK.text)
-        self.setFixedHeight(24)
-        self.setMinimumWidth(120)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-
-    def value(self) -> float:
-        return self._v
-
-    def set_value(self, v: float) -> None:
-        v = round(min(self._hi, max(self._lo, v)), 2)
-        if v != self._v:
-            self._v = v
-            self.update()
-
-    def set_accent(self, colour: str) -> None:
-        if QColor(colour) != self._accent:
-            self._accent = QColor(colour)
-            self.update()
-
-    def _x(self, v: float) -> float:
-        frac = (v - self._lo) / (self._hi - self._lo)
-        if self.layoutDirection() == Qt.RightToLeft:
-            frac = 1 - frac
-        return self.KNOB / 2 + frac * (self.width() - self.KNOB)
-
-    def _value_at(self, x: float) -> float:
-        """The whole percent under this x (the ends past the track: the ends themselves)."""
-        frac = min(1.0, max(0.0, (x - self.KNOB / 2) / max(1, self.width() - self.KNOB)))
-        if self.layoutDirection() == Qt.RightToLeft:
-            frac = 1 - frac
-        return round(self._lo + frac * (self._hi - self._lo), 2)
-
-    def _drag(self, x: float) -> None:
-        v = self._value_at(x)
-        if v != self._v:
-            self._v = v
-            self.update()
-            self.changed.emit(v)
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag(e.position().x())
-
-    def mouseMoveEvent(self, e):
-        if e.buttons() & Qt.LeftButton:
-            self._drag(e.position().x())
-
-    def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self.released.emit()
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        cy = self.height() / 2
-        start, knob = self._x(self._lo), self._x(self._v)
-        left, right = self.KNOB / 2, self.width() - self.KNOB / 2
-        p.setPen(Qt.NoPen)
-        p.setBrush(_edge(38))
-        p.drawRoundedRect(QRectF(left - 2, cy - 2, right - left + 4, 4), 2, 2)
-        p.setBrush(self._accent)
-        lo, hi = min(start, knob), max(start, knob)
-        p.drawRoundedRect(QRectF(lo - 2, cy - 2, hi - lo + 4, 4), 2, 2)
-        p.setBrush(QColor(0, 0, 0, 60))                 # the knob, on a soft shadow
-        p.drawEllipse(QRectF(knob - self.KNOB / 2, cy - self.KNOB / 2 + 1, self.KNOB, self.KNOB))
-        if palette().light:                            # a hairline round the white knob on the white glass
-            p.setPen(QPen(QColor(0, 0, 0, 40), 1))
-        p.setBrush(QColor("#FFFFFF"))
-        p.drawEllipse(QRectF(knob - self.KNOB / 2, cy - self.KNOB / 2, self.KNOB, self.KNOB))
-
-
 class _GlassSwitch(Switch):
     """controls.Switch drawn for the glass over the game: its track in the windows' accent when on, a faint one off
     (white on the dark tints, grey on the white one)."""
@@ -582,7 +345,7 @@ class _SettingsPanel(QWidget):
         self._opacity_head = self._section(col)
         self._opacity_label, self._opacity_value = self._label_row(col, value="Value")
         col.addSpacing(6)
-        self._slider = _Slider(OPACITY_MIN, OPACITY_MAX)
+        self._slider = Slider(OPACITY_MIN, OPACITY_MAX, _edge, lambda: palette().light)
         self._slider.changed.connect(self._pick_opacity)
         self._slider.released.connect(self._opacity_settled)
         col.addWidget(self._slider)
@@ -686,7 +449,7 @@ class _SettingsPanel(QWidget):
                 row.addStretch(1)
             # a tint's check reads on its own tile (dark on the white one), an accent's in its own text colour
             check = (LIGHT.text if key in LIGHT_TINTS else DARK.text) if kind == "tint" else ACCENTS[key][2]
-            b = _Swatch(kind, key, colour_of(key), check)
+            b = Swatch(kind, key, colour_of(key), check, _edge)
             b.clicked.connect(lambda _=False, k=key: picked(k))
             row.addWidget(b)
         return w
@@ -722,7 +485,7 @@ class _SettingsPanel(QWidget):
             lb.setContentsMargins(0, 0, 2 if rtl else 0, 0)
         self._reset.setText(bidi.plain(t("tbs_reset"), rtl))
         for row, chosen, presets in ((self._tints, tint, TINTS), (self._accents, accent_key, ACCENTS)):
-            for b in row.findChildren(_Swatch):
+            for b in row.findChildren(Swatch):
                 key = b.property("key")
                 b.setChecked(key == chosen)
                 b.set_ring(accent if row is self._tints else b.property("colour"))

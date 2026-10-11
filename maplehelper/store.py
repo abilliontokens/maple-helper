@@ -131,7 +131,9 @@ def _write_json(path: Path, data) -> None:
 
 DEFAULT_SETTINGS = {
     "language": None,             # "he" | "en"; None until onboarding
-    "appearance": "light",         # dark | light (opaque surfaces)
+    "app_tint": "white",          # the app's own windows' glass colour (ui/theme.py TINTS): white is the light look
+    "app_accent": "orange",       # ... their lit buttons' colour (ui/theme.py ACCENTS)
+    "app_opacity": 1.0,           # ... and their glass's opacity, 0.3-1.0 (below 1 the desktop shows through)
     "font_size": 14,
     "answer_length": "short",     # short | detailed
     "window": None,               # {"x","y","w","h","screen"} saved on move/resize
@@ -201,8 +203,8 @@ DEFAULT_SETTINGS = {
     # the key that shows or hides the bar, from any program (keys.py names it; "" is none). With Shift: the game
     # binds the plain F-keys. A Mac shows the desktop on F11, with Shift too, so it gets the next key down
     "game_toolbar_hotkey": "Shift+F10" if sys.platform == "darwin" else "Shift+F11",
-    "overlay_tint": "dark",       # the windows over the game: their glass colour (ui/npcoverlay.py TINTS)
-    "overlay_accent": "green",    # ... and their lit buttons' colour (ui/npcoverlay.py ACCENTS)
+    "overlay_tint": "dark",       # the windows over the game: their glass colour (ui/theme.py TINTS)
+    "overlay_accent": "green",    # ... and their lit buttons' colour (ui/theme.py ACCENTS)
 }
 
 
@@ -210,9 +212,23 @@ class Settings:
     path = DATA_DIR / "settings.json"
 
     def __init__(self):
-        self.data = {**DEFAULT_SETTINGS, **_read_json(self.path, {})}
+        stored = _read_json(self.path, {})
+        self.data = {**DEFAULT_SETTINGS, **stored}
+        self._appearance_to_tint(stored)
         self._sane_types()
         self._stored_language()
+
+    def _appearance_to_tint(self, stored: dict) -> None:
+        """Before the app's windows took the tints of the windows over the game they had two looks, "appearance":
+        "dark" or "light" (the default). A stored one becomes the tint once ("dark" the dark glass, anything else the
+        white one: the light look) and leaves the file. A tint stored already stays as it is (an older version, run
+        after this one, wrote its appearance back)."""
+        if "appearance" not in stored:
+            return
+        old = self.data.pop("appearance")
+        if "app_tint" not in stored:
+            self.data["app_tint"] = "dark" if old == "dark" else "white"
+        self.save()
 
     # stored in another shape than the default on purpose: a single bool from older versions, [reset, level]
     _ANY_TYPE = ("api_key_fallback", "usage_warned")

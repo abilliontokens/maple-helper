@@ -17,12 +17,6 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-@pytest.fixture(autouse=True)
-def restore_mode():
-    yield
-    theme.set_mode("dark")
-
-
 def _rgba(css: str) -> tuple[float, float, float, float]:
     c = theme.qcolor(css)
     return c.red(), c.green(), c.blue(), c.alpha() / 255
@@ -62,7 +56,7 @@ def _prop(rule: str, name: str) -> str:
 def test_warning_and_good_chips_read_on_dark_glass(selector):
     """VIS-2: the light-glass orange / green were drawn on dark glass too (2.4-3.4:1: the class grade letters were
     dim). Each chip's text is >= 4.5:1 on its own tint over a card (or the plain card, for the vote marks)."""
-    theme.set_mode("dark")
+    theme.set_look("dark", "orange", 1.0)
     c = theme.P()
     glass = "#%02X%02X%02X" % c["glass"]
     css = theme.stylesheet("Rubik", 14)
@@ -76,20 +70,20 @@ def test_warning_and_good_chips_read_on_dark_glass(selector):
 
 
 def test_light_chips_keep_their_colors():
-    theme.set_mode("light")
+    theme.set_look("white", "orange", 1.0)
     css = theme.stylesheet("Rubik", 14)
     assert _prop(_rule(css, "#TagWarn"), "color") == "#C9620A"
     assert _prop(_rule(css, "#TagGood"), "color") == theme.GOOD_TEXT_LIGHT
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_disabled_buttons_and_controls_look_disabled(app, mode):
+@pytest.mark.parametrize("tint", ["white", "dark"])
+def test_disabled_buttons_and_controls_look_disabled(app, tint):
     """VIS-4: only Primary / Send / StepBtn / Link had a :disabled rule; an answered chat choice row, "Check key"
     while it checks and the busy character menu were pixel-identical to live buttons."""
     from PySide6.QtWidgets import QPushButton, QToolButton
 
     from maplehelper.ui.controls import Select, Switch
-    theme.set_mode(mode)
+    theme.set_look(tint, "orange", 1.0)
     app.setStyleSheet(theme.stylesheet("Rubik", 14))
     makers = {name: (lambda name=name: QPushButton("Grind", objectName=name))
               for name in ("Chip", "Secondary", "Danger", "NowChip", "Quick", "TagChip", "ProfilePill")}
@@ -106,7 +100,7 @@ def test_disabled_buttons_and_controls_look_disabled(app, mode):
                 w.resize(90, 32)
                 shots.append(w.grab().toImage())
                 w.deleteLater()
-            assert shots[0] != shots[1], f"{name} looks the same disabled ({mode})"
+            assert shots[0] != shots[1], f"{name} looks the same disabled ({tint})"
     finally:
         app.setStyleSheet("")
 

@@ -164,13 +164,13 @@ class _FitScroll(QScrollArea):
 
 def draw_focus(w: QWidget) -> None:
     """The keyboard-focus ring on a card that opens from the keyboard (the app's focus ring covers buttons only):
-    the same orange as a focused search box, on the card's own rounded edge."""
+    the accent of a focused search box, on the card's own rounded edge."""
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QPainter, QPen
 
     p = QPainter(w)
     p.setRenderHint(QPainter.Antialiasing)
-    color = QColor(theme.ORANGE if theme.MODE == "dark" else theme.ORANGE_DEEP)
+    color = QColor(theme.ACCENT if theme.MODE == "dark" else theme.ACCENT_DEEP)
     color.setAlphaF(0.9)
     p.setPen(QPen(color, 2))
     p.drawRoundedRect(QRectF(w.rect()).adjusted(1, 1, -1, -1), 13, 13)
@@ -389,7 +389,7 @@ class HistoryDialog(GlassDialog):
                 actions.addWidget(go)
                 actions.addStretch(1)
                 pin = QPushButton(bidi.plain(t("pin"), rtl), objectName="Link")
-                pin.setIcon(theme.glyph_icon("pin", theme.accent_text(), 14))     # in the link's orange
+                pin.setIcon(theme.glyph_icon("pin", theme.accent_text(), 14))     # in the link's colour
                 pin.setCursor(Qt.PointingHandCursor)
                 pin.setAutoDefault(False)
                 pin.clicked.connect(lambda _=False, b=pin: (self.pin_requested.emit(question, p["a"]), b.setEnabled(False)))

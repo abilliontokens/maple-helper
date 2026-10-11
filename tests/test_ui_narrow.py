@@ -1,5 +1,5 @@
 """Narrow-window and wording fixes (offscreen Qt): wrapping tag rows, the chat at 470 px, no-character way back,
-orange text contrast, bidi of "40+", the "?" badge after a label's colon, session lines."""
+accent text contrast, bidi of "40+", the "?" badge after a label's colon, session lines."""
 import os
 import sys
 from types import SimpleNamespace
@@ -66,19 +66,19 @@ def test_adaptive_row_puts_the_button_under_a_narrow_field(app):
     assert row.minimumSizeHint().width() < 300
 
 
-def test_orange_text_is_darker_on_light_glass():
+def test_accent_text_is_darker_on_light_glass():
     from maplehelper.ui import theme
     try:
-        theme.set_mode("light")
+        theme.set_look("white", "orange", 1.0)
         css = theme.stylesheet("Rubik", 13)
-        assert theme.accent_text() == theme.ORANGE_TEXT_LIGHT
+        assert theme.qcolor(theme.accent_text()).valueF() < theme.qcolor(theme.ACCENT).valueF()
         link = css[css.index("QPushButton#Link, QPushButton#LinkDanger"):]
-        assert f"color: {theme.ORANGE_TEXT_LIGHT}" in link.split("}")[0]
-        assert "stop:1 #F07A12" in css           # the orange fills stay the brand orange
-        theme.set_mode("dark")
-        assert theme.accent_text() == theme.ORANGE and theme.accent_text(deep=True) == theme.ORANGE_DEEP
+        assert f"color: {theme.accent_text()}" in link.split("}")[0]
+        assert f"stop:1 {theme.ACCENT_DEEP}" in css           # the accent's fills stay the accent itself
+        theme.set_look("dark", "orange", 1.0)
+        assert theme.accent_text() == theme.ACCENT
     finally:
-        theme.set_mode("dark")
+        theme.set_look("white", "orange", 1.0)
 
 
 def test_a_trailing_plus_stays_with_its_number():

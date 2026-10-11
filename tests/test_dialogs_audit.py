@@ -228,11 +228,15 @@ def test_stepper_steps_with_the_arrow_keys(qapp):
 def test_settings_controls_have_screen_reader_names(env):
     from maplehelper.ui.controls import Switch
     from maplehelper.ui.dialogs import SettingsDialog
+    from maplehelper.ui.lookpick import Swatch
     s, profiles, kb = env
     dlg = SettingsDialog(s, profiles, kb, lambda *_: "")
     assert all(sw.accessibleName() for sw in dlg.findChildren(Switch))
     assert dlg.telemetry.accessibleDescription()                # its hint comes along
-    assert dlg.appearance.accessibleName() == "Appearance"
+    assert [w.accessibleName() for w in (dlg.look_tints, dlg.look_accents, dlg.look_opacity)] == [
+        "Glass colour", "Accent colour", "Opacity"]
+    assert {b.accessibleName() for b in dlg.look_tints.findChildren(Swatch)} >= {"White", "Midnight blue"}
+    assert all(b.accessibleName() for b in dlg.findChildren(Swatch))      # each tile and dot names its colour
     assert [b.accessibleName() for b in dlg.font.group.buttons()] == ["Small text", "Medium text", "Large text"]
     dlg.close()
 

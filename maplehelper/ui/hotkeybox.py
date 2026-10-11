@@ -57,9 +57,10 @@ def _held(mods) -> str:
     return "+".join(["Win" if m == "Meta" else m for m in keys.MODIFIERS if m in mods] + ["…"])
 
 
-def _qss(glass: bool, accent: str) -> str:
-    """The box in the app's own look (Settings), or in the glass over the game (the ⚙ panel: its accent, and the
-    glass's colours now, palette())."""
+def _qss(glass: bool, accent: str | None) -> str:
+    """The box in the app's own look (Settings: the app's accent now, accent None), or in the glass over the game
+    (the ⚙ panel: its accent, and the glass's colours now, palette())."""
+    accent = accent or theme.ACCENT
     if glass:
         p = palette()
         r, g, b = p.rim
@@ -95,7 +96,7 @@ class HotkeyBox(QWidget):
         self.t = t
         self._glass = glass
         self._key = key or ""
-        self._accent = theme.ORANGE
+        self._accent: str | None = None     # None: the app's accent (Settings), read each time it is styled
         self._listening = False
         self._mods: frozenset[str] = frozenset()      # held while listening, shown before the key comes
         self._refused = ""                              # the i18n key of why the last key can't be used
@@ -140,9 +141,9 @@ class HotkeyBox(QWidget):
     def listening(self) -> bool:
         return self._listening
 
-    def set_accent(self, colour: str) -> None:
-        """The ring while it listens in the windows' accent (the ⚙ panel's pick), and on the glass its colours now;
-        restyled only on a change."""
+    def set_accent(self, colour: str | None) -> None:
+        """The ring while it listens in the windows' accent (the ⚙ panel's pick; None: the app's own), and on the
+        glass its colours now; restyled only on a change."""
         self._accent = colour
         sheet = _qss(self._glass, colour)
         if sheet != self.styleSheet():
