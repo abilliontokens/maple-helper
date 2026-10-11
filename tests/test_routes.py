@@ -204,8 +204,9 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
              "npcs": [{"id": "8", "name": "Andre", "x": -72, "y": -12}]}]
     page = '<script src="/_next/static/chunks/app/msclassic/%5Blocale%5D/pathfinder/page-abc.js"></script>'
     js = 'let h=["000000001","000000002"];var r=/^[0-9]{9}$/'
+    from maplehelper import mapdata
     answers = {scrape_meowdb.MAPS_DATA: json.dumps(maps), scrape_meowdb.PATHFINDER: page,
-               scrape_meowdb.MAP_TERRAIN.format(id="000000003"): json.dumps({"vr": [-400, -300, 400, 300], "fh": []})}
+               mapdata.MAP_TERRAIN.format(id="000000003"): json.dumps({"vr": [-400, -300, 400, 300], "fh": []})}
     monkeypatch.setattr(scrape_meowdb, "fetch", lambda url, binary=False: answers.get(url, js))
     monkeypatch.setattr(scrape_meowdb, "DELAY_SECONDS", 0)
     monkeypatch.setattr(scrape_meowdb, "KB", tmp_path)
@@ -227,6 +228,49 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
     # the site down: the file we have stays
     monkeypatch.setattr(scrape_meowdb, "fetch", lambda url, binary=False: None)
     assert scrape_meowdb.scrape_routes() == 0 and (tmp_path / "routes.json").exists()
+
+
+def test_the_app_rebuilds_a_routes_file_without_the_hidden_teleports(tmp_path):
+    """0.18.0's KB carried a routes.json built before the hidden teleports: no dots on any platform. The app rebuilds
+    it from the site's map data (its taxi towns kept), once: a file with them, even all empty, is left alone, and the
+    site down leaves the old file as it was."""
+    from maplehelper import mapdata
+    old = {"source": "x", "taxi": ["000000001"],
+           "maps": [{"id": "000000001", "name": "A", "minimap": [160, 80, 80, 40], "portals": [], "npcs": []}]}
+    mapdata.write_routes(tmp_path / "routes.json", old)
+    maps = [{"id": "000000001", "name": "A", "hasMinimapImage": True, "minimapWidth": 160, "minimapHeight": 80,
+             "portals": [{"name": "door", "type": 1, "toMapId": "000000002", "x": 5, "y": 6}], "npcs": []},
+            {"id": "000000002", "name": "Shop", "portals": [], "npcs": [{"id": "8", "name": "Andre", "x": 0, "y": 0}]}]
+    asked = []
+    answers = {mapdata.MAPS_DATA: json.dumps(maps),
+               mapdata.MAP_TERRAIN.format(id="000000002"): json.dumps({"vr": [-400, -300, 400, 300]})}
+
+    def fetch(url):
+        asked.append(url)
+        return answers.get(url)
+    # the site down: nothing written, tried again later
+    assert mapdata.needs_refresh(tmp_path)
+    assert mapdata.refresh(tmp_path, fetch=lambda url: None, pause=lambda: None) is False
+    assert json.loads((tmp_path / "routes.json").read_text(encoding="utf-8")) == old
+    assert mapdata.refresh(tmp_path, fetch=fetch, pause=lambda: None) is True
+    data = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
+    assert data["taxi"] == ["000000001"]                                       # the old file's taxi towns stay
+    assert data["maps"][0]["hidden"] == [{"name": "door", "x": 5, "y": 6}]
+    assert data["maps"][1]["hidden"] == [] and data["maps"][1]["scene"] == [800, 600, 400, 300]
+    assert not (tmp_path / "routes.json.tmp").exists()
+    # done once: the rebuilt file (and a nightly one with no teleports at all) is never fetched again
+    asked.clear()
+    assert not mapdata.needs_refresh(tmp_path) and mapdata.refresh(tmp_path, fetch=fetch, pause=lambda: None) is False
+    assert asked == []
+
+
+def test_no_routes_file_is_not_an_old_one(tmp_path):
+    """Nothing to route with is not a file to rebuild: the app never fetches the site for a KB without routes."""
+    from maplehelper import mapdata
+    assert not mapdata.needs_refresh(tmp_path)
+    (tmp_path / "routes.json").write_text('{"maps": []}', encoding="utf-8")
+    assert not mapdata.needs_refresh(tmp_path)
+
 
 
 def test_validation_and_patch_notes(world, kb_copy, tmp_path):
