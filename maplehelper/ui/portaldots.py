@@ -1,6 +1,7 @@
 """Blue dots on the game's own minimap where the map's invisible teleports are (press-up and touch portals the game
 never draws), and a green ring around the NPC the player asked to be guided to (ui/npcoverlay.py): a click-through
-window laid over the minimap box the player drew. The map comes from each minimap read
+window laid over the minimap's box (LOCATION.box: the game's minimap window found at its top left, else the box the
+player drew), and moved with it. The map comes from each minimap read
 (ui/location.LOCATION.here), where its picture lies in the box from the fast follow between reads (LOCATION.follow:
 the marks move with the minimap's scroll, and go the moment the picture stops matching, a teleport or the loading
 screen). Hidden whenever there is nothing to place (no box, no read, a picture that doesn't match); the portal dots
@@ -53,17 +54,18 @@ class PortalDots(QWidget):
         LOCATION.changed.connect(self.refresh)
         LOCATION.followed.connect(self.refresh)
         LOCATION.guided.connect(self.refresh)
+        LOCATION.boxed.connect(self.refresh)      # the minimap window found elsewhere (or another size): over it
 
     def set_kb(self, kb: KnowledgeBase) -> None:
         self._kb = kb
         self.refresh()
 
     def refresh(self, _what: object = None) -> None:
-        """Place the dots and the guided NPC's ring from the live follow of the player's map (a Qt slot too:
-        LOCATION's signals carry what it re-reads). Never from a read's own view: it can be the last map's while
-        the reads wait to confirm a new one, and entering a shop flashed the street's dots back for a second
+        """Place the dots and the guided NPC's ring over LOCATION.box from the live follow of the player's map (a Qt
+        slot too: LOCATION's signals carry what it re-reads). Never from a read's own view: it can be the last map's
+        while the reads wait to confirm a new one, and entering a shop flashed the street's dots back for a second
         (live)."""
-        region = self._settings["minimap_region"]
+        region = LOCATION.box
         here = LOCATION.here
         if not isinstance(region, dict) or here is None:
             self._clear()

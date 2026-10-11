@@ -4,8 +4,9 @@ an equip's or a map's levels) and a muted line under it (HP and EXP, the NPC's r
 street), an item's NPC price on the end. A click opens the thing's own page in the detail window docked beside the
 search, the row lit in the accent while it shows: a header card with a larger picture, the name and its chips, then
 titled blocks — an NPC: where it stands and the way there; a monster: where it lives; an item: who drops and who
-sells it; a map: the way there and its monsters — with a way back through what was opened. Safe to sell? lists the
-items before anything is typed, the ones a current quest or recipe still needs first (NiaMeowDB's list,
+sells it; a map: the way there and its monsters — with a way back through what was opened. Every search lists its
+first rows before anything is typed (the monsters by level, then the NPCs; the maps and items by name); Safe to sell?
+lists the items, the ones a current quest or recipe still needs first (NiaMeowDB's list,
 sitedata.sell_list, sorted as its page sorts: the most needed first), each with its why-keep chips (quests,
 recipes, Repeatable) or a green Safe to sell and what an NPC pays; an All / Safe to sell / Keep switch narrows it,
 and a row opens the verdict with what needs it. The search is the one window over the game that takes the keyboard
@@ -34,8 +35,8 @@ from .npcoverlay import (BOTTOM, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE
 from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
-# the searches the toolbar offers: monsters and NPCs together (each row opens its own page), the maps (listed before
-# anything is typed), the items, and "sell" (the items again, safe to sell?, listed before anything is typed too)
+# the searches the toolbar offers: monsters and NPCs together (each row opens its own page), the maps, the items, and
+# "sell" (the items again, safe to sell?); each lists its first LIMIT rows before anything is typed
 KINDS = ("monster_npc", "map", "item", "sell")
 SELL_FILTERS = ("all", "safe", "keep")   # Safe to sell?'s switch: every item, those nothing needs, those something needs
 MIN_W, MIN_H = 260, 300             # the smallest the player can drag the window to
@@ -261,9 +262,9 @@ def _map_hits(kb) -> list[Hit]:
 
 
 _BUILDERS = {"monster": _monster_hits, "npc": _npc_hits, "item": _item_hits, "map": _map_hits}
-# the kinds listed before anything is typed (the first LIMIT): the maps by name, Safe to sell? the most needed first;
-# the rest wait for 2 letters
-BROWSE = {"map", "sell"}
+# the kinds listed before anything is typed (the first LIMIT): the monsters by level then the NPCs, the maps and the
+# items by name, Safe to sell? the most needed first (every kind the toolbar offers)
+BROWSE = {"monster_npc", "map", "item", "sell"}
 
 
 def _source(kb, kind: str) -> list[Hit]:
@@ -379,9 +380,9 @@ def search(kb, kind: str, query: str, limit: int = 50, sell: str = "all") -> tup
     """Every row of this kind whose name has all the query's words in it — case aside, the words in any order —
     up to `limit` of them, ranked: the exact name, then the names the query starts, then the rest; ties by
     name. The pair's other half is how many matched in all (the "and N more" line). A query under two letters
-    (spaces aside) is still being typed: nothing yet — but a BROWSE kind lists all of its rows (the maps by name,
-    Safe to sell? the most needed first). Safe to sell? searches only the rows its switch keeps (`sell`, one of
-    SELL_FILTERS)."""
+    (spaces aside) is still being typed: a BROWSE kind (every one the toolbar offers) lists all of its rows (the
+    monsters by level then the NPCs, the maps and items by name, Safe to sell? the most needed first), any other
+    kind nothing yet. Safe to sell? searches only the rows its switch keeps (`sell`, one of SELL_FILTERS)."""
     q = _fold(query or "")
     if len(q.replace(" ", "")) < 2:
         if kind in BROWSE:
@@ -1430,8 +1431,6 @@ class GameSearch(EdgeResize, QWidget):
         q = self._box.text()
         if self._kind == "sell" and sitedata.sell_list(self._kb) is None:
             text = t("sell_no_list")          # no chips, no switch to trust: say why
-        elif len(q.replace(" ", "")) < 2 and self._kind not in BROWSE:
-            text = t("search_type_more")
         elif not self._hits:
             text = t("search_none", q=q) if q.strip() else ""     # (the maps, before the KB's tables are built)
         elif self._total > len(self._hits):

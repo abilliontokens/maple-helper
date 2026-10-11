@@ -1,14 +1,21 @@
-"""Where the player is, refreshed every few seconds from the game's minimap (the box the player drew around it).
+"""Where the player is, refreshed every few seconds from the game's minimap.
 
-A QTimer ticks on the GUI thread; the read itself (the screenshot, then reading the minimap's title for the map
-and aligning its picture for the dot) runs on a worker thread, so the chat never freezes on it. The answer comes
-back through a signal, and the chat's character card and the map windows read it from ui/location.LOCATION. No box
-drawn yet: nothing runs.
+Every read finds the minimap first: the game's MINI MAP window always sits at the top left of the game's picture
+(gamearea.GameArea), so one grab of that corner and minimapfind.find_window place it, whatever its size (it changes
+with the map, and folds to its title strip inside a building). The box the player drew around it is the fallback,
+read when there is no game window or no minimap window in it. The box a read used goes to LOCATION.box: the windows
+over the game place themselves by it.
+
+A QTimer ticks on the GUI thread; the read itself (finding the window, the screenshot, then reading the minimap's
+title for the map and aligning its picture for the dot) runs on a worker thread, so the chat never freezes on it.
+The answer comes back through a signal, and the chat's character card and the map windows read it from
+ui/location.LOCATION.
 
 Between reads, while something draws on the game's minimap (the hidden-portal dots, or the guided NPC's ring), a
-fast follow (back to back while the minimap moves, every FOLLOW_IDLE_MS while it is still; no OCR) tracks where
-the aligned map's picture lies as the game scrolls the minimap, and says at once when it stops matching (a
-teleport, the loading screen): LOCATION.followed. That loss starts a whole read right away."""
+fast follow (back to back while the minimap moves, every FOLLOW_IDLE_MS while it is still; no OCR) grabs the last
+read's box and tracks where the aligned map's picture lies in it as the game scrolls the minimap, and says at once
+when it stops matching (a teleport, the loading screen): LOCATION.followed. That loss starts a whole read right
+away."""
 from __future__ import annotations
 
 import logging
@@ -16,9 +23,11 @@ import math
 import threading
 import time
 
+from PIL import Image
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import capture, minimap, routes
+from .. import capture, minimap, minimapfind, routes
+from ..gamearea import GameArea, valid_region
 from ..kb import KnowledgeBase
 from ..store import Settings
 from .location import LOCATION
@@ -34,19 +43,37 @@ FOLLOW_IDLE_MS = 150    # the fast follow's period while the minimap stands stil
                         # 60 ms, snapping after it, and a jump read as the dots bouncing (live)
 FOLLOW_HOLD_S = 1.0     # ... back to back until the minimap has stood still this long: the game scrolls it in 2-8 px
                         # steps, often a few hundred ms apart mid-jump
+CORNER_W, CORNER_H = 0.6, 0.75  # the part of the game's picture searched for its minimap window: its left 60% and top
+                                # 75% (the window always sits at the game's top left; one grab of that corner per read)
+
+
+def _window_box(found: tuple[int, int, int, int], rect: tuple[int, int, int, int],
+                size: tuple[int, int]) -> tuple[dict, tuple[int, int, int, int]]:
+    """A window found at `found` (x, y, w, h in the pixels of a grab of the capture rect `rect`, a picture of `size`)
+    as a box in capture pixels, with the part of the grab it covers. The edges are rounded to capture pixels first,
+    so that part is the very picture a grab of the box alone gives (a Retina grab has more pixels than points): the
+    fast follow grabs the box alone and only matches a picture of the read's size."""
+    x, y, w, h = rect
+    sx, sy = w / size[0], h / size[1]
+    fx, fy, fw, fh = found
+    left, top, right, bottom = round(fx * sx), round(fy * sy), round((fx + fw) * sx), round((fy + fh) * sy)
+    return ({"x": x + left, "y": y + top, "w": right - left, "h": bottom - top},
+            (round(left / sx), round(top / sy), round(right / sx), round(bottom / sy)))
 
 
 class MinimapScanner(QObject):
-    """Reads the drawn minimap box every few seconds and reports it through LOCATION.
+    """Reads the game's minimap every few seconds (its window, found at the game's top left; else the drawn box) and
+    reports it through LOCATION, with the box read.
 
     The Locator is built lazily once per KB and kept between reads (it holds the OCR engine, the header rows and
-    its lock on the picture); a KB update drops it so the next read rebuilds it. A read still going when the timer
-    ticks skips that tick (no pile-up). A box with no recognizable title backs off (a wasted read costs most of a
-    second of CPU); a hit reads every interval again, as does a restart (a new box)."""
+    its lock on the picture); a KB update drops it so the next read rebuilds it, and a read of another box than the
+    last one (a map change resizes the window) drops its lock. A read still going when the timer ticks skips that
+    tick (no pile-up). A read with no recognizable title, or nothing to read, backs off (a wasted read costs most of
+    a second of CPU); a hit reads every interval again, as does a restart (a new box, interval)."""
 
-    _found = Signal(object)       # Here | None: a read's answer, from the worker thread
-    _failed = Signal(str)         # a read's error as text ("Kind: message"), from the worker thread
-    _followed = Signal(object)    # a fast follow's answer: (map, View | None) | None, from the worker thread
+    _found = Signal(object, object)   # (Here | None, the box read | None): a read's answer, from the worker thread
+    _failed = Signal(str, object)     # a read's error as text ("Kind: message") and the box it had found (or None)
+    _followed = Signal(object)        # a fast follow's answer: (map, View | None) | None, from the worker thread
 
     def __init__(self, kb: KnowledgeBase, settings: Settings, parent=None):
         super().__init__(parent)
@@ -54,7 +81,14 @@ class MinimapScanner(QObject):
         self._settings = settings
         self._locator: minimap.Locator | None = None
         self._graph: routes.Graph | None = None
-        self._region: dict | None = None
+        self._region: dict | None = None      # the box the player drew (ints): the reads' fallback
+        self._box: dict | None = None         # the box the last read used, published; the fast follow grabs it
+        # the reads' own, worker thread only (one read at a time): the game's picture, the last box read (another
+        # one drops the locator's lock), and what was logged (a game window there, the minimap window's last size)
+        self._game = GameArea()
+        self._read_box: dict | None = None
+        self._game_seen = False
+        self._window_size: tuple[int, int] | None = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._follow_timer = QTimer(self)
@@ -81,7 +115,7 @@ class MinimapScanner(QObject):
         self._graph = None
 
     def reset_locator(self) -> None:
-        """Drop the locator's lock on the picture (a newly drawn box): the next read locks on again."""
+        """Drop the locator's lock on the picture (another box read, a restart): the next read locks on again."""
         if self._locator is not None:
             try:
                 self._locator.reset()
@@ -89,21 +123,16 @@ class MinimapScanner(QObject):
                 log.debug("minimap locator reset failed: %r", e)
 
     def restart(self) -> None:
-        """Settings changed (the box, the interval): pick them up. No box: stop scanning and forget the player."""
+        """Settings changed (the drawn box, the interval): pick them up. The reads run whether or not a box was drawn:
+        the minimap window is found on its own at the game's top left, the drawn box is only its fallback."""
         region = self._settings["minimap_region"]
         # ints for grab_image (a hand-edited float still reads the same box, not an error every interval)
-        self._region = {k: int(region[k]) for k in ("x", "y", "w", "h")} if self._valid(region) else None
+        self._region = {k: int(region[k]) for k in ("x", "y", "w", "h")} if valid_region(region) else None
         self.reset_locator()
         self._cooldown_until = 0.0     # a new box or interval: read right away, don't keep an old backoff
         self._miss_since = None
         self._pending = (None, 0)
         LOCATION.set_follow(None)
-        if self._region is None:
-            self._timer.stop()
-            self._follow_timer.stop()
-            LOCATION.set(None)
-            LOCATION.set_state("")
-            return
         self._timer.start(int(self._interval() * 1000))
         self._follow_timer.start(FOLLOW_IDLE_MS)
 
@@ -111,14 +140,6 @@ class MinimapScanner(QObject):
         """No read while the app goes (a read on its way finishes on its own)."""
         self._timer.stop()
         self._follow_timer.stop()
-
-    @staticmethod
-    def _valid(region) -> bool:
-        """A box the picker could have drawn: ints (or floats) with a size, not a stray dict."""
-        return (isinstance(region, dict)
-                and all(isinstance(region.get(k), (int, float)) and not isinstance(region.get(k), bool)
-                        for k in ("x", "y", "w", "h"))
-                and region["w"] > 0 and region["h"] > 0)
 
     def _interval(self) -> float:
         """The setting's seconds between reads, inside [MIN_INTERVAL, MAX_INTERVAL]."""
@@ -131,15 +152,14 @@ class MinimapScanner(QObject):
         return min(MAX_INTERVAL, max(MIN_INTERVAL, interval))
 
     def _tick(self) -> None:
-        if self._region is None:
-            return
         if time.monotonic() < self._cooldown_until:
-            return          # the box shows no minimap: a cold search costs seconds of CPU, don't run it every tick
+            return          # no minimap read lately: a cold search costs seconds of CPU, don't run it every tick
         with self._guard:
             if self._reading:
                 return          # the last read is still going: skip this tick, don't pile up
             self._reading = True
-        threading.Thread(target=self._read, args=(dict(self._region),), daemon=True).start()
+        drawn = dict(self._region) if self._region is not None else None
+        threading.Thread(target=self._read, args=(drawn,), daemon=True).start()
 
     def _locator_for(self) -> tuple:
         if self._locator is None:
@@ -147,19 +167,58 @@ class MinimapScanner(QObject):
             self._locator = minimap.Locator(self._graph)
         return self._locator, self._graph
 
-    def _read(self, region: dict) -> None:
+    def _read(self, drawn: dict | None) -> None:
+        """One read, on the worker thread: the minimap window found at the game's top left, else the drawn box. A box
+        other than the last one read (a map change resizes the window, the game moved, a box drawn) drops the
+        locator's lock on the picture, once: the same box keeps it."""
+        box = None
         try:
             locator, _ = self._locator_for()
-            img = capture.grab_image(region["x"], region["y"], region["w"], region["h"])
-            here = locator.locate(img)
+            found = self._window()
+            if found is not None:
+                box, img = found
+            elif drawn is not None:
+                box = drawn
+                img = capture.grab_image(box["x"], box["y"], box["w"], box["h"])
+            else:
+                img = None          # neither: nothing to read, a miss
+            if box is not None and box != self._read_box:
+                self._read_box = box
+                self.reset_locator()
+            here = locator.locate(img) if img is not None else None
         except Exception as e:      # noqa: BLE001 - a bad read is "unknown", never a crash
             with self._guard:
                 self._reading = False
-            self._failed.emit(f"{type(e).__name__}: {e}")
+            self._failed.emit(f"{type(e).__name__}: {e}", box)
             return
         with self._guard:
             self._reading = False
-        self._found.emit(here)
+        self._found.emit(here, box)
+
+    def _window(self) -> tuple[dict, Image.Image] | None:
+        """The game's minimap window: its box in capture pixels and its picture, from one grab of the top-left corner
+        of the game's picture; None with no game window, or no minimap window in it. The game window coming and going
+        logs once, and so does each new size of the minimap window (another map's)."""
+        play = self._game.find()
+        if (play is not None) != self._game_seen:
+            self._game_seen = play is not None
+            if play is None:
+                log.info("minimap: the game's window is gone")
+            else:
+                log.info("minimap: found the game's window, its picture at %d,%d (%dx%d)", *play)
+        if play is None:
+            return None
+        x, y, w, h = play
+        rect = (x, y, max(1, round(w * CORNER_W)), max(1, round(h * CORNER_H)))
+        corner = capture.grab_image(*rect)
+        found = minimapfind.find_window(corner)
+        if found is None:
+            return None
+        box, crop = _window_box(found, rect, corner.size)
+        if (box["w"], box["h"]) != self._window_size:
+            self._window_size = (box["w"], box["h"])
+            log.info("minimap: found the minimap window at %d,%d (%dx%d)", box["x"], box["y"], box["w"], box["h"])
+        return box, corner.crop(crop)
 
     def _wants_follow(self) -> bool:
         """The fast follow runs while something on the game's minimap moves with its scroll: the hidden-portal
@@ -174,17 +233,17 @@ class MinimapScanner(QObject):
         return guide is not None and guide[0] == here.map
 
     def _follow_tick(self) -> None:
-        if self._region is None or self._locator is None or not self._wants_follow():
+        if self._box is None or self._locator is None or not self._wants_follow():
             return
         with self._guard:
             if self._following:
                 return          # the last follow is still going: skip this tick
             self._following = True
-        threading.Thread(target=self._follow, args=(self._locator, dict(self._region)), daemon=True).start()
+        threading.Thread(target=self._follow, args=(self._locator, dict(self._box)), daemon=True).start()
 
-    def _follow(self, locator, region: dict) -> None:
+    def _follow(self, locator, box: dict) -> None:
         try:
-            got = locator.follow(capture.grab_image(region["x"], region["y"], region["w"], region["h"]))
+            got = locator.follow(capture.grab_image(box["x"], box["y"], box["w"], box["h"]))
         except Exception as e:      # noqa: BLE001 - a bad follow is no answer; the reads go on
             log.debug("minimap follow failed: %r", e)
             got = None
@@ -196,7 +255,7 @@ class MinimapScanner(QObject):
         """A fast follow's answer, back on the GUI thread. Nothing locked (or a failed follow) clears the follow: a
         stale one kept the dots where it last left them while the minimap scrolled on. Losing the picture starts a
         whole read at once (once per loss): it is what names the map the player arrived on."""
-        if self._region is None:
+        if self._box is None:
             return
         now = time.monotonic()
         if got is not None and got != LOCATION.follow:
@@ -221,11 +280,13 @@ class MinimapScanner(QObject):
         return max(3.0, 3.0 * self._interval())
 
     def _miss(self) -> None:
-        """A read with no recognizable title. A known map is never dropped for it (the owner's, 2026-10-08: the
-        card flipped to "not recognized" and back every few seconds and reset the way shown mid-walk): it stays
-        until a read names another map. Misses past the grace (or with no map known yet) only slow the reads to
-        max(2 s, 2 x interval) with a map kept, max(5 s, 5 x interval) with none: a wasted read costs most of a second of CPU; without this it ran back-to-back
-        forever. With no map known at all the card says "not recognized"."""
+        """A read with no recognizable title, or nothing to read (no minimap window found, no box drawn). A known map
+        is never dropped for it (the owner's, 2026-10-08: the card flipped to "not recognized" and back every few
+        seconds and reset the way shown mid-walk): it stays until a read names another map. Misses past the grace (or
+        with no map known yet) only slow the reads to max(2 s, 2 x interval) with a map kept, max(5 s, 5 x interval)
+        with none: a wasted read costs most of a second of CPU (a try without the game, little, but it need not run
+        every second either); without this it ran back-to-back forever. With no map known at all the card says "not
+        recognized"."""
         now = time.monotonic()
         if self._miss_since is None:
             self._miss_since = now
@@ -241,10 +302,21 @@ class MinimapScanner(QObject):
         self._cooldown_until = now + max(5.0, 5.0 * self._interval())
         LOCATION.set_state("unknown")
 
-    def _deliver(self, here) -> None:
-        """A read's answer, back on the GUI thread. Another map than the known one counts only once CONFIRM reads
-        in a row name it: one misread (the street line read alone, "Victoria Road", is a map's name too) must not
-        move the player and reset the way shown."""
+    def _use_box(self, box: dict | None) -> None:
+        """The box a read used, back on the GUI thread (None: no minimap window found, no box drawn): published, and
+        grabbed by the fast follow from now on. Another box than the last drops the follow, whose placing was in the
+        old one: the read's own placing starts it again in the new one."""
+        LOCATION.set_box(box)
+        if box != self._box:
+            self._box = box
+            LOCATION.set_follow(None)
+
+    def _deliver(self, here, box) -> None:
+        """A read's answer and the box it read, back on the GUI thread. The box goes out first: what places itself by
+        it (the dots, the NPC window) sits on the right box when the answer lands. Another map than the known one
+        counts only once CONFIRM reads in a row name it: one misread (the street line read alone, "Victoria Road",
+        is a map's name too) must not move the player and reset the way shown."""
+        self._use_box(box)
         if here is None:
             self._miss()
             return
@@ -274,9 +346,11 @@ class MinimapScanner(QObject):
                 name = here.map
             log.info("minimap: %s", name)
 
-    def _complain(self, error: str) -> None:
-        """A read's error, back on the GUI thread: logged once per distinct error, then a miss like an unrecognized
-        read (often the same cause)."""
+    def _complain(self, error: str, box) -> None:
+        """A read's error and the box it had found (None: it failed before one), back on the GUI thread: the box goes
+        out as a read's does, the error is logged once per distinct error, then a miss like an unrecognized read
+        (often the same cause)."""
+        self._use_box(box)
         if error not in self._logged_errors:
             if len(self._logged_errors) > 100:
                 self._logged_errors.clear()     # pathological: new errors every read must not grow forever

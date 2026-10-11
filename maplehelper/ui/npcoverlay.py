@@ -165,13 +165,15 @@ def palette() -> Palette:
 
 
 def ink(color: str) -> str:
-    """A coloured text's or chip's colour that reads on the glass now: as it is on the dark tints, darkened on the
-    white glass (the chips' light pastels vanish on white)."""
+    """A coloured text's or chip's colour ("#RRGGBB", or "#AARRGGBB" with its own alpha) that reads on the glass
+    now: as it is on the dark tints, darkened on the white glass (the chips' light pastels vanish on white). A
+    see-through colour keeps its alpha (#AARRGGBB, which style sheets read)."""
     if not _palette.light:
         return color
     c = QColor(color)
     h, s, v, a = c.getHsvF()
-    return QColor.fromHsvF(max(h, 0.0), min(1.0, s * 1.1 + 0.15), v * 0.55, a).name()
+    out = QColor.fromHsvF(max(h, 0.0), min(1.0, s * 1.1 + 0.15), v * 0.55, a)
+    return out.name(QColor.HexArgb) if a < 1.0 else out.name()
 
 
 def _rgba(color: str, alpha: float) -> str:
@@ -839,6 +841,21 @@ class GuideWindow(QWidget):
         self.legend.setVisible(shown)
 
 
+def minimap_box(settings, screens: list) -> QRect | None:
+    """Where the game's minimap window is on screen, in logical pixels, for the windows over the game to sit by:
+    LOCATION.box (found on its own at the game's top left, else the box the player drew, as the reads use it), else
+    the drawn box (settings["minimap_region"], before the first read); None while neither is there. `screens` is
+    [(geometry, devicePixelRatio)] of every screen."""
+    region = LOCATION.box if LOCATION.box is not None else _picked(settings, "minimap_region")
+    if not isinstance(region, dict):
+        return None
+    try:
+        box, _ = from_capture(region, screens, scale=sys.platform != "darwin")
+    except (KeyError, TypeError, ValueError):
+        return None
+    return box
+
+
 class _Header(QWidget):
     """The title row: dragging it moves the window (the ✕ in it still clicks)."""
 
@@ -896,11 +913,13 @@ class NpcOverlay(EdgeResize, QWidget):
         self._placed = False                 # geometry applied at least once: there is a place to remember
         self._collapsed = False              # folded to the header: no NPCs to list (_fit)
         self._full_h: int | None = None      # the height it opens back to from the fold
+        self._default_at: QPoint | None = None   # where it opened by the minimap with no place saved, until moved
         self._geom = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._remember)
         self.setStyleSheet(qss(self._settings))
         self._build()
         LOCATION.changed.connect(self.refresh)
         LOCATION.status.connect(self.refresh)    # the minimap recognized or not: the empty card's hint follows
+        LOCATION.boxed.connect(self._box_moved)  # the minimap window found, or found elsewhere
 
     # ------------------------------------------------------------ the panel
 
@@ -1012,8 +1031,8 @@ class NpcOverlay(EdgeResize, QWidget):
         icon = hint = ""
         if self._mid is None:
             key, icon = "npc_overlay_unknown", NO_MAP
-            hint = ("npc_overlay_unknown_box" if isinstance(_picked(self._settings, "minimap_region"), dict)
-                    else "npc_overlay_unknown_nobox")
+            # the game's minimap window found (or drawn) but its map not read yet, or no minimap window at all
+            hint = "npc_overlay_unknown_box" if LOCATION.box is not None else "npc_overlay_unknown_nobox"
         elif not self._npcs:
             key, icon, hint = "npc_overlay_none", NO_NPCS, "npc_overlay_none_hint"
         elif query and not self._shown:
@@ -1258,26 +1277,34 @@ class NpcOverlay(EdgeResize, QWidget):
         if self._collapsed:             # folded: the saved height waits for a map with NPCs
             self._full_h = size.height()
             size = QSize(size.width(), self.height())
-        self.setGeometry(QRect(spot if spot is not None else self._default_spot(size), size))
+        self._default_at = self._default_spot(size) if spot is None else None
+        self.setGeometry(QRect(spot if spot is not None else self._default_at, size))
         self._placed = True
 
     def _default_spot(self, size: QSize) -> QPoint:
-        """Just right of the drawn minimap box (the window is about the map in it), else the primary screen's
-        top-left corner."""
+        """Just right of the game's minimap window (minimap_box: the window is about the map in it), else the
+        primary screen's top-left corner."""
         screens = [(s.geometry(), s.devicePixelRatio()) for s in QGuiApplication.screens()]
-        region = self._settings["minimap_region"]
+        box = minimap_box(self._settings, screens)
         primary = QGuiApplication.primaryScreen().availableGeometry()
-        if isinstance(region, dict):
-            try:
-                box, _ = from_capture(region, screens, scale=sys.platform != "darwin")
-            except (KeyError, TypeError, ValueError):
-                box = None
-            if box is not None:
-                screen = next((g for g, _ in screens if g.intersects(box)), primary)
-                x = min(max(box.right() + 1 + GAP, screen.left()), screen.right() - size.width() + 1)
-                y = min(max(box.top(), screen.top()), screen.bottom() - size.height() + 1)
-                return QPoint(x, y)
+        if box is not None:
+            screen = next((g for g, _ in screens if g.intersects(box)), primary)
+            x = min(max(box.right() + 1 + GAP, screen.left()), screen.right() - size.width() + 1)
+            y = min(max(box.top(), screen.top()), screen.bottom() - size.height() + 1)
+            return QPoint(x, y)
         return primary.topLeft() + QPoint(SHADOW + 4, SHADOW + 4)
+
+    def _box_moved(self, box: dict | None) -> None:
+        """LOCATION.boxed: the game's minimap window found, or found elsewhere. Still where it opened by default
+        (the player hasn't moved it), the window moves beside the new box; the empty card's hint follows. A box
+        gone (the minimap closed) leaves it where it is."""
+        if not self.isVisible():
+            return
+        if box is not None and self._default_at is not None and self.pos() == self._default_at:
+            self._default_at = self._default_spot(QSize(self.width(), self._full_h if self._collapsed and self._full_h
+                                                        else self.height()))
+            self.move(self._default_at)
+        self._retext_status()
 
     def moveEvent(self, e) -> None:
         self._geom.start()

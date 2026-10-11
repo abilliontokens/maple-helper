@@ -1,5 +1,6 @@
 """The hidden-portal dots over the game's minimap (ui/portaldots.py): placed from each minimap read's view over the
-drawn box, hidden when there is nothing to place or the setting is off; and their Settings switch."""
+minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or the setting is off; and
+their Settings switch."""
 import os
 from types import SimpleNamespace
 
@@ -20,10 +21,10 @@ def qapp():
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = None, "", None, None
+    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = None, "", None, None, None
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = old
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = old
 
 
 @pytest.fixture
@@ -32,12 +33,13 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch):
     spots = {"010003000": [(0.5, 0.5), (0.9, 0.9), (0.0, 0.0)]}
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(hidden_spots=lambda m: spots.get(m, [])))
     s = isolated_store.Settings()
-    s["minimap_region"] = dict(BOX)
+    clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
     yield w, s, clean_location
     clean_location.changed.disconnect(w.refresh)
     clean_location.followed.disconnect(w.refresh)
     clean_location.guided.disconnect(w.refresh)
+    clean_location.boxed.disconnect(w.refresh)
     w.close()
 
 
@@ -53,7 +55,7 @@ def _place(loc, here):
 
 
 def test_dots_sit_on_the_box_where_the_map_was_placed(dots, qapp):
-    """Each hidden portal in view is a blue dot at its place in the drawn box; one outside the window shown is
+    """Each hidden portal in view is a blue dot at its place in the minimap's box; one outside the window shown is
     left out. The window covers the box exactly and never takes a click."""
     from PySide6.QtCore import QPointF, QRect, Qt
     w, _, loc = dots
@@ -81,13 +83,25 @@ def test_nothing_to_place_hides_the_dots(dots, change):
     elif change == "no_read":
         loc.set(None)
     elif change == "no_box":
-        s["minimap_region"] = None
-        w.refresh()
+        loc.set_box(None)                               # the minimap window gone, and no box drawn
     elif change == "none_in_view":
         _place(loc, _here(panel=(150, 150, 200, 200)))
     else:
         _place(loc, _here("100000000"))                 # a map with no hidden portals
     assert not w.isVisible() and w._dots == []
+
+
+def test_a_new_box_moves_the_dots_over_it(dots):
+    """The minimap window found elsewhere, or another size (a map with a bigger minimap): the dots' window covers the
+    new box at once, the dots at the same place in it; the drawn box in the settings plays no part."""
+    from PySide6.QtCore import QPointF, QRect
+    w, s, loc = dots
+    s["minimap_region"] = {"x": 900, "y": 900, "w": 50, "h": 50}
+    _place(loc, _here())
+    assert w.geometry() == QRect(100, 100, 200, 200)
+    loc.set_box({"x": 40, "y": 60, "w": 260, "h": 230})
+    assert w.isVisible() and w.geometry() == QRect(40, 60, 260, 230)
+    assert w._dots[0] == QPointF(60, 45)
 
 
 def test_the_guided_npc_rings_where_the_map_was_placed(dots):

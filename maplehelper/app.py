@@ -191,8 +191,9 @@ class MapleHelperApp:
         self.overlay.sync_finished.connect(self.grind.sync_done)     # before the tools window redraws (below)
         self.grind.sync()          # a session running when the app last closed goes on (unless it was left idle)
         self.overlay.tools_requested.connect(lambda: self.show_tools())
-        # where the player is, read from the game's minimap every few seconds (the box they drew around it): the
-        # character card says it, and the map windows draw the way from there (ui/minimapscan.py)
+        # where the player is, read from the game's minimap every few seconds (its window found at the game's top
+        # left, else the box the player drew around it: LOCATION.box): the character card says it, and the map
+        # windows draw the way from there (ui/minimapscan.py)
         from .ui.minimapscan import MinimapScanner
         self.minimap_scanner = MinimapScanner(self.kb, self.settings)
         self.minimap_scanner.restart()
@@ -722,7 +723,8 @@ class MapleHelperApp:
         self.open_window("settings", make, on_close=self.overlay.refresh_profile_chip)
 
     def pick_minimap(self):
-        """The character card's minimap button: draw the box around the game's minimap; the reads start from it."""
+        """The character card's minimap button: draw the box around the game's minimap, the reads' fallback when
+        its window isn't found at the game's top left on its own."""
         self._pick_region("minimap_region", "minimap_pick_hint", getattr(self, "minimap_scanner", None))
 
     def pick_loot_area(self):
@@ -754,10 +756,9 @@ class MapleHelperApp:
             return                  # not a box: keep whatever was there
         self.settings[setting] = {k: int(rect[k]) for k in ("x", "y", "w", "h")}  # saves, like every setting
         if scanner is not None:
-            scanner.restart()       # (the minimap's also resets the locator's lock onto the new box)
-        dots = getattr(self, "portal_dots", None)
-        if dots is not None:
-            dots.refresh()          # over the new box at once: its first read may equal the last and signal nothing
+            # (the minimap's: the drawn box is its fallback; LOCATION.box, and the windows placed by it, follow
+            # once the scanner reads from it)
+            scanner.restart()
         if setting == "loot_region":
             self._tools_call("loot_changed")
 
