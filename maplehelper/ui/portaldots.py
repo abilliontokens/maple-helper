@@ -19,7 +19,7 @@ from ..kb import KnowledgeBase
 from ..store import Settings
 from . import theme
 from .location import LOCATION
-from .npcoverlay import set_capturable
+from .npcoverlay import keep_over_game, set_capturable
 from .regionpick import from_capture
 
 log = logging.getLogger("maplehelper")
@@ -42,6 +42,7 @@ class PortalDots(QWidget):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                          | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self._kb = kb

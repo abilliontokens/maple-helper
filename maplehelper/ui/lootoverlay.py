@@ -29,6 +29,7 @@ from . import theme
 from .glass import SHADOW
 from .npcoverlay import (BOTTOM, FILL1, FILL2, GEOM_DEBOUNCE_MS, MUTED, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN,
                          SIDE, TEXT, TOP, _Header, _flags, _paint_glass, accent_of, set_capturable)
+from .npcoverlay import keep_over_game
 from .widgets import fit_picture, zoom_on_hover
 
 WIDTH = 320 + 2 * SHADOW        # the panel 320 px wide (the NPCs window's), past its shadow rim: three tiles abreast
@@ -383,6 +384,7 @@ class LootOverlay(QWidget):
     def __init__(self, scanner, settings, kb, t: I18n | None = None):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setWindowTitle("Maple Helper")

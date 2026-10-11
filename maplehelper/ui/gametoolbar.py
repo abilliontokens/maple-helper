@@ -54,6 +54,7 @@ from .npcoverlay import (
     apply_look,
     set_capturable,
 )
+from .npcoverlay import keep_over_game
 from .regionpick import from_capture
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
@@ -409,6 +410,7 @@ class _SettingsPanel(QWidget):
         # like the search window, not the bar's own flags: it takes the keyboard once clicked, for Esc and the key box
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self._bar = bar
         self._settings = bar._settings
@@ -678,6 +680,7 @@ class GameToolbar(EdgeResize, QWidget):
     def __init__(self, settings: Settings, t: I18n):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setMouseTracking(True)          # hovering a side shows the resize cursor

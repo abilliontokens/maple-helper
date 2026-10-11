@@ -364,6 +364,10 @@ def set_capturable(w: QWidget, settings) -> None:
     the read) and the chat's game screenshots would carry it too; with settings["overlays_in_screenshots"] on they
     do, so the player can screenshot what the overlays show. Set on every show, and by the app when the setting
     flips. Older Windows draws it into the shot either way, where the reader's matching leaves the markers out."""
+    if sys.platform == "darwin":
+        from .. import osapi
+        osapi.float_over_fullscreen(int(w.winId()))     # on the game's Space when it runs fullscreen too
+        return
     if sys.platform != "win32":
         return
     try:
@@ -378,6 +382,14 @@ def set_capturable(w: QWidget, settings) -> None:
 def _flags() -> Qt.WindowType:
     """Over the game, frameless, and never taking the keyboard from it (clicks still work)."""
     return Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
+
+
+def keep_over_game(w: QWidget) -> None:
+    """Every window over the game stays when the player clicks the game. macOS hides an app's tool windows
+    (Qt.Tool) whenever another app is in front, so a click on the game took the bar and its windows away. Call it
+    in the constructor: Qt hands the attribute to the native window only when it makes one (QWidgetPrivate::create,
+    then QCocoaWindow sets hidesOnDeactivate from it)."""
+    w.setAttribute(Qt.WA_MacAlwaysShowToolWindow)
 
 
 def dock_beside(win: QWidget, owner: QWidget, gap: int = GUIDE_GAP) -> None:
@@ -681,6 +693,7 @@ class GuideWindow(QWidget):
     def __init__(self, owner: NpcOverlay):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_AlwaysShowToolTips)      # the picture's zoom while the game has the keyboard
         self.setFocusPolicy(Qt.NoFocus)
@@ -811,6 +824,7 @@ class NpcOverlay(EdgeResize, QWidget):
     def __init__(self, kb: KnowledgeBase, settings: Settings, t: I18n):
         super().__init__(None, _flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
+        keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_AlwaysShowToolTips)      # a picture's zoom while the game has the keyboard
         self.setFocusPolicy(Qt.NoFocus)
