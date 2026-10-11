@@ -1,4 +1,6 @@
 """The portrait comes from the player's name tag found in the pixels, not from the AI's rough box alone."""
+from pathlib import Path
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -94,3 +96,109 @@ def test_a_bush_beside_the_sprite_is_not_part_of_it():
     assert not m[95:125, :30].any()                      # the bush at the crop's left edge
     assert m[20:60, 50:90].mean() > 0.9                  # the head
     assert m[125:140, 45:75].any()                       # the feet stay
+
+
+def test_official_client_tag_with_soft_letters_and_an_overlapped_pair():
+    # MapleStory Classic World scales its picture up, so the letters are light grey (at 225 the tag went unseen and
+    # a "Hm" quick-slot box became the portrait); two overlapping tags make a short piece that must not count
+    import numpy as np
+    from PIL import Image
+
+    from maplehelper import portrait
+    a = np.asarray(Image.open(Path(__file__).parent / "fixtures" / "classic_world_tags.png").convert("RGB"))
+    assert all(abs(t[3] - 29) <= 3 for t in portrait.find_name_tags(a))
+    left, top, right, bottom = portrait.portrait_rect(a, None, "Kalimero")
+    assert 470 <= (left + right) / 2 <= 610 and 590 <= bottom <= 620       # standing on the tag at (525, 608)
+
+
+def _fixture(name):
+    return np.asarray(Image.open(Path(__file__).parent / "fixtures" / name).convert("RGB"))
+
+
+def _learned():
+    return (np.asarray(Image.open(Path(__file__).parent / "fixtures" / "classic_letters_kalimero.png").convert("L"))
+            > 127).astype(np.float32)
+
+
+def test_the_learned_letters_find_the_tag_in_a_crowd():
+    # "Oldcc Kalimero": two tags merged into one plate, which plate finding misses; the letters search finds it
+    from maplehelper.portrait import find_learned
+    hit = find_learned(_fixture("classic_crowd.png"), _learned())
+    assert hit is not None and abs(hit[0][0] - 310) <= 4 and abs(hit[0][1] - 273) <= 3
+    left, top, right, bottom = portrait_rect(_fixture("classic_crowd.png"), None, "Kalimero", _learned())
+    assert abs((left + right) / 2 - 360) <= 6 and abs(bottom - 278) <= 4
+
+
+def test_the_name_in_the_games_own_ui_is_no_tag():
+    # the same letters in the status bar and over a shop window's portrait: no plate edge above them
+    for name in ("classic_status_bar.png", "classic_shop_label.png"):
+        assert portrait_rect(_fixture(name), None, "Kalimero", _learned()) is None, name
+
+
+def test_a_tag_found_by_the_drawn_name_hands_its_letters_over_to_learn():
+    found = {}
+    assert portrait_rect(_fixture("classic_world_tags.png"), None, "Kalimero", None, found) is not None
+    letters = found["letters"]
+    assert letters.shape[0] >= 10 and letters.shape[1] > 3 * letters.shape[0]
+
+
+def test_a_soft_outlined_sprite_against_bricks_comes_out_whole():
+    # the scaled-up official client softens the outline: the flood took the hat and face along with the bricks
+    from maplehelper.portrait import sprite_mask
+    m = sprite_mask(_fixture("classic_sprite_bricks.png"))
+    assert m is not None and 0.3 <= m.mean() <= 0.55
+    rows = np.flatnonzero(m.any(axis=1))
+    assert rows[0] <= 30 and rows[-1] >= 140                    # the hat's top down to the feet
+    assert not m[:12].any()                                    # the bricks above the hat are gone
+
+
+def _beam() -> np.ndarray:
+    """A dark beam over a lighter wall, plate-wide for the name, with bright speckle where letters would start:
+    the live scenery (bricks, a beam, a shop sign) that became a magician's portrait."""
+    rng = np.random.default_rng(7)
+    img = np.full((500, 800, 3), 180, np.uint8)
+    img[300:330, 200:310] = (72, 72, 72)
+    band = img[308:317, 200:310]
+    band[rng.random(band.shape[:2]) < 0.10] = (205, 205, 205)
+    return img
+
+
+def test_a_scenery_edge_of_the_right_width_is_no_portrait():
+    # live (2026-10-07): the tag search found nothing for "formatme", yet a beam of the right width near the AI's
+    # box became the portrait. Without the name's letters, no rect, even with a plate-shaped edge by the box
+    box = [240 / 800, 250 / 500, 40 / 800, 60 / 500]      # the AI pointed just above the beam
+    assert portrait_rect(_beam(), box, "Formatme", None) is None
+
+
+def test_another_players_tag_with_the_wrong_name_is_no_portrait():
+    # another player's tag by the AI's box spells their name, not ours: its width fitting is not enough either
+    box = [0.10, 0.10, 0.05, 0.06]                        # next to the other tag at (104, 102)
+    assert portrait_rect(_fixture("classic_world_tags.png"), box, "Formatme", None) is None
+
+
+def test_a_scenery_cutout_does_not_reach_the_feet():
+    # the live portrait's cut-out is a band across the top (rows 0-53 of 128) with the bottom half transparent;
+    # a real cut-out stands on the tag at the crop's bottom
+    from maplehelper.portrait import mask_reaches_feet, sprite_mask
+    scenery = np.asarray(Image.open(Path(__file__).parent / "fixtures" / "portrait_scenery_live.png"))
+    assert not mask_reaches_feet(scenery[..., 3] > 127)
+    crop = np.zeros((100, 100, 3), np.uint8)
+    crop[:] = (150, 210, 120)
+    crop[20:80, 30:70] = (20, 20, 20)
+    crop[22:78, 32:68] = (200, 60, 60)
+    assert mask_reaches_feet(sprite_mask(crop))
+    for name in ("portrait_bush.png", "classic_sprite_bricks.png"):
+        assert mask_reaches_feet(sprite_mask(_fixture(name))), name
+
+
+def test_a_spritless_cutout_is_no_portrait():
+    """A rect without a sprite in it (the nameless scene's grass, no outline to cut out) keeps the job picture
+    instead of saving the scenery as the portrait."""
+    import io
+
+    from maplehelper.ui.overlay import crop_portrait
+    img = _scene()
+    H, W = img.shape[:2]
+    buf = io.BytesIO()
+    Image.fromarray(img).save(buf, "JPEG")
+    assert crop_portrait(buf.getvalue(), [600 / W, 250 / H, 60 / W, 90 / H], None, "", False) is None

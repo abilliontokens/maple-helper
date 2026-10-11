@@ -47,7 +47,7 @@ def test_onboarding_relabels_the_connect_page_for_codex(env):
     assert dlg.install_btn.text() == "Install Claude Code (Anthropic's official tool)"
     dlg._on_provider("codex")
     assert s["provider"] == "codex"
-    assert dlg.install_btn.text() == "Install ChatGPT (Codex, OpenAI's official tool)"
+    assert dlg.install_btn.text() == "Install Codex (OpenAI's official tool for ChatGPT)"
     assert dlg.login_btn.text() == "Sign in with ChatGPT"
     assert "OpenAI" in dlg.key_edit.placeholderText()
     assert "OpenAI" in dlg.privacy_label.text()
@@ -61,7 +61,7 @@ def test_onboarding_relabels_the_connect_page_for_gemini(env, monkeypatch):
     dlg = Onboarding(s, profiles, kb, lambda *_: "")
     dlg._on_provider("gemini")
     assert s["provider"] == "gemini"
-    assert dlg.install_btn.text() == "Install Gemini (Google Antigravity, Google's official tool)"
+    assert dlg.install_btn.text() == "Install Google Antigravity (Google's official tool for Gemini)"
     assert dlg.login_btn.text() == "Sign in with Google"
     assert "AIza" in dlg.key_edit.placeholderText()
     assert "the AI you chose (currently Google's Gemini)" in dlg.privacy_label.text()
@@ -289,7 +289,7 @@ def test_settings_offers_install_and_says_when_a_sign_in_timed_out(env, monkeypa
     s["provider"] = "codex"
     dlg = SettingsDialog(s, profiles, kb, lambda *_: "")
     dlg._on_account({"status": "not_installed", "email": None, "provider": "codex"})
-    assert not dlg.install_btn.isHidden() and dlg.install_btn.text() == "Install ChatGPT (Codex, OpenAI's official tool)"
+    assert not dlg.install_btn.isHidden() and dlg.install_btn.text() == "Install Codex (OpenAI's official tool for ChatGPT)"
     dlg._on_account({"status": "logged_out", "email": None, "provider": "codex"})
     assert dlg.install_btn.isHidden()
 
@@ -307,7 +307,7 @@ def test_settings_offers_install_and_says_when_a_sign_in_timed_out(env, monkeypa
     dlg.close()
 
 
-def test_settings_esc_keeps_unsaved_changes_and_keys_must_differ(env):
+def test_settings_esc_keeps_unsaved_changes_and_has_no_keys(env):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
     from maplehelper.ui.dialogs import SettingsDialog
@@ -317,16 +317,8 @@ def test_settings_esc_keeps_unsaved_changes_and_keys_must_differ(env):
     dlg.rejected.connect(lambda: closed.append(True))
     QTest.keyClick(dlg, Qt.Key_Escape)
     assert not closed
-    dlg.hk_voice.setCurrentText(dlg.hk_toggle.currentText())
-    assert not dlg.save_btn.isEnabled() and not dlg.keys_error.isHidden()
-    dlg._save()
-    assert s["hotkey_voice"] != s["hotkey_toggle"]           # not saved like that
-    # any other key the list offers (F12 is not offered on Windows: it never registers; macOS's toggle is F11)
-    from maplehelper.ui.dialogs import hotkey_choices
-    other = next(k for k in hotkey_choices((s["hotkey_toggle"], s["hotkey_voice"]))
-                 if k not in (dlg.hk_toggle.currentText(), ""))
-    dlg.hk_voice.setCurrentText(other)
-    assert dlg.save_btn.isEnabled() and dlg.keys_error.isHidden()
+    # no keyboard shortcuts any more: the official client in front takes every key from other programs
+    assert not hasattr(dlg, "hk_toggle") and not hasattr(dlg, "hk_voice") and dlg.save_btn.isEnabled()
     dlg.close()
 
 
@@ -366,7 +358,7 @@ def test_install_runs_inside_the_app_and_shows_why_it_failed(env, monkeypatch):
     dlg = Onboarding(s, profiles, kb, lambda *_: "")
     dlg._on_provider("codex")
     dlg._start_install()
-    assert not dlg.install_panel.isHidden() and "Installing ChatGPT" in dlg.install_panel.title.text()
+    assert not dlg.install_panel.isHidden() and "Installing Codex" in dlg.install_panel.title.text()
     assert dlg.install_btn.isHidden()
     inst.lines.append("Downloading Codex 1.2.3")
     dlg.install_panel._tick()

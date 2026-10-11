@@ -51,7 +51,6 @@ def overlay(isolated_store, kb, monkeypatch):
     ov.show()
     yield ov
     ov.hide()
-    ov.bubble.hide()
     ov.deleteLater()
 
 
@@ -80,6 +79,33 @@ def test_focus_ring_only_for_keyboard_focus():
     a.setFocus(Qt.MouseFocusReason)          # a click: no ring anywhere
     pump()
     assert a.findChild(theme._Ring) is None and theme._FOCUS_RING.ring is None
+    w.close()
+
+
+def test_a_clicked_button_that_hides_itself_rings_nothing():
+    """"Update now" turns into the download's progress: Qt hands its focus to the next button as if Tab were
+    pressed, and the search button showed the orange ring (the owner's, 2026-10-08)."""
+    from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+    from maplehelper.ui import theme
+    theme.install_focus_ring()
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    search, update = QPushButton("search"), QPushButton("update")
+    lay.addWidget(search)
+    lay.addWidget(update)
+    w.show()
+    pump()
+    update.setFocus(Qt.MouseFocusReason)      # clicked
+    pump()
+    update.hide()                             # its own click hid it
+    pump()
+    assert search.findChild(theme._Ring) is None and theme._FOCUS_RING.ring is None
+    update.show()
+    update.setFocus(Qt.MouseFocusReason)
+    pump()
+    search.setFocus(Qt.TabFocusReason)        # a real Tab still rings
+    pump()
+    assert search.findChild(theme._Ring) is not None
     w.close()
 
 
@@ -124,16 +150,17 @@ def test_tab_order_follows_the_screen(overlay):
     order = overlay.tab_order()
     pos = {w: i for i, w in enumerate(order)}
     must = [overlay.history_btn, overlay.close_btn, overlay.profile_card.refresh, overlay.profile_card.now_btn,
-            overlay.clear_tags_btn, overlay.recapture_btn, overlay.input, overlay.mic_btn]
+            overlay.clear_tags_btn, overlay.recapture_btn, overlay.input, overlay.clear_btn, overlay.mic_btn]
     assert all(w in pos for w in must)
-    # header, then the character card, then the tagged cards, then the input row (camera, field, mic)
+    # header, then the character card, then the tagged cards, then the input row (camera, field, clear, mic)
     assert pos[overlay.history_btn] < pos[overlay.profile_card.now_btn] < pos[overlay.clear_tags_btn] \
-        < pos[overlay.recapture_btn] < pos[overlay.input] < pos[overlay.mic_btn]
+        < pos[overlay.recapture_btn] < pos[overlay.input] < pos[overlay.clear_btn] < pos[overlay.mic_btn]
     overlay.activateWindow()
     overlay.input.setFocus()
     pump(50)
     if app.focusWidget() is not overlay.input:
         pytest.skip("the window didn't get keyboard focus (another window is active during the full run)")
+    assert overlay.focusNextPrevChild(True) and app.focusWidget() is overlay.clear_btn
     assert overlay.focusNextPrevChild(True) and app.focusWidget() is overlay.mic_btn
     overlay.focusNextPrevChild(True)
     assert app.focusWidget() is order[0]                 # round to the header
@@ -176,7 +203,7 @@ def test_thirteenth_pin_asks_before_dropping_the_oldest(overlay):
     overlay.pin_answer("new q", "new a")
     assert len(pins.items(overlay.settings, cid)) == pins.MAX_PINS
     assert not any(p["a"] == "new a" for p in pins.items(overlay.settings, cid))      # nothing dropped yet
-    row = overlay.feed_lay.itemAt(overlay.feed_lay.count() - 2).widget()
+    row = overlay.feed_lay.itemAt(overlay.feed_lay.count() - 1).widget()
     yes = row.chips[0]
     yes.click()
     have = [p["a"] for p in pins.items(overlay.settings, cid)]
@@ -553,7 +580,7 @@ def test_class_change_in_chat_asks_and_advancement_does_not(overlay):
     c = overlay.profiles.active                    # Thief / Assassin, Lv. 32
     overlay._apply_profile_update({"job": "Cleric", "level": 55})
     assert (c.job, c.level) == ("Assassin", 32)
-    row = overlay.feed_lay.itemAt(overlay.feed_lay.count() - 2).widget()
+    row = overlay.feed_lay.itemAt(overlay.feed_lay.count() - 1).widget()
     assert len(row.chips) == 3
     row.chips[0].click()                           # "Update"
     assert c.job == "Cleric" and c.level == 55 and c.base_class == "Magician"

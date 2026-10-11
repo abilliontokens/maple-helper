@@ -29,7 +29,7 @@
 
 ## About
 
-Maple Helper is a desktop assistant for Windows and macOS that puts a chat overlay on top of MapleStory Classic World. Press **F9** to open it, then type a question or press **F10** to speak (press again to stop). Answers come from your own AI account (Claude, ChatGPT, Gemini or Grok) and draw on a screenshot of your game, your character profile, previous conversations, and a local copy of the NiaMeowDB game database.
+Maple Helper is a desktop assistant for Windows and macOS that puts a chat overlay on top of MapleStory Classic World. Open it from the Maple Helper icon by the clock (the menu bar on macOS), then type a question or click the microphone to speak (click again to stop). Answers come from your own AI account (Claude, ChatGPT, Gemini or Grok) and draw on a screenshot of your game, your character profile, previous conversations, and a local copy of the NiaMeowDB game database.
 
 Use it to look up drops, find quest NPCs, or ask where to train without switching away from the game. The **play tools** window adds calculators and planners that read the same database: where to train, hit and damage, your build, quests for your level, crafting, citizenship and prices.
 
@@ -44,7 +44,7 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
   </picture>
 </p>
 <h3 align="center">Ask about anything in the game</h3>
-<p align="center">Press <b>F9</b> in game and ask. Instant answers come straight from the game database, with a card for the monster and pictures of everything it drops.</p>
+<p align="center">Open the chat in game and ask. Instant answers come straight from the game database, with a card for the monster and pictures of everything it drops.</p>
 
 <br>
 
@@ -187,7 +187,7 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
   </picture>
 </p>
 <h3 align="center">Make it yours</h3>
-<p align="center">Light or dark appearance, hotkeys, language, font size, answer length, and your AI (Claude, ChatGPT, Gemini or Grok) with its account and plan usage.</p>
+<p align="center">Light or dark appearance, language, font size, answer length, and your AI (Claude, ChatGPT, Gemini or Grok) with its account and plan usage.</p>
 
 ## Download
 
@@ -197,21 +197,25 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
 
 ## Features
 
-- **In-game chat:** Open and close the overlay with a global hotkey, and resize it from any edge or corner.
+- **In-game chat:** Open the overlay from the tray icon, the desktop shortcut or the taskbar, and resize it from any edge or corner.
 - **Your choice of AI:** Claude, ChatGPT, Gemini or Grok, on your own account or an API key. The app installs each one's official tool for you, with the progress shown in the app, and you can switch any time in settings.
 - **Stays on the game:** Questions that aren't about MapleStory Classic get a short note instead of an answer, and the answer comes in the language you asked in.
 - **Screen context:** Capture the game window when you open the overlay, with a camera button to refresh the screenshot.
 - **Character profiles:** Track your level, job, map, and active quests, with updates based on your conversations and screenshots. Edit, delete or switch characters from the character card's menu.
 - **Conversation memory:** Keep separate chat history and session summaries for each character.
 - **Visual reference cards:** See images of relevant monsters, items, maps, NPCs, and quests alongside answers, grouped under titles (for example, what a monster drops).
+- **Where it is on the map:** The ◎ on a map, NPC or quest (on its card, or its tile under "Maps", "NPCs" or "Quests") opens a window beside the chat. A map shows the map next door with an orange dot on the portal that leads in, as NiaMeowDB marks it ("Leads back here"); an NPC, its map with a green dot where it stands (one inside a shop: the shop's door); a quest, where to start it and where to turn it in. The window reopens wherever you last left it.
+- **Where you are, from the minimap:** The minimap button on the character card (beside ⟳) lets you drag a box around the game's minimap. Maple Helper then reads it every second (Settings → "Minimap scan, in seconds": half a second, 1, 2, 5 or 10 seconds), reading the map you're in from the minimap's title, and shows it under your level. While it knows where you are, the ◎ window draws the way there from your map, step by step with your blue dot on the first map (a legend tells it from the portal's orange one), and the play tools' "How to get there" starts from your map.
 - **Tag cards:** Tap one or more cards to ask follow-up questions about them, such as "where is it?" or "which one is easier for me?".
 - **Who drops it:** Ask which monsters drop an item and get the answer grouped by monster, with pictures.
+- **Item details:** The ⓘ on an item's card or tile opens a window to the right of the chat with all the item's stats from its NiaMeowDB page, the monsters that drop it (with their level, map and an "Ask in chat" button), and NiaMeowDB's "Meow Notes". The window reopens wherever you last left it.
 - **Guides library:** 32 full guides (every class, grind maps, the EXP table, the damage formula and more) with skill and item icons, character art, tables and tips, in English and Hebrew. The ones that fit your character come first.
 - **Plan usage:** See how much of your Claude, ChatGPT or Gemini plan is used, with a heads-up in the chat before the 5-hour limit runs out, and a saver mode.
 - **Play tools:** A window of calculators and planners beside the chat, built from the game database and your character, every page linked to the others (a monster's way there, its hit & damage, an item's droppers and price):
   - **Grind spots:** maps for your level, ranked, with your hit chance, hits to kill, EXP per kill and kills to level.
-  - **Grind tracker:** a grind session measured from screenshots (EXP, mesos and potions per hour, estimated kills, recent sessions to compare).
+  - **Grind tracker:** a grind session measured from screenshots (EXP, mesos and potions per hour, estimated kills, recent sessions to compare). Level and EXP are read off the bottom bar on your computer; the AI is asked only while the inventory is open (mesos, potions, loot).
   - **Farming:** who drops each item, where and at what level; monsters that drop what your quests, recipes and starred items need come first, then what an NPC pays most for; a farm session counts what lands in your bag.
+  - **Loot log:** press Start and every "You received EXP", "You have gained mesos" and "x1 earned" message is counted on your computer, each one once: EXP, mesos and items picked up, per hour, what an NPC pays for the items, the latest pickups and your saved logs. The messages are found on their own at the game window's bottom right, at any resolution or window size (or mark the area yourself). A small see-through card over the game shows the running totals (drag it anywhere, its × hides it). Every log and pickup is also kept for good in a database on your computer (`loot.sqlite` in the app's data folder), with the time and what an NPC paid for each item, so any day can be looked back on. No AI and no screenshots sent anywhere.
   - **Quests:** by level, a full card for each quest (where to get it, what to do, what to bring and where to get it, who to finish with, the rewards), daily and weekly quests that come back, and a search that forgives typos.
   - **Crafting:** each profession's teacher and quests, and every recipe by level, searchable by name or ingredient, with who drops each ingredient.
   - **Citizenship:** the Henesys and Kerning City quests by citizenship grade, and the town the guide recommends for your class.
@@ -259,7 +263,7 @@ Windows may show **Windows protected your PC** the first time, because the app i
 
 The Mac app is not notarized by Apple yet, so macOS blocks the first launch. Open **System Settings → Privacy & Security** and click **Open Anyway** next to Maple Helper. You do this once per version.
 
-Maple Helper lives in the menu bar (there is no Dock icon). Allow **Screen Recording** when it asks (or under **System Settings → Privacy & Security → Screen Recording**), then restart the app: that is how it sees the game window. The hotkeys are ordinary system shortcuts and need no permission. On macOS 15 the setting is called **Screen & System Audio Recording**.
+Maple Helper lives in the menu bar (there is no Dock icon). Allow **Screen Recording** when it asks (or under **System Settings → Privacy & Security → Screen Recording**), then restart the app: that is how it sees the game window. On macOS 15 the setting is called **Screen & System Audio Recording**.
 
 After an update, screenshots can stop working although Maple Helper still shows as allowed: the new version needs the permission again. Select Maple Helper in that list, remove it with **−**, add it again (or turn its switch off and on), then restart the app.
 
@@ -300,9 +304,9 @@ Open PowerShell (Windows) or Terminal (macOS) in the repository folder. On macOS
 
 | Control | Action |
 | --- | --- |
-| **F9** | Open or close the chat overlay. |
-| **F10** | Start recording your voice; press again to transcribe and, by default, send the question. |
-| **Window buttons** | Minimize or close the overlay (F9 opens it again). |
+| **Tray icon** | Click the Maple Helper icon by the clock (the menu bar on macOS) to open the chat; in a full-screen game, the Windows key shows it. |
+| **Microphone button** | Start recording your voice; click again to transcribe and, by default, send the question. |
+| **Window buttons** | Minimize the overlay to the taskbar or close it (the tray icon opens it again). |
 | **Tap a card** | Tag it for the next question; tap again to untag. |
 | **Camera button** | Take a fresh screenshot of the game window. |
 | **Tools button** | Open the play tools (grind spots, grind tracker, farm, quests, crafting, citizenship, build, hit & damage, item price, sell or keep, how to get there, pets). |
@@ -310,7 +314,7 @@ Open PowerShell (Windows) or Terminal (macOS) in the repository folder. On macOS
 | **Orange ?** | Hover it to see what a game term means. |
 | **System tray menu** | Show the overlay, open settings, or quit the app. |
 
-In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the appearance (light or dark), hotkeys, language, font size, answer length, starting with Windows, and whether voice questions are sent immediately.
+In settings, you can change the AI provider (Claude, ChatGPT, Gemini or Grok) and its account, the appearance (light or dark), language, font size, answer length, starting with Windows, and whether voice questions are sent immediately.
 
 The speech model downloads on first use, so the first voice request takes longer. Transcription uses CUDA when available and falls back to the CPU (always the CPU on macOS).
 
@@ -321,6 +325,8 @@ Settings, character profiles, conversation history, speech models, and downloade
 When you ask a question, the app sends your chosen AI provider (Anthropic for Claude, OpenAI for ChatGPT, Google for Gemini, xAI for Grok) your question, the available game screenshot, character profile, recent conversation, earlier session summaries, and relevant knowledge-base context. The AI can also read local knowledge-base files to answer the question; it runs read-only and cannot change files or search the web. Claude and Grok can read nothing outside the knowledge base and the screenshot; Gemini is kept out of your own files too. With Codex, Gemini and Grok, the screenshot is written to a temporary file for the run and deleted right after. After a chat session has been closed for 30 minutes, the app may send the session transcript to the same provider to generate a summary for future conversations.
 
 Voice recordings are transcribed locally. The resulting text is used as your question. The Prices tool asks NiaMeowDB for recent Free Market listings of the item you look up (only the item name is sent). The app also checks GitHub Releases for app and knowledge-base updates, and installs an update only when its SHA-256 matches the release's checksums.
+
+So we know how many people use Maple Helper, every 10 minutes while it runs the app tells our PostHog project that it is running: its version, your OS, and whether this is the first time ever, today or this month. The id it is sent under is random for each run and never stored, so runs can't be linked to each other or to you, and the project discards IP addresses. Turn it off in **Settings → Privacy & system → Count me as a player**. Separately, **Share anonymous usage stats** (on unless you turn it off) also sends which features get used, under a random id kept on your computer. Neither ever sends your questions, answers, screenshots, voice or character names. Setting the environment variable `MAPLEHELPER_NO_TELEMETRY=1` turns both off.
 
 ## Development
 

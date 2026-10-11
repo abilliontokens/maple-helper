@@ -131,13 +131,12 @@ def _write_json(path: Path, data) -> None:
 
 DEFAULT_SETTINGS = {
     "language": None,             # "he" | "en"; None until onboarding
-    "hotkey_toggle": "F9",
-    "hotkey_voice": "F10",
     "appearance": "light",         # dark | light (opaque surfaces)
     "font_size": 14,
     "answer_length": "short",     # short | detailed
-    "window": None,
-    "bubble_pos": None,           # where the minimized bubble sits               # {"x","y","w","h","screen"} saved on move/resize
+    "window": None,               # {"x","y","w","h","screen"} saved on move/resize
+    "map_window_pos": None,       # where the player left the map window ({"x","y"}); None: it opens beside the chat
+    "item_window_pos": None,      # where the player left the item details window ({"x","y"}); None: beside the chat
     "start_with_windows": False,
     "voice_send_immediately": True,
     "microphone": None,           # a name from voice.input_devices(); None = the system's default microphone
@@ -153,6 +152,7 @@ DEFAULT_SETTINGS = {
     # Older files hold a single bool here, which meant the Anthropic key.
     "api_key_fallback": {},
     "onboarding_done": False,
+    "shot_hints_seen": [],        # the screenshot hints shown in full once (then one line, CHAT-05)
     "tour_done": False,           # the first-run tour of the chat window was shown (skipped counts too)
     "pins": {},                   # character id -> pinned answers [{q, a, t}]
     "tips_dismissed": {},         # character id -> {tip kind: level it was hidden at}
@@ -165,9 +165,42 @@ DEFAULT_SETTINGS = {
     "news_read": [],              # news ids the player dismissed or read (news.py), so they come up once
     "last_session": None,         # summary of the previous play session, shown when the chat next opens
     "instant_answers": True,      # simple factual questions answered from the KB, without Claude
-    "telemetry": False,           # anonymous usage stats, opt-in (see telemetry.py)
+    "telemetry": True,            # anonymous usage stats, on unless turned off (the owner's, 2026-10-08; telemetry.py)
     "install_id": "",             # random id for those stats, created on first use
+    "presence": True,             # anonymous "the app is running" ping, for player counts (see presence.py)
+    "presence_sent": {},          # what that ping last marked as sent: {"ever", "day", "month"}
     "grind_auto": True,           # the grind tracker reads the game every minute while a session runs
+    "minimap_region": None,       # the game's minimap on screen, drawn by the player: {"x","y","w","h"} in capture pixels
+    "minimap_scan_interval": 1.0,  # seconds between two reads of the minimap (where the player is)
+    "minimap_hidden_portals": True,  # blue dots on the game's minimap where its invisible teleports are (ui/portaldots.py)
+    "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)
+    "npc_overlay_geom": None,     # where the player left it: {"x","y","w","h"}; None: beside the minimap box
+    "npc_overlay_opacity": 0.85,  # its background's opacity, 0.3-1.0 (the game shows through)
+    "game_toolbar": True,         # the small bar over the game: the NPCs-here window, monster/NPC/item search (ui/gametoolbar.py)
+    "game_toolbar_pos": None,     # where the player left the bar: {"x","y"}; None: above the minimap box
+    "game_search_geom": None,     # where the player left the search window: {"x","y","w","h"}; None: under the bar
+    "game_detail_size": None,     # the size the player dragged the search's page window to: {"w","h"}; None: fits its page
+    "game_rides": False,          # the toolbar's Cabs & Teleports switch: the way to a found NPC/map takes them, or walks
+    "overlays_in_screenshots": False,   # the windows over the game show in screen captures (they hide from them)
+    "loot_region": None,          # the game's pickup messages on screen, drawn by the player (the loot log reads them)
+    "loot_overlay": False,        # the loot log's window over the game (ui/lootoverlay.py); a log starting turns it on
+    "loot_overlay_pos": None,     # ... where the player left it: {"x","y"} in screen pixels
+    "loot_overlay_folded": False,  # ... folded to its title row (its – button)
+    "scroll_planner": False,      # the scroll planner's window over the game (ui/scrollplanner.py): the bar's Scrolls button
+    "scroll_planner_geom": None,  # ... where the player left it: {"x","y","w","h"}; None: under the bar
+    "gear_advisor": False,        # the gear upgrade advisor's window over the game (ui/gearadvisor.py): the bar's Gear button
+    "gear_advisor_geom": None,    # ... where the player left it: {"x","y","w","h"}; None: under the bar
+    "craft_advisor": False,       # the crafting advisor's window over the game (ui/craftadvisor.py): the bar's Crafting button
+    "craft_advisor_geom": None,   # ... where the player left it: {"x","y","w","h"}; None: under the bar
+    "craft_plan_size": None,      # ... the size the player dragged its Forge plan window to: {"w","h"}; None: fits its plan
+    "craft_exp_table": None,      # crafting EXP per level the player measured in game: {"7": 1234}; None: the KB's table
+    "game_toolbar_width": None,   # the width the player dragged the bar to (its buttons wrap into rows); None: one row
+    "game_toolbar_icons": False,  # the bar's buttons as icons (their names in the tooltips) instead of words
+    # the key that shows or hides the bar, from any program (keys.py names it; "" is none). With Shift: the game
+    # binds the plain F-keys. A Mac shows the desktop on F11, with Shift too, so it gets the next key down
+    "game_toolbar_hotkey": "Shift+F10" if sys.platform == "darwin" else "Shift+F11",
+    "overlay_tint": "dark",       # the windows over the game: their glass colour (ui/npcoverlay.py TINTS)
+    "overlay_accent": "green",    # ... and their lit buttons' colour (ui/npcoverlay.py ACCENTS)
 }
 
 
@@ -177,7 +210,6 @@ class Settings:
     def __init__(self):
         self.data = {**DEFAULT_SETTINGS, **_read_json(self.path, {})}
         self._sane_types()
-        self._windows_keys()
         self._stored_language()
 
     # stored in another shape than the default on purpose: a single bool from older versions, [reset, level]
@@ -198,20 +230,6 @@ class Settings:
                 ok = isinstance(v, type(default))
             if not ok:
                 self.data[key] = default
-
-    def _windows_keys(self) -> None:
-        """Windows keeps F12 for the debugger and never lets a program register it: a hotkey saved as F12 (older
-        versions offered it) never worked there, so it loads as the default key, or the other default when that
-        one is the other hotkey's, never two hotkeys on one key."""
-        if sys.platform != "win32":
-            return
-        keys = ("hotkey_toggle", "hotkey_voice")
-        for key in keys:
-            if self.data.get(key) != "F12":
-                continue
-            other = self.data.get(next(k for k in keys if k != key))
-            self.data[key] = next(k for k in (DEFAULT_SETTINGS[key], *(DEFAULT_SETTINGS[k] for k in keys),
-                                              *(f"F{i}" for i in range(1, 12))) if k != other)
 
     def _stored_language(self) -> None:
         """v0.9.x stored the language only when it was clicked (Hebrew was preselected): a player who set up the app
@@ -271,6 +289,12 @@ class Character:
     name_seen: bool = False  # the name was read off the HUD once: from then on only that exact name is this character
     crafts: dict = field(default_factory=dict)        # crafting profession -> its level
     cycle_done: dict = field(default_factory=dict)    # a daily / weekly quest marked done -> when (it comes back)
+    gear: dict = field(default_factory=dict)          # equip slot ("Hat", "One-Handed Sword"...) -> KB key of the item worn
+    ap: dict = field(default_factory=dict)            # the player's STR / DEX / INT / LUK as they typed them ("str": 35)
+    gender: str = ""                                  # "Male" | "Female" as the player picked it ("" not said): gender-only gear
+    craft_bag: dict = field(default_factory=dict)     # crafting advisor: KB item key -> how many the player has
+    craft_pct: dict = field(default_factory=dict)     # ... profession -> its Mastery bar % as the player typed it
+    craft_targets: list = field(default_factory=list)  # ... KB keys of the items the player plans to craft
     updated_at: float = field(default_factory=time.time)
 
     @property
@@ -468,6 +492,10 @@ class Profiles:
         History(cid).clear()
         from .grind import Store as GrindStore
         GrindStore().forget(cid)            # its grind sessions go with it
+        from . import lootdb
+        from .lootlog import Store as LootStore
+        LootStore().forget(cid)             # and its loot logs, in loot.json and the loot database
+        lootdb.forget(cid)
         self.characters.remove(c)
         if self.active_id == cid:
             self.active_id = self.characters[0].id if self.characters else None
@@ -594,6 +622,24 @@ class History:
     def __init__(self, character_id: str):
         self.log = HISTORY_DIR / f"{character_id}.jsonl"
         self.summaries_path = HISTORY_DIR / f"{character_id}.summaries.json"
+        self.fresh_path = HISTORY_DIR / f"{character_id}.fresh"
+
+    def start_fresh(self) -> None:
+        """The chat's "clear" button: the AI's next question starts a new conversation (what was said before stays in
+        the History window and its summaries, but is no longer sent as the recent conversation)."""
+        try:
+            HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+            self.fresh_path.write_text(repr(time.time()), encoding="utf-8")
+        except OSError as e:
+            log.warning(f"chat not cleared for the AI: {e}")
+
+    def conversation(self, n: int = 20) -> list[dict]:
+        """The recent conversation the AI sees: recent(n) since the chat was last cleared."""
+        try:
+            since = float(self.fresh_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            since = 0.0
+        return [r for r in self.recent(n) if not isinstance(r.get("t"), (int, float)) or r["t"] > since]
 
     def append(self, role: str, text: str, entities: list[str] | None = None) -> None:
         rec = {"t": time.time(), "role": role, "text": text, "entities": entities or []}
@@ -686,5 +732,5 @@ class History:
             log.warning(f"session summary not saved: {e}")
 
     def clear(self) -> None:
-        for p in (self.log, self.summaries_path, self.summaries_path.with_suffix(".json.bak")):
+        for p in (self.log, self.summaries_path, self.summaries_path.with_suffix(".json.bak"), self.fresh_path):
             p.unlink(missing_ok=True)       # the backup copy too, or cleared summaries would come back

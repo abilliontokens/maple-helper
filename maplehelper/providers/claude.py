@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .. import usage
 from .base import CREATE_NO_WINDOW, HEDGE_AFTER_S, Attempt, Installer, Lines, Provider, Race, RawResult, StreamText, \
-    classify_error, child_env, find_posix, find_windows_exe, http_ok, note_tool_use, open_login, run_installer, scrub
+    classify_error, cli_outdated, child_env, find_posix, find_windows_exe, http_ok, note_tool_use, open_login, run_installer, scrub
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +31,9 @@ WARM_MAX_AGE_S = 15 * 60    # a warm process waiting longer is replaced by a fre
 RESULT_GRACE_S = 5.0        # the answer's turn ended (with its META block) and no "result" line came: done anyway
 META_MARK = "@@META@@"
 POSIX_DIRS = ["~/.local/bin", "~/.claude/local", "/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin"]
+# flags ClaudeBackend passes that an old Claude Code rejects ("error: unknown option '--restricted'", issue #107)
+NEEDED_FLAGS = ("--restricted", "--strict-mcp-config", "--tools", "--no-session-persistence",
+                "--include-partial-messages")
 
 
 def find_claude() -> str | None:
@@ -76,6 +79,7 @@ def env(api_key: str | None = None) -> dict:
 class Claude(Provider):
     name = "claude"
     label = "Claude"
+    tool = "Claude Code"
     keyring_user = "anthropic_api_key"
     model_setting = "model"
     saver_model = usage.SAVER_MODEL
@@ -92,6 +96,8 @@ class Claude(Provider):
         exe = find_claude()
         if not exe:
             return {"status": "not_installed", "email": None}
+        if cli_outdated(self.name, exe, ("--help",), NEEDED_FLAGS, env()):
+            return {"status": "outdated", "email": None}       # signed in or not, no answer can work: update first
         try:
             r = subprocess.run([exe, "auth", "status"], capture_output=True, timeout=20, env=env(),
                                creationflags=CREATE_NO_WINDOW)
@@ -199,7 +205,7 @@ class ClaudeBackend:
         if self._warm is proc and proc.poll() is None:
             wants = getattr(self.brain, "wants_warm", None)
             if wants is not None and not wants():
-                # the chat closed, or no question, for long: let it go; the next F9, typing or question warms one
+                # the chat closed, or no question, for long: let it go; the next opening, typing or question warms one
                 # again (audit PRF-1)
                 log.info("chat not in use for a while: the warm Claude Code process is stopped, not renewed")
                 self.drop_warm()
@@ -263,6 +269,19 @@ class ClaudeBackend:
         finally:
             timer.cancel()
 
+    @staticmethod
+    def _died(proc: subprocess.Popen) -> RawResult:
+        """A CLI that ended before it took the question, twice: its stderr says why. A Claude Code too old for a
+        flag passed here ("error: unknown option '--restricted'") failed every answer with "Something went wrong"
+        and nothing in the log (issue #107)."""
+        try:
+            proc.wait(timeout=5)
+            stderr = proc.stderr.read().decode("utf-8", errors="replace")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            stderr = ""
+        log.warning("Claude Code ended before taking the question (exit %s): %s", proc.poll(), scrub(stderr[-1500:]))
+        return RawResult(error=classify_error(stderr) or "no_result")
+
     def run(self, prompt: str, screenshot_jpeg: bytes | None, on_raw_delta=None, model: str | None = None,
             tools: bool = True) -> RawResult:
         """model / tools: see _spawn. The warm process serves only a call with the player's own setup."""
@@ -304,8 +323,10 @@ class ClaudeBackend:
             except OSError as e:
                 return RawResult(error=f"launch_failed: {e}")
             how = "new process (the warm one had ended)"
-            if not a.track(proc) or not self._send(proc, data):
+            if not a.track(proc):
                 return RawResult(error="no_result")
+            if not self._send(proc, data):
+                return RawResult(error="no_result") if a.lost else self._died(proc)
         sent = time.monotonic()
         # get the next one ready while the player reads this answer
         if own:
@@ -347,7 +368,10 @@ class ClaudeBackend:
                 lines.touch()
                 a.activity()
             t = ev.get("type")
+            n_calls = len(calls)
             blocks = note_tool_use(ev, calls) or blocks
+            if len(calls) > n_calls:
+                a.stage("tools")
             if t == "stream_event":
                 se = ev.get("event") or {}
                 kind = se.get("type")

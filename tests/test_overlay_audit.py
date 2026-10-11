@@ -41,7 +41,6 @@ def overlay(isolated_store, kb, monkeypatch):
         th.quit()
         th.wait(2000)
     ov.hide()
-    ov.bubble.hide()
     ov.deleteLater()
     flush(app)
 
@@ -62,7 +61,7 @@ def pump(app, ms):
 
 
 def last_row(ov):
-    return ov.feed_lay.itemAt(ov.feed_lay.count() - 2).widget()
+    return ov.feed_lay.itemAt(ov.feed_lay.count() - 1).widget()
 
 
 def shown(text: str) -> str:
@@ -232,27 +231,6 @@ def test_a_drag_resize_saves_the_geometry_once(overlay, monkeypatch):
 
 # ------------------------------------------------------------------ OVL-20: the mini bubble and a right-click
 
-def test_the_mini_bubble_ignores_a_right_click():
-    from PySide6.QtWidgets import QApplication
-
-    from maplehelper.ui.minibubble import MiniBubble
-    QApplication.instance() or QApplication([])
-    b = MiniBubble()
-    got = []
-    b.clicked.connect(lambda: got.append(1))
-
-    def ev(kind, button):
-        p = QPointF(20, 20)
-        return QMouseEvent(kind, p, p, button, button, Qt.NoModifier)
-    b.mousePressEvent(ev(QEvent.MouseButtonPress, Qt.RightButton))
-    b.mouseReleaseEvent(ev(QEvent.MouseButtonRelease, Qt.RightButton))
-    assert got == []
-    b.mousePressEvent(ev(QEvent.MouseButtonPress, Qt.LeftButton))
-    b.mouseReleaseEvent(ev(QEvent.MouseButtonRelease, Qt.LeftButton))
-    assert got == [1]
-    assert b._icon.width() >= 256                       # OVL-26: the sharp source, not the 64 px one
-
-
 # ------------------------------------------------------------------ OVL-21: redrawn on a language / AI switch
 
 def test_ask_ai_anyway_names_the_current_ai_after_a_switch(overlay):
@@ -311,9 +289,16 @@ def test_a_long_notice_link_shrinks_instead_of_widening_the_chat():
 
 def test_a_long_unbroken_word_can_wrap():
     from maplehelper.ui.widgets import ZWSP, soft_breaks
+    word = "Snail_Shell_" + "x" * 80
+    out = soft_breaks(f"ראו {word} שם")
+    assert out.replace(ZWSP, "") == f"ראו {word} שם" and ZWSP in out
+    # a URL is left whole (a break inside it would be in the link too): the answer's HTML breaks the text it shows
     url = "https://meowdb.com/items/" + "x" * 80
-    out = soft_breaks(f"ראו {url} שם")
-    assert out.replace(ZWSP, "") == f"ראו {url} שם" and ZWSP in out
+    assert soft_breaks(f"ראו {url} שם") == f"ראו {url} שם"
+    assert ZWSP in soft_breaks(url, links=False)      # the player's own question: no link, so it still wraps (X-R2)
+    from maplehelper import bidi
+    html = bidi.to_html(f"ראו {url} שם", "rtl", md=True)
+    assert f'href="{url}"' in html and ZWSP in html
     assert soft_breaks("**" + "a" * 40 + "**").count("**") == 2           # the bold markup stays whole
     assert soft_breaks("short words only") == "short words only"
 

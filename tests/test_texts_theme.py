@@ -130,13 +130,10 @@ def test_mac_gets_mac_paths_and_shortcuts(mac):
         t = I18n(lang)
         assert "⌘V" in t("copied") and "Ctrl" not in t("copied")
         assert "Windows" not in t("voice_mic_failed")
-        assert "fn+F9" in t("close_chat") and "fn+F10" in t("input_placeholder") and "fn+F10" in t("voice_nothing")
-        assert "fn+F10" in t("mic_tip", key="F10") and "fn+F9" in t("shot_hint_ready")
-        assert "fn+F9" in t("ob_done_hint")
-        assert "fn+" not in t("hotkey_taken", key="F9")          # naming the key, not teaching a press
+        # no keys to press: the chat opens from the menu bar icon (the tray on Windows)
+        for key in ("close_chat", "ob_done_hint", "tour_close_body", "tour_done_body", "tour_min_body"):
+            assert "F9" not in t(key) and "fn+" not in t(key) and "Windows" not in t(key), key
         assert t("update_available", version="1") != t("update_available_mac")   # its own Mac line, not swapped
-    # the callers swap in the chosen key and keep the "fn+"
-    assert "fn+F7" in I18n("en")("close_chat").replace("F9", "F7")
 
 
 def test_windows_wording_is_unchanged(monkeypatch):
@@ -174,3 +171,21 @@ def test_every_text_key_the_code_asks_for_exists():
         asked |= set(re.findall(r'(?<![\w.])(?:self\.)?t\(\s*"([a-z][a-z0-9_]*)"', f.read_text(encoding="utf-8")))
     missing = sorted(k for k in asked if k not in STRINGS)
     assert missing == []
+
+
+def test_right_click_menu_speaks_the_ui_language(app):
+    """COPY-08: a text field's own menu (Undo, Copy, Paste) was English, "&" marks and all, in the Hebrew app."""
+    from PySide6.QtWidgets import QLineEdit
+
+    from maplehelper.app import qt_texts
+
+    def words():
+        edit = QLineEdit()             # the menu is the field's child: keep the field alive while reading it
+        return " ".join(a.text() for a in edit.createStandardContextMenu().actions())
+    try:
+        qt_texts(app, "he")
+        assert re.search("[\u0590-\u05ff]", words()) and "Paste" not in words()
+        qt_texts(app, "en")
+        assert "Paste" in words()
+    finally:
+        qt_texts(app, "en")

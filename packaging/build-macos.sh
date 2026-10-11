@@ -59,8 +59,17 @@ rm -rf dist build
 "$PYTHON" -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/maplehelper.spec
 
 # one consistent ad-hoc signature over the whole bundle (PyInstaller signs piece by piece)
-codesign --force --deep --sign - "$APP"
-codesign --verify --deep --strict "$APP"
+signdiag() {
+  echo "== codesign failed; bundle diagnostics" >&2
+  echo "-- broken symlinks:" >&2; find "$APP" -type l ! -exec test -e {} \; -print >&2 || true
+  echo "-- hidden files/dirs:" >&2; find "$APP" -name '.*' -print >&2 || true
+  echo "-- rapidocr in the bundle:" >&2; find "$APP" -path '*rapidocr*' -maxdepth 6 -print >&2 || true
+  codesign --force --deep --sign - -vvvv "$APP" >&2 || true
+  codesign --verify --deep --strict -vvvv "$APP" >&2 || true
+  exit 1
+}
+codesign --force --deep --sign - "$APP" || signdiag
+codesign --verify --deep --strict "$APP" || signdiag
 
 # ---------------------------------------------------------------- 2. smoke test the frozen app
 selftest "$APP/$APP_EXE"
@@ -88,7 +97,13 @@ if [ "$TEST_DMG" = 1 ]; then
   [ -L "$mnt/Applications" ] || { echo "DMG is missing the Applications link" >&2; exit 1; }
   codesign --verify --deep --strict "$mnt/Maple Helper.app"
   selftest "$mnt/Maple Helper.app/$APP_EXE"
-  hdiutil detach "$mnt" >/dev/null
+  # the self-tested app can still be closing: "Resource busy" failed the v0.14.0 release after SELFTEST OK.
+  # The image is read-only and already tested, so the last try forces it
+  for attempt in 1 2 3 4; do
+    if [ "$attempt" = 4 ]; then hdiutil detach "$mnt" -force >/dev/null && break; echo "hdiutil detach failed" >&2; exit 1; fi
+    if hdiutil detach "$mnt" >/dev/null; then break; fi
+    echo "hdiutil detach failed, retrying ($attempt)"; sleep 5
+  done
   trap - EXIT
   echo "== DMG round trip OK"
 fi

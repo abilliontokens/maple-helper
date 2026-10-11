@@ -1,4 +1,4 @@
-"""Maple Helper entry point: tray icon, global hotkeys, overlay, voice, onboarding."""
+"""Maple Helper entry point: tray icon, the bar's hotkey, overlay, voice, onboarding."""
 from __future__ import annotations
 
 import os
@@ -6,12 +6,12 @@ import sys
 import threading
 import webbrowser
 
-from PySide6.QtCore import QLockFile, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QLibraryInfo, QLockFile, QObject, Qt, QTimer, QTranslator, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import APP_NAME, __version__, news, osapi, providers, report, tables, telemetry, updater, whatsnew, wishlist
+from . import APP_NAME, __version__, news, osapi, presence, providers, report, tables, telemetry, updater, whatsnew, wishlist
 from .brain import Brain
 from .i18n import I18n, system_language
 from .kb import KnowledgeBase
@@ -23,8 +23,6 @@ from .ui.patchnotes import PatchNotesDialog, WhatsNewDialog, update_notice
 from .ui.toast import notify
 from .voice import VoiceController
 
-HOTKEY_TOGGLE = 1
-HOTKEY_VOICE = 2
 INSTANCE_SERVER = "MapleHelper-" + (os.environ.get("USERNAME") or os.environ.get("USER") or "app")
 BACKGROUND_ARG = "--background"   # start in the tray only (autostart at login, silent updates)
 UPDATED_ARG = "--updated"         # the installer reopens the app with it after "Update now": show what's new
@@ -32,6 +30,7 @@ KB_RETRY_MS = 5 * 60 * 1000      # a failed or postponed KB update tries again t
 KB_CHECK_MS = 60 * 60 * 1000     # an open app looks for a new KB this often: the night's KB within the hour (only a
                                  # small manifest is read when there is nothing new)
 APP_CHECK_MS = 15 * 60 * 1000    # and for a new app release this often: one small GitHub API call (60 an hour allowed)
+HOTKEY_TOOLBAR = 1              # the one system-wide key: shows or hides the bar over the game (game_toolbar_hotkey)
 # the .ico carries every Windows size; macOS draws the menu bar and Dock from a PNG
 APP_ICON = "app.ico" if sys.platform == "win32" else "icon-256.png"
 
@@ -102,13 +101,15 @@ class MapleHelperApp:
         qapp.setQuitOnLastWindowClosed(False)
         self.main_thread = _MainThread()
         self._look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        self._look_provider = self.settings["provider"]
 
     # ------------------------------------------------------------------ startup
 
     def style(self, opacity: float | None = None) -> str:
         theme.set_mode(self.settings["appearance"])
-        self.qapp.setLayoutDirection(Qt.RightToLeft if I18n(self.settings["language"] or system_language()).rtl
-                                     else Qt.LeftToRight)
+        lang = self.settings["language"] or system_language()
+        self.qapp.setLayoutDirection(Qt.RightToLeft if I18n(lang).rtl else Qt.LeftToRight)
+        qt_texts(self.qapp, lang)
         css = theme.stylesheet(self.font_family, self.settings["font_size"])
         # restyling the app re-polishes every open widget (the chat with its answers too): only when it changed,
         # not each time a window opens, which held "Play tools" back for a second
@@ -152,6 +153,7 @@ class MapleHelperApp:
             self.style()
             Onboarding(self.settings, self.profiles, self.kb, self.style, only_character=True).exec()
         telemetry.init(self.settings, __version__)
+        presence.start(self.settings, __version__)
         telemetry.track("app_started", fresh_install=fresh_install, background=BACKGROUND_ARG in sys.argv[1:],
                         provider=self.settings["provider"], language=self.settings["language"])
         self.brain = Brain(self.kb, provider=self.settings["provider"], length=self.settings["answer_length"])
@@ -160,6 +162,9 @@ class MapleHelperApp:
         # tray at login keeps none waiting all day (audit PRF-1); typing the first question outlasts its start
         self.overlay = Overlay(self.settings, self.profiles, self.kb, self.brain)
         self.overlay.setStyleSheet(self.style())
+        # the look the chat is built in (the first-run setup may have picked the language since __init__)
+        self._look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        self._look_provider = self.settings["provider"]
         self.overlay.setWindowOpacity(1.0)
         self.overlay.shot_provider = self.capture
         self.overlay.settings_requested.connect(self.open_settings)
@@ -185,20 +190,78 @@ class MapleHelperApp:
         self.overlay.sync_finished.connect(self.grind.sync_done)     # before the tools window redraws (below)
         self.grind.sync()          # a session running when the app last closed goes on (unless it was left idle)
         self.overlay.tools_requested.connect(lambda: self.show_tools())
-        from .ui.widgets import ROUTE_REQUESTS
+        # where the player is, read from the game's minimap every few seconds (the box they drew around it): the
+        # character card says it, and the map windows draw the way from there (ui/minimapscan.py)
+        from .ui.minimapscan import MinimapScanner
+        self.minimap_scanner = MinimapScanner(self.kb, self.settings)
+        self.minimap_scanner.restart()
+        # blue dots on the game's minimap where its invisible teleports are, from those reads (ui/portaldots.py)
+        from .ui.portaldots import PortalDots
+        self.portal_dots = PortalDots(self.kb, self.settings)
+        self.portal_dots.refresh()
+        # the "NPCs on this map" window over the game itself (ui/npcoverlay.py), shown from its own setting; the
+        # guide it sets is what the ring above draws on the game's minimap. Before any of the windows over the
+        # game are made: the glass tint they all paint is taken from the settings (the ⚙ panel re-takes it live).
+        from .ui import npcoverlay
+        npcoverlay.apply_look(self.settings)
+        self.npc_overlay = npcoverlay.NpcOverlay(self.kb, self.settings, I18n(self.settings["language"] or "he"))
+        self.npc_overlay.refresh()
+        # the little bar over the game (ui/gametoolbar.py): its NPCs-here button flips the window above, its
+        # search buttons open the monster/NPC/item search (ui/gamesearch.py) — made on the first ask, so a start
+        # in the tray builds none of it
+        from .ui.gametoolbar import TOOLS, GameToolbar
+        self.game_toolbar = GameToolbar(self.settings, I18n(self.settings["language"] or "he"))
+        self.game_toolbar.npc_toggled.connect(self.npc_overlay.refresh)
+        self.npc_overlay.closed.connect(self.game_toolbar.refresh)
+        self.game_toolbar.search_requested.connect(self._open_game_search)
+        self.game_toolbar.rides_toggled.connect(self._game_rides_toggled)
+        self.game_toolbar.look_changed.connect(self._overlay_look_changed)
+        self.game_toolbar.closed.connect(self._game_toolbar_closed)            # its ✕: how to bring it back
+        self.game_toolbar.hotkey_changed.connect(self._toolbar_hotkey_changed)  # its ⚙ panel's key box
+        self.game_toolbar.refresh()
+        self.overlay.minimap_requested.connect(self.pick_minimap)     # the character card's minimap button
+        # the loot log: the game's pickup messages read while a log runs (the box the player drew around them), with
+        # its timer as long as the app (ui/lootscan.py)
+        from .ui.lootscan import LootScanner
+        self.loot_scanner = LootScanner(self.kb, self.profiles, self.settings)
+        self.loot_scanner.changed.connect(lambda: self._tools_call("loot_changed"))
+        # ... and its own card over the game while a log runs (not inside a Maple Helper window: ui/lootoverlay.py)
+        from .ui.lootoverlay import LootOverlay
+        self.loot_overlay = LootOverlay(self.loot_scanner, self.settings, self.kb,
+                                        I18n(self.settings["language"] or "he"))
+        self.loot_scanner.changed.connect(self.loot_overlay.sync)
+        self.loot_overlay.sync()
+        # the bar over the game's Loot log button shows / hides that window (lit while it shows), as NPCs here does
+        self.game_toolbar.loot_toggled.connect(self.loot_overlay.sync)
+        self.loot_overlay.closed.connect(self.game_toolbar.refresh)
+        self.loot_scanner.changed.connect(self.game_toolbar.refresh)     # a log starting opens it: the button follows
+        # the bar's Scrolls and Gear buttons: the scroll planner's and the gear advisor's windows (ui/scrollplanner.py,
+        # ui/gearadvisor.py), made on the first ask, or now when the app last closed with one open
+        self._tool_windows: dict = {}
+        self.game_toolbar.tool_toggled.connect(self._tool_toggled)
+        for key in TOOLS:
+            if self.settings[key]:
+                self._tool_toggled(key)
+        from .ui.widgets import ITEM_REQUESTS, MAP_REQUESTS, ROUTE_REQUESTS
         ROUTE_REQUESTS.requested.connect(self.show_route)       # a map card's "How to get here"
+        MAP_REQUESTS.requested.connect(self.show_map_location)  # a map's "Where it is on the map"
+        ITEM_REQUESTS.requested.connect(self.show_item_details)  # an item's ⓘ
 
         self.overlay.news_requested.connect(self.show_news_page)
         self.overlay.profile_changed.connect(self.on_profile_changed)
         self.overlay.sync_finished.connect(lambda ok: self._tools_call("sync_done", ok))
 
+        # one keyboard shortcut only, the bar's show/hide (game_toolbar_hotkey). The chat has none: the official
+        # client in front takes every key from other programs (live test, 2026-10-07), so the chat opens from the
+        # tray icon, the desktop shortcut or the taskbar, and talking from the mic button. The bar's key may not reach
+        # the app while the game is in front either: the tray's Show the toolbar and Settings always bring it back
         self.hotkeys = osapi.Hotkeys()
-        self.hotkeys.pressed.connect(self.on_hotkey)
-        self.register_hotkeys()
-
-        self.voice = VoiceController(self.settings["hotkey_voice"])
+        self.hotkeys.pressed.connect(self._on_hotkey)
+        from .ui.hotkeybox import CAPTURE
+        CAPTURE.listening.connect(self._hotkey_capture)       # a key box waiting for a key: the bar's let go
+        self.register_toolbar_hotkey()
+        self.voice = VoiceController()
         self.apply_voice_settings()
-        self.register_voice_hotkey()
         self.voice.started.connect(self.on_voice_start)
         self.voice.state.connect(lambda s: self.overlay.voice_state(s))
         self.voice.text.connect(self.on_voice_text)
@@ -237,7 +300,7 @@ class MapleHelperApp:
         if BACKGROUND_ARG in sys.argv[1:]:
             # started with Windows or by a silent update: stay in the tray until the player asks for the chat
             t = I18n(self.settings["language"])
-            self.toast(t("app_tagline"), t("ob_done_hint").replace("F9", self.settings["hotkey_toggle"]))
+            self.toast(t("app_tagline"), t("ob_done_hint"))
         else:
             # the first-run tour starts with the chat itself (Overlay.open_overlay), whenever it first opens
             QTimer.singleShot(0, lambda: self.overlay.toggle(self.capture))
@@ -257,6 +320,156 @@ class MapleHelperApp:
         if not self.overlay.is_open():
             self.overlay.toggle(self.capture)
         QTimer.singleShot(300, self.overlay.start_tour)
+
+    def _open_game_search(self, kind: str) -> None:
+        """A toolbar search button: the search window (ui/gamesearch.py) is made on the first ask and opened in
+        that mode, under the bar until the player has placed it themselves."""
+        search = getattr(self, "game_search", None)
+        if search is None:
+            from .ui.gamesearch import GameSearch
+            search = self.game_search = GameSearch(self.kb, self.settings, I18n(self.settings["language"] or "he"))
+            search.mode_changed.connect(self.game_toolbar.set_search_mode)
+        if not isinstance(self.settings["game_search_geom"], dict):
+            search.place_under(self.game_toolbar.frameGeometry())
+        search.open(kind)
+
+    def _tool_window(self, key: str):
+        """The scroll planner's or gear advisor's window, made on the first ask."""
+        w = self._tool_windows.get(key)
+        if w is None:
+            t = I18n(self.settings["language"] or "he")
+            if key == "scroll_planner":
+                from .ui.scrollplanner import ScrollPlanner
+                w = ScrollPlanner(self.kb, self.settings, self.profiles, t)
+            elif key == "gear_advisor":
+                from .ui.gearadvisor import GearAdvisor
+                w = GearAdvisor(self.kb, self.settings, self.profiles, t)
+                w.scroll_requested.connect(self._plan_scrolls)
+            else:
+                from .ui.craftadvisor import CraftAdvisor
+                w = CraftAdvisor(self.kb, self.settings, self.profiles, t)
+            w.closed.connect(self.game_toolbar.refresh)          # its ✕: the bar's button goes off
+            self._tool_windows[key] = w
+        return w
+
+    def _place_tool(self, key: str, w) -> None:
+        """A tool window about to show: under the bar until the player has placed it themselves."""
+        if not w.isVisible() and not isinstance(self.settings[key + "_geom"], dict):
+            w.place_under(self.game_toolbar.frameGeometry())
+
+    def _tool_toggled(self, key: str) -> None:
+        """The bar's Scrolls or Gear button flipped its window's setting: the window follows."""
+        w = self._tool_window(key) if self.settings[key] else self._tool_windows.get(key)
+        if w is None:
+            return
+        if self.settings[key]:
+            self._place_tool(key, w)
+        w.refresh()
+
+    def _plan_scrolls(self, key: str) -> None:
+        """The gear advisor's "Plan scrolls" on an item: the scroll planner opens on it, its bar button lit."""
+        planner = self._tool_window("scroll_planner")
+        self._place_tool("scroll_planner", planner)
+        planner.open_item(key)
+        self.game_toolbar.refresh()
+
+    def _game_rides_toggled(self) -> None:
+        """The toolbar's Cabs & Teleports switch: a way already shown follows it, in the search's detail page and
+        in the ◎ where-is-it window."""
+        search = getattr(self, "game_search", None)
+        if search is not None:
+            search.rides_changed()
+        where = self.__dict__.get("_windows", {}).get("map")
+        if where is not None and where.isVisible() and where.key:
+            where.show_map(where.key)
+
+    def register_toolbar_hotkey(self) -> None:
+        """The bar's key (game_toolbar_hotkey) bound now in place of the old one; none: let go. A key that can't be
+        bound (the system or another program holds it) says so in a toast, once: the same key isn't tried again on
+        every Save. The official client in front may keep the key to itself even so (live tests, 2026-10-07): the
+        tray item and Settings > Minimap always bring the bar back."""
+        from .keys import label
+        hotkeys = getattr(self, "hotkeys", None)
+        key = self.settings["game_toolbar_hotkey"] or ""
+        if hotkeys is None or key == getattr(self, "_toolbar_key", None):
+            return
+        self._toolbar_key, self._toolbar_bound = key, False
+        if not key:
+            hotkeys.unregister(HOTKEY_TOOLBAR)
+        elif hotkeys.register(HOTKEY_TOOLBAR, key):
+            self._toolbar_bound = True
+        else:
+            from . import bidi
+            t = I18n(self.settings["language"])
+            self.toast(t("tb_hotkey_taken_title"), t("tb_hotkey_taken", key=bidi.ltr_block(label(key), t.rtl)),
+                       timeout_ms=9000)
+
+    def _hotkey_capture(self, listening: bool) -> None:
+        """A key box (Settings, the bar's ⚙ panel) waits for a key: the bar's own key is let go meanwhile, or
+        pressing it there would show or hide the bar instead of reaching the box; bound again once the box is done
+        (a key that wouldn't bind isn't tried, and toasted, again)."""
+        hotkeys = getattr(self, "hotkeys", None)
+        if hotkeys is None:
+            return
+        if not listening:
+            self.register_toolbar_hotkey()
+        elif getattr(self, "_toolbar_bound", False):
+            hotkeys.unregister(HOTKEY_TOOLBAR)
+            self._toolbar_key, self._toolbar_bound = None, False
+
+    def _on_hotkey(self, hotkey_id: int) -> None:
+        if hotkey_id == HOTKEY_TOOLBAR:
+            self.toggle_game_toolbar()
+
+    def toggle_game_toolbar(self) -> None:
+        """The bar's key and the tray's Show/Hide the toolbar: the bar shown (game_toolbar on) or hidden (off)."""
+        self.settings["game_toolbar"] = not self.settings["game_toolbar"]
+        self.game_toolbar.refresh()
+        self._game_toolbar_followed()
+
+    def _game_toolbar_closed(self) -> None:
+        """The bar's ✕: Settings and the tray item follow, and a toast says how to bring the bar back."""
+        from . import bidi
+        from .keys import label, usable
+        self._game_toolbar_followed()
+        t = I18n(self.settings["language"])
+        key, mac = self.settings["game_toolbar_hotkey"], "_mac" if t.mac else ""
+        body = (t("tray_toolbar_back" + mac, key=bidi.ltr_block(label(key), t.rtl)) if usable(key) else
+                t("tray_toolbar_back_nokey" + mac))
+        self.toast(t("tray_toolbar_hidden"), body, timeout_ms=12000)
+
+    def _game_toolbar_followed(self) -> None:
+        """The bar turned on or off outside Settings (its ✕, its key, the tray item): an open Settings window's switch
+        follows, with the value its Save compares against — after the ✕ it kept reading On, so closing it changed
+        nothing and the bar was 'on' yet gone (the owner, 2026-10-11) — and the tray item says the other way now."""
+        self._settings_follow("game_toolbar")
+        self._retext_tray_toolbar()
+
+    def _toolbar_hotkey_changed(self) -> None:
+        """The ⚙ panel picked or cleared the bar's key: bound now; Settings' key box and the tray item follow."""
+        self.register_toolbar_hotkey()
+        self._settings_follow("game_toolbar_hotkey")
+        self._retext_tray_toolbar()
+
+    def _settings_follow(self, key: str) -> None:
+        dlg = self.__dict__.get("_windows", {}).get("settings")
+        if dlg is not None:
+            dlg.follow(key)
+
+    def _retext_tray_toolbar(self) -> None:
+        """The tray item says what a click does: Show the toolbar while it's off, Hide while it's on, with its key."""
+        from . import bidi
+        from .keys import label, usable
+        item = getattr(self, "_tray_toolbar", None)
+        if item is None:
+            return
+        t = I18n(self.settings["language"])
+        text = t("tray_toolbar_hide" if self.settings["game_toolbar"] else "tray_toolbar_show")
+        key = self.settings["game_toolbar_hotkey"]
+        if usable(key):
+            # in the label itself: the menu's shortcut column glued a key to Hebrew text ("הצ'אטF9", seen live)
+            text = f"{text}  ·  {bidi.ltr_block(label(key), t.rtl)}"
+        item.setText(bidi.plain(text, t.rtl))
 
     def _listen_for_second_launch(self):
         """The app runs in the tray (autostart): opening it again from the desktop or Start menu shows the chat."""
@@ -281,7 +494,7 @@ class MapleHelperApp:
     def _on_mac_reopen(self, state) -> None:
         """Maple Helper opened again from Finder, Launchpad or Spotlight while it runs (menu bar only, no Dock icon):
         the chat shows, as a second launch does on Windows. Only when nothing of ours is on screen and the app didn't
-        just activate itself (a hotkey opening the chat, a dialog brought forward)."""
+        just activate itself (the tray icon opening the chat, a dialog brought forward)."""
         if state != Qt.ApplicationActive or getattr(self, "overlay", None) is None:
             return
         if osapi.seconds_since_self_activation() < 1.5:
@@ -344,20 +557,8 @@ class MapleHelperApp:
 
     def show_whats_new(self, notes: list[dict] | None = None):
         self.open_window("whats_new", lambda: WhatsNewDialog(
-            notes if notes is not None else whatsnew.load()[:6], self.settings["language"], self.style()))
-
-    def register_hotkeys(self):
-        key = self.settings["hotkey_toggle"]
-        if not self.hotkeys.register(HOTKEY_TOGGLE, key):
-            t = I18n(self.settings["language"])
-            self.toast(t("settings"), t("hotkey_taken", key=key), timeout_ms=9000)
-
-    def register_voice_hotkey(self):
-        self.hotkeys.unregister(HOTKEY_VOICE)
-        key = self.settings["hotkey_voice"]
-        if key != self.settings["hotkey_toggle"] and not self.hotkeys.register(HOTKEY_VOICE, key):
-            t = I18n(self.settings["language"])
-            self.toast(t("settings"), t("hotkey_taken", key=key), timeout_ms=9000)
+            notes if notes is not None else whatsnew.since("0", __version__)[:6],    # notes written ahead of
+            self.settings["language"], self.style()))                              # a release stay hidden
 
     def check_permissions(self):
         """macOS: ask once for Screen Recording (the screenshot), and say how to grant it when missing."""
@@ -390,15 +591,6 @@ class MapleHelperApp:
 
     def capture(self, hwnd):
         return osapi.capture_game(hwnd)
-
-    def on_hotkey(self, hotkey_id: int):
-        if hotkey_id == HOTKEY_TOGGLE:
-            if self.overlay.is_open():
-                self.overlay.close_overlay()
-            else:
-                self.overlay.toggle(self.capture)   # also restores from the minimized bubble
-        elif hotkey_id == HOTKEY_VOICE:
-            self.voice.toggle()
 
     def apply_voice_settings(self):
         self.voice.microphone = self.settings["microphone"]
@@ -438,8 +630,7 @@ class MapleHelperApp:
 
     def on_voice_text(self, text: str):
         if not text.strip():          # silence (or only noise): say so, instead of nothing happening
-            self.overlay.add_system(I18n(self.settings["language"])("voice_nothing")
-                                    .replace("F10", self.settings["hotkey_voice"]))
+            self.overlay.add_system(I18n(self.settings["language"])("voice_nothing"))
             return
         fixed = self.kb.resolve_names(text)
         self.overlay.voice_text(fixed, send=self.settings["voice_send_immediately"])
@@ -480,13 +671,20 @@ class MapleHelperApp:
         header.setEnabled(False)
         menu.addAction(header)
         menu.addSeparator()
-        key = self.settings["hotkey_toggle"]
-        # the key in the label itself: the menu's shortcut column glued it to the text in Hebrew ("הצ'אטF9", seen live)
         from . import bidi
-        a_show = QAction(bidi.plain(f"{t('tray_open')}  ·  {key}", t.rtl), menu, triggered=self.show_chat)
+        a_show = QAction(bidi.plain(t("tray_open"), t.rtl), menu, triggered=self.show_chat)
         a_set = QAction(t("tray_settings"), menu, triggered=self.open_settings)
         a_quit = QAction(t("tray_quit"), menu, triggered=self.qapp.quit)
         menu.addAction(a_show)
+        # the bar over the game, shown or hidden from here too: its key may not reach the app while the game is in
+        # front, and its ✕ once hid it with no way back the player found (the owner, 2026-10-11). The label says what
+        # a click does, read again each time the menu opens (the ✕, the key and Settings flip it meanwhile)
+        self._tray_toolbar = None
+        if getattr(self, "game_toolbar", None) is not None:
+            self._tray_toolbar = QAction("", menu, triggered=self.toggle_game_toolbar)
+            menu.addAction(self._tray_toolbar)
+            self._retext_tray_toolbar()
+            menu.aboutToShow.connect(self._retext_tray_toolbar)
         menu.addAction(a_set)
         if getattr(self, "pending_installer", None):
             a_upd = QAction(t("update_now_tray", version=updater.installer_version(self.pending_installer)), menu,
@@ -514,8 +712,59 @@ class MapleHelperApp:
             dlg.patch_notes_requested.connect(lambda: self.show_patch_notes())
             dlg.whats_new_requested.connect(lambda: self.show_whats_new())
             dlg.tour_requested.connect(lambda: self.replay_tour(dlg))
+            if getattr(self, "_kb_updating", False) and getattr(self, "_kb_interactive", False):
+                dlg.kb_update_busy()       # a check asked for in an earlier Settings window still runs
             return dlg
         self.open_window("settings", make, on_close=self.overlay.refresh_profile_chip)
+
+    def pick_minimap(self):
+        """The character card's minimap button: draw the box around the game's minimap; the reads start from it."""
+        self._pick_region("minimap_region", "minimap_pick_hint", getattr(self, "minimap_scanner", None))
+
+    def pick_loot_area(self):
+        """The loot log's "Select the messages area": draw the box around the game's pickup messages."""
+        self._pick_region("loot_region", "loot_pick_hint", getattr(self, "loot_scanner", None))
+
+    def _pick_region(self, setting: str, hint: str, scanner):
+        """Draw a box on the game (the chat steps aside meanwhile); it is saved in `setting` and `scanner` restarts
+        on it. One picker at a time."""
+        from .ui.regionpick import RegionPicker
+        if getattr(self, "_region_picker", None) is not None:
+            return                  # already picking
+        t = I18n(self.settings["language"] or "he")
+        self._picker_overlay_open = self.overlay.is_open()
+        if self._picker_overlay_open:
+            self.overlay.hide()     # the chat would cover the game the box is drawn on
+        picker = RegionPicker(hint=t(hint), rtl=t.rtl)
+        self._region_picker = picker
+        picker.picked.connect(lambda rect: self._on_region_picked(rect, setting, scanner))
+        picker.start()
+
+    def _on_region_picked(self, rect: dict, setting: str, scanner):
+        self._end_region_pick()
+        ok = (isinstance(rect, dict)
+              and all(isinstance(rect.get(k), (int, float)) and not isinstance(rect.get(k), bool)
+                      for k in ("x", "y", "w", "h"))
+              and rect["w"] > 0 and rect["h"] > 0)
+        if not ok:
+            return                  # not a box: keep whatever was there
+        self.settings[setting] = {k: int(rect[k]) for k in ("x", "y", "w", "h")}  # saves, like every setting
+        if scanner is not None:
+            scanner.restart()       # (the minimap's also resets the locator's lock onto the new box)
+        dots = getattr(self, "portal_dots", None)
+        if dots is not None:
+            dots.refresh()          # over the new box at once: its first read may equal the last and signal nothing
+        if setting == "loot_region":
+            self._tools_call("loot_changed")
+
+    def _end_region_pick(self):
+        picker, self._region_picker = getattr(self, "_region_picker", None), None
+        if picker is not None:
+            picker.close()
+        if getattr(self, "_picker_overlay_open", False):
+            self._picker_overlay_open = False
+            if not self.overlay.isVisible():
+                self.overlay.show()
 
     def _reopen_windows_in_new_look(self):
         """A language or appearance change: the other open windows (tools, guides, history...) were built in the
@@ -552,6 +801,9 @@ class MapleHelperApp:
         if kind == "whats_new":
             notes = getattr(dlg, "notes", None)
             return lambda: self.show_whats_new(notes)
+        if kind == "item" and getattr(dlg, "key", None):
+            key = dlg.key
+            return lambda: self.show_item_details(key)
         cid = kind.split(":", 1)[1] if ":" in kind else None
         if self._character(cid) is None:
             return None                       # that character is gone
@@ -613,6 +865,7 @@ class MapleHelperApp:
         # another provider, account or model: a warm process started under the old setup is replaced. An answer
         # in progress goes on (changing the model mid-answer killed it); switching provider ends the old one anyway
         self.apply_ai_settings()
+        self.brain.refind_cli()     # an install or update from Settings may have put the CLI elsewhere
         self.brain.drop_warm()
         threading.Thread(target=self.brain.prewarm, daemon=True).start()
 
@@ -673,15 +926,41 @@ class MapleHelperApp:
 
     def on_settings_changed(self):
         telemetry.set_enabled(self.settings["telemetry"])
-        # the new theme first: apply_language rebuilds text with the theme's colors written in (the retake link
-        # kept the dark theme's faint orange on white)
-        self.overlay.setStyleSheet(self.style())
-        self.overlay.apply_language()
-        self._reopen_windows_in_new_look()
+        presence.set_enabled(self.settings["presence"])
         from .ui import terms
-        from .ui.toast import Toast
-        for toast in list(Toast._live):
-            toast.restyle()              # a toast up during the switch: old text colors on the new glass
+        look = (self.settings["language"], self.settings["appearance"], self.settings["font_size"])
+        # only a new language, appearance or text size restyles the chat: with a long chat that took ~1.6 s on
+        # every Save (the microphone, saver mode...), and a theme switch ~4 s (PERF-02)
+        if look != getattr(self, "_look", None):
+            QApplication.setOverrideCursor(Qt.WaitCursor)     # a few seconds with a long chat: not a hang
+            try:
+                # the new theme first: apply_language rebuilds text with the theme's colors written in (the retake
+                # link kept the dark theme's faint orange on white)
+                self.overlay.setStyleSheet(self.style())
+                self.overlay.apply_language()
+                npc = getattr(self, "npc_overlay", None)
+                if npc is not None:
+                    npc.apply_language(I18n(self.settings["language"] or "he"))   # its texts follow the switch
+                game = getattr(self, "game_toolbar", None)
+                if game is not None:
+                    game.apply_language(I18n(self.settings["language"] or "he"))    # the bar's texts too
+                search = getattr(self, "game_search", None)
+                if search is not None:
+                    search.apply_language(I18n(self.settings["language"] or "he"))
+                loot = getattr(self, "loot_overlay", None)
+                if loot is not None:
+                    loot.apply_language(I18n(self.settings["language"] or "he"))
+                for w in self.__dict__.get("_tool_windows", {}).values():
+                    w.apply_language(I18n(self.settings["language"] or "he"))
+                self._reopen_windows_in_new_look()
+                from .ui.toast import Toast
+                for toast in list(Toast._live):
+                    toast.restyle()              # a toast up during the switch: old text colors on the new glass
+            finally:
+                QApplication.restoreOverrideCursor()
+        elif self.settings["provider"] != getattr(self, "_look_provider", None):
+            self.overlay.apply_language()       # only the AI changed: the texts that name it ("Ask Claude anyway")
+        self._look_provider = self.settings["provider"]
         terms.hide()
         self.overlay.apply_capture_mode()
         self.apply_saver_mode()
@@ -689,15 +968,58 @@ class MapleHelperApp:
         self.brain.ui_lang = self.settings["language"] or "he"
         self.overlay.show_saver_badge(self.settings["saver_mode"])
         threading.Thread(target=self.brain.prewarm, daemon=True).start()
-        self.voice.set_key(self.settings["hotkey_voice"])
         self.apply_voice_settings()
-        self.hotkeys.unregister(HOTKEY_TOGGLE)      # free both first: a swap would otherwise collide
-        self.hotkeys.unregister(HOTKEY_VOICE)
-        self.register_hotkeys()
-        self.register_voice_hotkey()
         self.apply_autostart()
+        self.register_toolbar_hotkey()          # the bar's key picked in Settings > Minimap: bound now
         self.tray.hide()
         self.make_tray()
+        scanner = getattr(self, "minimap_scanner", None)
+        if scanner is not None:
+            scanner.restart()       # the scan interval (or nothing) changed: pick it up, no restart needed
+        dots = getattr(self, "portal_dots", None)
+        if dots is not None:
+            dots.refresh()          # the hidden-portal dots switched on or off
+        from .ui import npcoverlay
+        npcoverlay.apply_look(self.settings)     # the tint every window's glass paints, before they repaint
+        self._overlay_look_changed()
+
+    def _overlay_look_changed(self) -> None:
+        """Every window over the game at the colours, icons and transparency the settings give now, not on the
+        next restart: the ⚙ panel's choices land here (look_changed), and so does a Save in Settings (the bar or
+        the screenshots switch). Each window re-reads the opacity, re-styles its own lit buttons in the accent, and
+        repaints its glass in the tint _paint_glass takes (the NPCs window's guide and the search's page window too)."""
+        npc = getattr(self, "npc_overlay", None)
+        if npc is not None:
+            npc.refresh()          # the NPCs-on-this-map window switched on or off
+        game = getattr(self, "game_toolbar", None)
+        if game is not None:
+            game.refresh()         # the bar over the game switched on or off (its button follows the window)
+        search = getattr(self, "game_search", None)
+        if search is not None:
+            search._read_opacity()          # no refresh of its own: its rows are the search's, not the look's
+            search.update()
+            if getattr(search, "_detail", None) is not None:
+                search._detail.update()
+        loot = getattr(self, "loot_overlay", None)
+        if loot is not None:
+            loot.sync()            # the loot log's window at the windows' opacity
+        for w in self.__dict__.get("_tool_windows", {}).values():
+            w.refresh()            # the scroll planner / gear advisor at the windows' opacity
+        self._apply_overlay_capture()
+
+    def _apply_overlay_capture(self) -> None:
+        """Settings' "Show the overlays in screenshots": every window over the game that exists takes it now (each
+        also takes it whenever it shows), not on the next restart."""
+        from .ui.npcoverlay import set_capturable
+        search = getattr(self, "game_search", None)
+        npc = getattr(self, "npc_overlay", None)
+        for w in (getattr(self, "portal_dots", None), npc, getattr(npc, "_guide", None),
+                  getattr(self, "game_toolbar", None), search, getattr(search, "_detail", None),
+                  getattr(self, "loot_overlay", None), *self.__dict__.get("_tool_windows", {}).values(),
+                  # the crafting advisor's Forge plan window beside it
+                  *(getattr(w, "plan_window", None) for w in self.__dict__.get("_tool_windows", {}).values())):
+            if w is not None:
+                set_capturable(w, self.settings)
 
     def apply_autostart(self):
         if sys.platform == "win32" and not getattr(sys, "frozen", False):
@@ -768,6 +1090,9 @@ class MapleHelperApp:
 
     def _kb_update_done(self, status: str, before: str, interactive: bool):
         t = I18n(self.settings["language"])
+        settings_win = self.__dict__.get("_windows", {}).get("settings")
+        if settings_win is not None and hasattr(settings_win, "kb_update_done"):
+            settings_win.kb_update_done()     # its "Update database" link said "Checking…" meanwhile
         self.overlay.show_scope()           # the check itself moves "verified on" on, even with nothing new
         if status == "updated":
             self.reload_kb()
@@ -914,13 +1239,15 @@ class MapleHelperApp:
 
         def make():
             dlg = ToolsDialog(self.kb, self.profiles, self.settings, self.settings["language"], self.style(),
-                              self.grind, page)
+                              self.grind, page, loot=self.loot_scanner)
+            dlg.loot_area_requested.connect(self.pick_loot_area)
             dlg.sync_requested.connect(self.overlay.sync_profile)
             dlg.grind_sync_requested.connect(lambda: self.overlay.sync_profile(grind=True))
             dlg.ask_requested.connect(self.ask_from_tools)
             dlg.detail_ask_requested.connect(lambda q, shown: self.ask_from_tools(q, True, detail=True, shown=shown))
             dlg.tag_requested.connect(self.ask_about_guide)
             dlg.guide_requested.connect(self.show_guides)
+            dlg.add_character_requested.connect(lambda: (self.add_character(), self.on_profile_changed()))
             return dlg
         return self.open_window("tools", make)
 
@@ -938,6 +1265,27 @@ class MapleHelperApp:
     def show_route(self, key: str):
         """Play tools on the way to a map, from the character's map."""
         self.show_tools("route").route_to_map(key)
+
+    def show_map_location(self, key: str):
+        """The map window on this map's way in (the open one shows it, rather than a second window): beside the chat
+        the first time, then where the player left it."""
+        from .ui.mapview import MapLocationDialog
+        chat = self.overlay.frameGeometry() if self.overlay.isVisible() else None
+        dlg = self.open_window("map", lambda: MapLocationDialog(self.kb, self.settings["language"], self.style(),
+                                                                self.settings, chat))
+        dlg.show_map(key)
+
+    def show_item_details(self, key: str):
+        """An item's stats, droppers and Meow Notes, to the right of the chat the first time, then where the player
+        left it (the open window shows the next item instead of a second window)."""
+        from .ui.itemview import ItemDetailsDialog
+        chat = self.overlay.frameGeometry() if self.overlay.isVisible() else None
+
+        def make():
+            dlg = ItemDetailsDialog(self.kb, self.settings["language"], self.style(), self.settings, chat)
+            dlg.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
+            return dlg
+        self.open_window("item", make).show_item(key)
 
     def ask_from_tools(self, question: str, with_screenshot: bool, detail: bool = False, shown: str | None = None):
         if not self.overlay.is_open():
@@ -958,6 +1306,8 @@ class MapleHelperApp:
     def on_profile_changed(self):
         self.grind.sync()          # another character: its own session's minute reads (or none)
         self._tools_call("profile_changed")
+        for w in self.__dict__.get("_tool_windows", {}).values():
+            w.character_changed()      # the gear advisor's level, job and worn gear are the new character's
 
     def show_guides(self, open_key: str | None = None):
         from .ui.guides import GuidesDialog
@@ -1023,12 +1373,15 @@ class MapleHelperApp:
         old = self.__dict__.get("_windows", {}).get(f"wishlist:{cid}")
         if old is not None:
             old.close()             # a star added meanwhile: show the list as it is now, not the open copy
-        self.open_window(f"wishlist:{cid}", lambda: self._wishlist_dialog(keys))
+        self.open_window(f"wishlist:{cid}", lambda: self._wishlist_dialog(keys, c or self.profiles.active))
 
-    def _wishlist_dialog(self, keys):
+    def _wishlist_dialog(self, keys, c=None):
         from .ui.wishlist import WishlistDialog
-        dlg = WishlistDialog(keys, self.kb, self.settings["language"], self.style())
+        dlg = WishlistDialog(keys, self.kb, self.settings["language"], self.style(), c.level if c else None)
         dlg.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
+        # who drops it and the way there, from Play tools (answered locally, no AI)
+        dlg.farm_requested.connect(lambda name: self.show_tools("farm").farm_item(name))
+        dlg.route_requested.connect(lambda name: self.show_tools("route").route_to_place(name))
         return dlg
 
     def show_patch_notes(self, entries: list[dict] | None = None, tab: str = "changes"):
@@ -1061,6 +1414,24 @@ class MapleHelperApp:
         # a tagged card the new KB dropped would crash the next question (set_tags keeps only cards it has)
         self.overlay.set_tags(self.overlay.focus_keys)
         self.grind.kb = self.kb
+        scanner = getattr(self, "minimap_scanner", None)
+        if scanner is not None:
+            scanner.set_kb(self.kb)     # its locator is rebuilt from the new KB on the next read
+        dots = getattr(self, "portal_dots", None)
+        if dots is not None:
+            dots.set_kb(self.kb)        # the new KB's hidden portals
+        npc = getattr(self, "npc_overlay", None)
+        if npc is not None:
+            npc.set_kb(self.kb)        # the new KB's NPC lists
+        search = getattr(self, "game_search", None)
+        if search is not None:
+            search.set_kb(self.kb)     # the new KB's monster/NPC/item search
+        loot = getattr(self, "loot_scanner", None)
+        if loot is not None:
+            loot.set_kb(self.kb)        # the item names it matches reads against
+            self.loot_overlay.kb = self.kb
+        for w in self.__dict__.get("_tool_windows", {}).values():
+            w.set_kb(self.kb)                # the new KB's equips and scrolls
         self.overlay.show_scope()           # the new KB's "verified on" date
         self.overlay.show_news()            # and its news
         # the open KB windows were built on the old KB (their lists named pages the swap removed): reopen them as
@@ -1075,7 +1446,17 @@ class MapleHelperApp:
 
     def shutdown(self):
         telemetry.flush()
+        presence.stop()
         self.grind.stop()                        # no minute read while the app goes
+        scanner = getattr(self, "minimap_scanner", None)
+        if scanner is not None:
+            scanner.stop()                  # no minimap read while the app goes
+        loot = getattr(self, "loot_scanner", None)
+        if loot is not None:
+            loot.stop()                     # no loot read while the app goes; the running log is saved
+            self.loot_overlay.hide()
+        for w in self.__dict__.get("_tool_windows", {}).values():
+            w.hide()                        # (their setting stays: open again next time)
         try:
             self.overlay.save_session_summary()   # quitting ends the session: show it next time
         except Exception:
@@ -1102,10 +1483,9 @@ class MapleHelperApp:
             stop_login()                         # a sign-in still waiting (Codex's holds a port the next one needs)
         except Exception:
             pass
-        try:
-            self.hotkeys.close()
-        except Exception:
-            pass
+        hotkeys = getattr(self, "hotkeys", None)
+        if hotkeys is not None:
+            hotkeys.close()                      # the bar's key free for other programs again
         if getattr(self, "pending_installer", None):
             from .setupwait import setup_running
             if setup_running():
@@ -1134,6 +1514,29 @@ def _hold_running_mutex():
     wait_for_setup()
     k32 = ctypes.windll.kernel32
     _RUNNING = k32.CreateMutexW(None, False, "MapleHelperRunning")
+
+
+_QT_TEXTS: dict = {}       # the installed Qt translator and its language
+
+
+def qt_texts(qapp, lang: str) -> None:
+    """Qt's own words (a text field's right-click menu: Undo, Copy, Paste, Select All) in the UI language. Without
+    qtbase_he they stayed English, "&" marks and all, in the Hebrew app. The frozen build ships the .qm files
+    (maplehelper.spec drops only qtwebengine's)."""
+    want = "he" if lang == "he" else ""
+    if _QT_TEXTS.get("lang", "") == want:
+        return
+    old = _QT_TEXTS.pop("tr", None)
+    if old is not None:
+        qapp.removeTranslator(old)
+    _QT_TEXTS["lang"] = want
+    if want:
+        tr = QTranslator(qapp)
+        if tr.load(f"qtbase_{want}", QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
+            qapp.installTranslator(tr)
+            _QT_TEXTS["tr"] = tr
+        else:
+            report.log.info("no Qt translations for %s", want)
 
 
 def main():

@@ -1,8 +1,9 @@
-"""Small Windows helpers: find the game window, capture it, focus handling, hotkeys, autostart.
+"""Small Windows helpers: find the game window, capture it, focus handling, the bar's hotkey, autostart.
 
 Deliberately non-invasive: no keyboard hooks, no key-state polling, no process access, nothing hidden
 from screen capture. The game window is found by its title and captured from the screen like any
-screenshot tool; keys are ordinary Windows hotkeys (RegisterHotKey).
+screenshot tool. One key, the bar over the game's show/hide, is an ordinary Windows hotkey (RegisterHotKey); the
+official client in front may take it from other programs (live tests), so the bar's tray item stays the sure way.
 Same interface as macapi.py; the app picks one through osapi.py.
 """
 from __future__ import annotations
@@ -16,14 +17,13 @@ import sys
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, Signal
 from PySide6.QtWidgets import QApplication, QWidget
 
-from . import APP_NAME, capture
+from . import APP_NAME, capture, keys
 from .capture import grab_image, grab_jpeg
 
 user32 = ctypes.windll.user32
 dwmapi = ctypes.windll.dwmapi
 
 GAME_TITLES = ("MapleStory Classic", "MapleStory", "Classic World", "MapleRoyals")
-VK = {f"F{i}": 0x6F + i for i in range(1, 13)}   # F1=0x70 ... F12=0x7B
 APP_ID = "MapleHelper.App"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -36,7 +36,7 @@ def prepare_process() -> None:
 
 
 def missing_permissions(request: bool = False) -> list[str]:
-    return []   # Windows needs no extra grant for screen capture or hotkeys
+    return []   # Windows needs no extra grant for screen capture
 
 
 def _title(hwnd) -> str:
@@ -193,13 +193,21 @@ def float_over_fullscreen(win_id: int) -> None:
     """Nothing to do: on Windows a topmost window already floats over a borderless game."""
 
 
-MOD_NOREPEAT = 0x4000
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x0008, 0x4000
+MOD_FLAGS = {"Ctrl": MOD_CONTROL, "Alt": MOD_ALT, "Shift": MOD_SHIFT, "Meta": MOD_WIN}
 WM_HOTKEY = 0x0312
 
 
 def register_hotkey(hwnd: int, hotkey_id: int, key_name: str) -> bool:
-    vk = VK.get(key_name)
-    return bool(vk and user32.RegisterHotKey(wt.HWND(hwnd), hotkey_id, MOD_NOREPEAT, vk))
+    """key_name as keys.py names it ("Shift+F11"). False for a name that can't be a hotkey here, or a key another
+    program already holds."""
+    if not keys.usable(key_name, mac=False):
+        return False
+    mods, key = keys.split(key_name)
+    flags = MOD_NOREPEAT
+    for m in mods:
+        flags |= MOD_FLAGS[m]
+    return bool(user32.RegisterHotKey(wt.HWND(hwnd), hotkey_id, flags, keys.WIN_VK[key]))
 
 
 def unregister_hotkey(hwnd: int, hotkey_id: int) -> None:
@@ -234,7 +242,7 @@ class Hotkeys(QObject):
         QApplication.instance().installNativeEventFilter(self._filter)
 
     def register(self, hotkey_id: int, key_name: str) -> bool:
-        """(Re)binds hotkey_id to key_name. False when another app already owns the key."""
+        """(Re)binds hotkey_id to key_name. False when it can't be a hotkey or another program holds the key."""
         self.unregister(hotkey_id)
         ok = register_hotkey(int(self._host.winId()), hotkey_id, key_name)
         if ok:
@@ -242,8 +250,9 @@ class Hotkeys(QObject):
         return ok
 
     def unregister(self, hotkey_id: int) -> None:
-        unregister_hotkey(int(self._host.winId()), hotkey_id)
-        self._ids.discard(hotkey_id)
+        if hotkey_id in self._ids:
+            unregister_hotkey(int(self._host.winId()), hotkey_id)
+            self._ids.discard(hotkey_id)
 
     def close(self) -> None:
         for hid in list(self._ids):

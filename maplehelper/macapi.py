@@ -1,9 +1,9 @@
-"""macOS helpers, same interface as winapi.py: find the game window, capture it, focus, hotkeys, autostart.
+"""macOS helpers, same interface as winapi.py: find the game window, capture it, focus, the bar's hotkey, autostart.
 
-Just as non-invasive as on Windows: no event taps, no key-state polling, no process access. Windows come
-from the Quartz window list, capture is a screen grab, and keys are ordinary system hotkeys
-(Carbon RegisterEventHotKey, the macOS counterpart of RegisterHotKey). The one privacy grant the player
-gives is Screen Recording (window titles + the screenshot).
+Just as non-invasive as on Windows: no event taps, no key-state polling, no process access. Windows come from the
+Quartz window list, capture is a screen grab, and the one key (the bar over the game's show/hide) is an ordinary
+system hotkey (Carbon RegisterEventHotKey, the macOS counterpart of RegisterHotKey). The one privacy grant the
+player gives is Screen Recording (window titles + the screenshot).
 
 pyobjc and Carbon are loaded lazily, so the pure parts of this module import (and are tested) on any OS.
 """
@@ -19,14 +19,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
-from . import capture
+from . import capture, keys
 from .capture import grab_image, grab_jpeg
 
 GAME_TITLES = ("MapleStory Classic", "MapleStory", "Classic World", "MapleRoyals")
-# virtual key codes (HIToolbox kVK_F1...). Macs send F-keys only with fn held, unless
-# "Use F1, F2, etc. keys as standard function keys" is on (System Settings > Keyboard).
-KEYCODES = {"F1": 122, "F2": 120, "F3": 99, "F4": 118, "F5": 96, "F6": 97,
-            "F7": 98, "F8": 100, "F9": 101, "F10": 109, "F11": 103, "F12": 111}
 LAUNCH_AGENT_LABEL = "com.maplehelper.app"
 LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 # mss on macOS takes points (Qt's logical coordinates), not physical pixels
@@ -234,7 +230,7 @@ def float_over_fullscreen(win_id: int) -> None:
         pass   # cosmetic: the window still works on the game's Space when the game is windowed
 
 
-# ---------------------------------------------------------------- hotkeys (Carbon)
+# ---------------------------------------------------------------- the bar's hotkey (Carbon)
 
 def fourcc(code: str) -> int:
     return int.from_bytes(code.encode("ascii"), "big")
@@ -255,7 +251,19 @@ kEventHotKeyPressed = 5
 kEventParamDirectObject = fourcc("----")
 typeEventHotKeyID = fourcc("hkid")
 eventNotHandledErr = -9874
+# Carbon's modifier flags (cmdKey, shiftKey, optionKey, controlKey), by Qt's names: Ctrl is ⌘ on a Mac, Meta ⌃
+CARBON_MODS = {"Ctrl": 1 << 8, "Shift": 1 << 9, "Alt": 1 << 11, "Meta": 1 << 12}
 _carbon_lib = None
+
+
+def carbon_combo(key_name: str) -> tuple[int, int] | None:
+    """The key code and Carbon modifiers of a keys.py name ("Shift+F10" -> (109, shiftKey)); None for a name that
+    can't be a hotkey on a Mac (F21-F24 have no key there)."""
+    if not keys.usable(key_name, mac=True):
+        return None
+    mods, key = keys.split(key_name)
+    code = keys.MAC_KEYCODES.get(key)
+    return None if code is None else (code, sum(CARBON_MODS[m] for m in mods))
 
 
 def carbon():
@@ -299,20 +307,20 @@ class Hotkeys(QObject):
             if err == 0 and hk.signature == SIGNATURE and hk.id in self._refs:
                 self.pressed.emit(int(hk.id))
                 return 0
-        except Exception:
+        except Exception:      # noqa: BLE001, S110 - a callback from C: never let an error unwind into Carbon
             pass
         return eventNotHandledErr
 
     def register(self, hotkey_id: int, key_name: str) -> bool:
-        """(Re)binds hotkey_id to key_name. False when the key is unknown or another app owns it."""
+        """(Re)binds hotkey_id to key_name. False when it can't be a hotkey on a Mac or another app holds the key."""
         self.unregister(hotkey_id)
-        code = KEYCODES.get(key_name)
-        if code is None:
+        combo = carbon_combo(key_name)
+        if combo is None:
             return False
         c = carbon()
         ref = ctypes.c_void_p()
-        err = c.RegisterEventHotKey(code, 0, EventHotKeyID(SIGNATURE, hotkey_id), c.GetApplicationEventTarget(), 0,
-                                    ctypes.byref(ref))
+        err = c.RegisterEventHotKey(combo[0], combo[1], EventHotKeyID(SIGNATURE, hotkey_id),
+                                    c.GetApplicationEventTarget(), 0, ctypes.byref(ref))
         if err != 0:
             return False
         self._refs[hotkey_id] = ref

@@ -1,4 +1,5 @@
-"""Anonymous usage stats (PostHog), only when the player opts in (Settings > Privacy & system).
+"""Anonymous usage stats (PostHog), on by default for a new install; the player can turn them off (Settings >
+Privacy & system). An install that already has the setting keeps its choice.
 
 What is sent: event names ("question_asked", ...), the app version, the OS, and a few short
 values such as which provider answered. Each install gets a random id that is not linked to the
@@ -47,17 +48,22 @@ def install_id(settings) -> str:
     return settings["install_id"]
 
 
-def init(settings, version: str) -> None:
-    """Call once at startup. Nothing is sent unless the player turned stats on and a key is set."""
-    _state["key"] = _key()
-    # the id is made only when stats are turned on: a player who never opts in never gets one
-    _state["settings"], _state["id"] = settings, settings["install_id"] or ""
-    _state["base"] = {
+def base_props(version: str) -> dict:
+    """What every event says about the app (also the presence ping's, see presence.py)."""
+    return {
         "app_version": version,
         "$os": {"win32": "Windows", "darwin": "Mac OS X"}.get(sys.platform, sys.platform),
         "frozen": bool(getattr(sys, "frozen", False)),   # False = a source run (development)
         "$lib": "maplehelper",
     }
+
+
+def init(settings, version: str) -> None:
+    """Call once at startup. Nothing is sent unless the player turned stats on and a key is set."""
+    _state["key"] = _key()
+    # the id is made only when stats are on: a player who turns them off before any event never gets one
+    _state["settings"], _state["id"] = settings, settings["install_id"] or ""
+    _state["base"] = base_props(version)
     set_enabled(bool(settings["telemetry"]))
 
 
@@ -112,8 +118,9 @@ def _drain() -> list[dict]:
             return items
 
 
-def _post(batch: list[dict]) -> bool:
-    body = json.dumps({"api_key": _state["key"], "batch": batch}).encode("utf-8")
+def _post(batch: list[dict], key: str | None = None) -> bool:
+    """`key`: the presence ping posts while these stats are off (and init's key unset)."""
+    body = json.dumps({"api_key": key or _state["key"], "batch": batch}).encode("utf-8")
     req = urllib.request.Request(f"{HOST}/batch/", data=body, method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "MapleHelper"})
     try:
