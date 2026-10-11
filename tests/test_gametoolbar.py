@@ -185,19 +185,62 @@ def test_apply_language_retexts_and_mirrors(bar):
     assert w._npcs.text() == "NPCs Here" and w.layoutDirection() == Qt.LeftToRight
 
 
-# ------------------------------------------------------------ its width (the buttons wrap)
+# ------------------------------------------------------------ its length (the buttons wrap, words become icons)
+
+def _rows(w):
+    return len({b.y() for b, _ in w._buttons()})
+
+
+def _drag(w, width: int, height: int) -> None:
+    """A drag of the bar's end: the size changes, and the other side follows just after (never inside the resize:
+    that cancelled Windows' own drag)."""
+    from PySide6.QtWidgets import QApplication
+    w.resize(width, height)
+    QApplication.processEvents()
+
 
 def test_a_narrower_bar_wraps_its_buttons_into_rows(bar):
     """The buttons wrap into as many rows as the width leaves room for, the bar's height following; at the
-    narrowest width it goes — its widest single button — a button or two a row, not all on one."""
+    narrowest width it goes — its biggest single icon — a button or two a row, not all on one."""
     w, s = bar
     w.refresh()
-    rows = lambda: len({b.y() for b, _ in w._buttons()})
     one_row = w.height()
-    s["game_toolbar_width"] = w._width_limits()[0]      # the narrowest: the widest single button fits, alone
+    s["game_toolbar_width"] = w._limits()[0]
     w.refresh()
-    assert rows() >= 5
+    assert _rows(w) >= 5
     assert w.height() > one_row
+
+
+def test_the_bar_goes_narrower_than_one_row_of_words(bar):
+    """Its side dragged in only ever made it wider: Qt on Windows refuses a system resize narrower than the width a
+    window's height fits when its layout says its height follows its width (2026-10-11). The bar's never says so,
+    and goes down to its biggest icon."""
+    w, s = bar
+    w.refresh()
+    _, natural = w._limits()
+    assert not w.layout().hasHeightForWidth() and not w._flow.hasHeightForWidth()
+    assert w.minimumWidth() < natural // 4
+
+
+def test_too_narrow_for_the_words_the_buttons_show_icons_alone_and_back(bar):
+    """Words while they fit in WORD_LINES_MAX rows; narrower, each button shows its icon alone (its name in the
+    tooltip), and widening brings the words back. The ⚙'s icons choice isn't touched."""
+    from maplehelper.ui import gametoolbar
+    w, s = bar
+    w.refresh()
+    _, natural = w._limits()
+    words = [s_[0] for s_ in w._sizes[False]]
+    room = lambda width: width - 2 * gametoolbar.SIDE         # noqa: E731
+    # the narrowest width the words still take two rows at, found as the bar finds it
+    two = next(x for x in range(natural, 0, -1) if gametoolbar._lines(words, room(x - 1), gametoolbar.FLOW_GAP) > 2)
+    _drag(w, two, w.height())
+    assert w._npcs.text() == "NPCs Here" and _rows(w) == gametoolbar.WORD_LINES_MAX
+    _drag(w, two - 1, w.height())                              # one pixel less: three rows of words, so icons
+    assert all(b.text() == "" and b.toolTip() == w.t(key) for b, key in w._buttons())
+    assert w._npcs.iconSize() == QSize(gametoolbar.ICON_PX, gametoolbar.ICON_PX)
+    assert w.height() == w._flow.extent(w.width() - 2 * gametoolbar.SIDE) + gametoolbar.TOP + gametoolbar.BOTTOM
+    _drag(w, two, w.height())
+    assert w._npcs.text() == "NPCs Here" and _rows(w) == 2 and s["game_toolbar_icons"] is False
 
 
 def test_the_dragged_width_is_kept_and_reopened(bar):
@@ -205,9 +248,9 @@ def test_the_dragged_width_is_kept_and_reopened(bar):
     from maplehelper.ui import gametoolbar
     w, s = bar
     w.refresh()
-    w._widths.stop()                    # the debounced save, as the 400 ms timer would fire it
+    w._lengths.stop()                   # the debounced save, as the 400 ms timer would fire it
     w.resize(420, w.height())
-    w._remember_width()
+    w._remember_length()
     assert s["game_toolbar_width"] == 420
     again = gametoolbar.GameToolbar(s, I18n("en"))
     again.refresh()
@@ -223,13 +266,56 @@ def test_the_width_clamps_to_the_screen(bar):
     assert w.width() <= screen.width()
 
 
-def test_the_width_clamps_to_the_widest_single_button(bar):
+def test_the_width_clamps_to_the_biggest_single_icon(bar):
     from maplehelper.ui import gametoolbar
     w, s = bar
     s["game_toolbar_width"] = 1
     w.refresh()
-    assert w.width() == w._width_limits()[0]
-    assert w.width() >= w._npcs.width() + 2 * gametoolbar.SIDE      # the widest button fits, margins and all
+    assert w.width() == w._limits()[0]
+    assert w.width() >= w._npcs.width() + 2 * gametoolbar.SIDE      # the button fits, margins and all
+
+
+# ------------------------------------------------------------ upright (the ◯ before the grip)
+
+def test_the_circle_stands_the_bar_upright_and_lays_it_back(bar):
+    """The ◯ sits before the grip's dots; it turns the bar into a column (its top and bottom the ends to drag, its
+    width as its column), kept in game_toolbar_vertical, and back into a row at the width it had."""
+    w, s = bar
+    w.refresh()
+    width, rows = w.width(), _rows(w)
+    assert w._orient.x() < w._grip.x() and w._orient.toolTip() == "Stand the toolbar upright"
+    w._orient.click()
+    assert s["game_toolbar_vertical"] is True and w.height() > w.width()
+    xs = {b.x() for b, _ in w._buttons()}
+    ys = [b.y() for b, _ in w._buttons()]
+    assert len(xs) == 1 and ys == sorted(ys)                       # one column, in the bar's order
+    assert w._grip.width() > w._grip.height()                       # its dots across the column
+    mid = QPoint(w.width() // 2, 3)
+    assert w._edges_at(mid) == Qt.TopEdge and w._edges_at(QPoint(3, w.height() // 2)) == Qt.Edge(0)
+    assert w._orient.toolTip() == "Lay the toolbar flat"
+    w._orient.click()
+    assert s["game_toolbar_vertical"] is False and w.width() == width and _rows(w) == rows
+
+
+def test_an_upright_bar_shorter_wraps_into_columns_and_keeps_its_height(bar):
+    """Dragged shorter, the column wraps into columns and the buttons show icons alone; the height is kept in
+    game_toolbar_height and the next bar opens upright at it."""
+    from maplehelper.ui import gametoolbar
+    w, s = bar
+    s["game_toolbar_vertical"] = True
+    w.refresh()
+    _, natural = w._limits()
+    one_column = w.width()
+    w._lengths.stop()
+    _drag(w, w.width(), natural // 4)
+    assert len({b.x() for b, _ in w._buttons()}) >= 3 and w.width() > one_column
+    assert all(b.text() == "" for b, _ in w._buttons())
+    w._remember_length()
+    assert s["game_toolbar_height"] == natural // 4
+    again = gametoolbar.GameToolbar(s, I18n("en"))
+    again.refresh()
+    assert again.height() == natural // 4 and again._flow.upright
+    again.close()
 
 
 # ------------------------------------------------------------ the ⚙ panel

@@ -1349,6 +1349,8 @@ STRINGS = {
     "tb_craft_tip": {"he": "חלון יועץ הקראפטינג מעל המשחק: בוחרים מה להכין, ורואים מה לפארם, באיזה סדר להכין ומה יעלה",
                      "en": "The Crafting Advisor window over the game: pick what to make and see what to farm, what to craft in which order, and what it costs"},
     "tb_move": {"he": "גררו כדי להזיז", "en": "Drag to move"},
+    "tb_vertical": {"he": "להעמיד את הסרגל (טור)", "en": "Stand the toolbar upright"},
+    "tb_horizontal": {"he": "להשכיב את הסרגל (שורה)", "en": "Lay the toolbar flat"},
     "tb_close": {"he": "הסתרת הסרגל (מחזירים אותו מהתפריט של הסמל של Maple Helper, בקיצור המקשים שלו או בהגדרות > מיני-מפה)",
                  "en": "Hide the toolbar (bring it back from Maple Helper's icon menu, with its shortcut or in Settings > Minimap)"},
     # the key that shows or hides the bar (Settings > Minimap and its ⚙ panel, ui/hotkeybox.py)

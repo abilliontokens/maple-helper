@@ -197,6 +197,8 @@ DEFAULT_SETTINGS = {
     "craft_plan_size": None,      # ... the size the player dragged its Forge plan window to: {"w","h"}; None: fits its plan
     "craft_exp_table": None,      # crafting EXP per level the player measured in game: {"7": 1234}; None: the KB's table
     "game_toolbar_width": None,   # the width the player dragged the bar to (its buttons wrap into rows); None: one row
+    "game_toolbar_height": None,  # ... the height, when it stands upright (its buttons wrap into columns); None: one
+    "game_toolbar_vertical": False,   # the bar upright, a column (its ◯ before the grip turns it)
     "game_toolbar_icons": False,  # the bar's buttons as icons (their names in the tooltips) instead of words
     # the key that shows or hides the bar, from any program (keys.py names it; "" is none). With Shift: the game
     # binds the plain F-keys. A Mac shows the desktop on F11, with Shift too, so it gets the next key down

@@ -2,9 +2,11 @@
 any map, any item, and whether an item is safe to sell (each asks the app to open ui/gamesearch.py in that mode) —
 Cabs & Teleports for the way shown, the loot log and the tool windows. Like the NPCs window it floats over the game:
 frameless, always on top, never taking the keyboard from it (clicks still work), dark glass the minimap reads never
-see. Its sides are draggable: the buttons wrap into as many rows as the width leaves room for, the height following,
-and the width is kept in game_toolbar_width. Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in
-its text's colour: small beside the words, or alone in icons mode with the name in the tooltip. The ⚙ beside the ✕
+see. Its ends are draggable (its sides; its top and bottom when the ◯ before the grip stands it upright): the buttons
+wrap into as many lines as the length leaves room for, the other side following, and show their icons alone once the
+words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width (game_toolbar_height
+upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's colour: small beside the
+words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙ beside the ✕
 opens the panel with the look of every window over the game, the icons mode and the bar's show/hide key
 (_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the player left it is
 kept in game_toolbar_pos; with none saved it opens just above the drawn minimap box."""
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QSizePolicy,
     QToolButton,
@@ -49,7 +52,6 @@ from .npcoverlay import (
     _flags,
     _Header,
     _paint_glass,
-    _picked,
     accent_of,
     apply_look,
     set_capturable,
@@ -59,6 +61,9 @@ from .regionpick import from_capture
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
 FLOW_GAP = 6                                              # between the buttons, and between the rows they wrap into
+# the most rows (columns, upright) the buttons' words may wrap into: dragged shorter, the bar shows icons alone
+WORD_LINES_MAX = 2
+QT_MAX = 16777215                                         # Qt's "no limit" for a widget's size
 KINDS = {"monster_npc": "tb_monster_npc", "map": "tb_maps", "item": "tb_items", "sell": "tb_sell"}  # search buttons, i18n keys
 # the tool windows the bar shows and hides, after the loot log: each button is its window's setting -> its i18n key
 TOOLS = {"scroll_planner": "tb_scrolls", "gear_advisor": "tb_gear", "craft_advisor": "tb_craft"}
@@ -142,12 +147,12 @@ def line_icon(name: str, colour: str, on: str | None = None, hover: str | None =
 
 def qss(settings) -> str:
     """The bar's own style: the accent that lights a lit button, from the settings, and the room an icon alone takes
-    on its button in icons mode (rebuilt whenever either is picked)."""
+    on its button (iconOnly: the ⚙'s icons mode, or a bar dragged too short for the words)."""
     accent, on_accent = accent_of(settings)
-    pad = "6px 9px" if _picked(settings, "game_toolbar_icons") else "5px 10px"
     return f"""
 QPushButton {{ background: {FILL1}; color: {TEXT}; border: none; border-radius: 8px;
-              padding: {pad}; text-align: center; }}
+              padding: 5px 10px; text-align: center; }}
+QPushButton[iconOnly="true"] {{ padding: 6px 9px; }}
 QPushButton:hover {{ background: {FILL2}; }}
 QPushButton:checked, QPushButton[on="true"] {{ background: {accent}; color: {on_accent}; }}
 QToolButton {{ background: transparent; border: none; border-radius: 6px; padding: 4px; }}
@@ -161,9 +166,14 @@ class _Grip(QWidget):
     def __init__(self):
         super().__init__()
         self.setCursor(Qt.OpenHandCursor)
-        self.setFixedSize(12, 28)
-        self._icon = line_icon("grip-vertical", MUTED)
         self._grab = None          # (its window is self.window(), not kept)
+        self.set_upright(False)
+
+    def set_upright(self, upright: bool) -> None:
+        """Its dots across an upright bar (grip-horizontal), down a lying one (grip-vertical)."""
+        self.setFixedSize(28, 12) if upright else self.setFixedSize(12, 28)
+        self._icon = line_icon("grip-horizontal" if upright else "grip-vertical", MUTED)
+        self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -180,6 +190,79 @@ class _Grip(QWidget):
 
     def mouseReleaseEvent(self, e):
         self._grab = None
+
+
+def _lines(lengths: list[int], room: int, gap: int) -> int:
+    """How many lines (rows, or columns upright) items of these lengths wrap into within `room`, the way the bar's
+    layout lays them out: a line takes the next item while it still fits, and every line takes at least one."""
+    lines, used = 0, None
+    for n in lengths:
+        if used is None or used + gap + n > room:
+            lines, used = lines + 1, n
+        else:
+            used += gap + n
+    return lines
+
+
+class _BarLayout(FlowLayout):
+    """The bar's buttons in a row that wraps into rows, or (upright) a column that wraps into columns.
+
+    It never says its height follows its width (hasHeightForWidth): Qt on Windows then refuses a system resize
+    narrower than the width the window's current height fits, so dragging the bar's side only ever made it wider
+    (2026-10-11, the side dragged 500 px in stayed at the one-row width). The bar sets its own other side from
+    extent() as its length changes."""
+
+    def __init__(self, spacing: int):
+        super().__init__(spacing=spacing)
+        self.upright = False
+
+    def hasHeightForWidth(self):
+        return False
+
+    def setGeometry(self, rect):
+        QLayout.setGeometry(self, rect)
+        if self.upright:
+            self._columns(rect, apply=True)
+        else:
+            self._arrange(rect, apply=True)
+
+    def extent(self, room: int) -> int:
+        """The other side the items take within this length: the height a row of `room` wraps them into, or upright
+        the width a column of `room` wraps them into."""
+        if self.upright:
+            return self._columns(QRect(0, 0, 0, room), apply=False)
+        return self._arrange(QRect(0, 0, room, 0), apply=False)
+
+    def _columns(self, rect, apply: bool) -> int:
+        """Columns of items top to bottom that fit the height, from the leading side (right in Hebrew); each column
+        as wide as its widest item, its buttons stretched to that width (a menu's look), the small tool buttons
+        centred. Returns the width used."""
+        cols, col, y = [], [], 0
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            h = item.sizeHint().height()
+            if col and y + self._v + h > rect.height():
+                cols.append(col)
+                col, y = [], 0
+            y += (self._v if col else 0) + h
+            col.append(item)
+        if col:
+            cols.append(col)
+        x, rtl = 0, self._rtl()
+        for col in cols:
+            w = max(self._width(item) for item in col)
+            y = rect.y()
+            for item in col:
+                ih = item.sizeHint().height()
+                iw = w if isinstance(item.widget(), QPushButton) else self._width(item)
+                inset = (w - iw) // 2
+                left = rect.right() - x - w + 1 + inset if rtl else rect.x() + x + inset
+                if apply:
+                    item.setGeometry(QRect(left, y, iw, ih))
+                y += ih + self._v
+            x += w + self._h
+        return x - self._h if cols else 0
 
 
 # ---------------------------------------------------------------- the ⚙ panel's own controls
@@ -663,10 +746,12 @@ class _SettingsPanel(QWidget):
 class GameToolbar(EdgeResize, QWidget):
     """The bar itself. The NPCs-here button flips settings["npc_overlay"] (npc_toggled: the window follows),
     the search buttons ask for their search (search_requested: "monster_npc", "map", "item" or "sell"), and
-    the ✕ turns the bar itself off (closed: the app says how to bring it back). Its sides are dragged narrower
-    and wider, the buttons wrapping into rows; the ⚙ opens the panel with the look, the icons mode and the bar's
-    key. Clicks work but it never takes the keyboard from the game, and the minimap reads never see it. Its
-    place is kept in game_toolbar_pos, its width in game_toolbar_width."""
+    the ✕ turns the bar itself off (closed: the app says how to bring it back). Its length is dragged shorter and
+    longer (its width; its height upright, the ◯ before the grip turning it), the buttons wrapping into lines and
+    showing icons alone once the words would take more than WORD_LINES_MAX lines; the ⚙ opens the panel with the
+    look, the icons mode and the bar's key. Clicks work but it never takes the keyboard from the game, and the
+    minimap reads never see it. Its place is kept in game_toolbar_pos, its length in game_toolbar_width (or
+    game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
 
     search_requested = Signal(str)     # which search to open: "monster_npc" | "map" | "item" | "sell"
     npc_toggled = Signal()             # settings["npc_overlay"] flipped: the NPCs-here window follows
@@ -691,10 +776,16 @@ class GameToolbar(EdgeResize, QWidget):
         self._placed = False                 # geometry applied at least once: there is a place to remember
         self._mode = ""                      # the search window's mode, lit on its button ("" none)
         self._panel: _SettingsPanel | None = None   # the ⚙ panel, made on the first ask
-        self._fitting = False                # our own width/height fit, not the player's drag to remember
-        self._width_set = -1                 # the width the settings last gave: a width past it is a drag
+        self._fitting = False                # our own fit of its size, not the player's drag to remember
+        self._length_set = -1                # the length the settings last gave: a length past it is a drag
+        self._icons_shown: bool | None = None   # icons alone on the buttons now (the ⚙'s choice, or too short)
+        self._sizes: dict[bool, list[tuple[int, int]]] = {}   # words / icons alone -> each item's (width, height)
         self._geom = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._remember)
-        self._widths = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._remember_width)
+        self._lengths = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._remember_length)
+        # the other side fitted just after a resize, never inside it: a resize of its own from resizeEvent cancelled
+        # Windows' drag of the bar's side, every step of it (2026-10-11)
+        self._refit = QTimer(self, singleShot=True, interval=0,
+                             timeout=lambda: self._fit(self.height() if self._upright() else self.width()))
         self.setStyleSheet(qss(settings))
         self._build()
 
@@ -704,8 +795,18 @@ class GameToolbar(EdgeResize, QWidget):
         col = QVBoxLayout(self)
         col.setContentsMargins(SIDE, TOP, SIDE, BOTTOM)
         col.setSpacing(0)
-        self._flow = FlowLayout(spacing=FLOW_GAP)
+        col.setSizeConstraint(QLayout.SetNoConstraint)    # the bar sets its own limits (_apply_size)
+        self._flow = _BarLayout(FLOW_GAP)
         col.addLayout(self._flow)
+        # the ◯ before the grip's dots: the bar upright (a column) or lying (a row)
+        self._orient = QToolButton(objectName="Orient")
+        self._orient.setIcon(line_icon("circle", MUTED, hover=TEXT))
+        self._orient.setIconSize(QSize(TOOL_ICON_PX - 2, TOOL_ICON_PX - 2))
+        self._orient.setAutoRaise(True)
+        self._orient.setCursor(Qt.PointingHandCursor)
+        self._orient.setFocusPolicy(Qt.NoFocus)
+        self._orient.clicked.connect(self._orient_clicked)
+        self._flow.addWidget(self._orient)
         self._grip = _Grip()
         self._flow.addWidget(self._grip)
         self._npcs = QPushButton(checkable=True)
@@ -777,15 +878,32 @@ class GameToolbar(EdgeResize, QWidget):
         b.setIcon(line_icon(ICONS[key], on_fill if b.property("on") else TEXT, on=on_fill))
 
     def _retext(self) -> None:
-        t, rtl = self.t, self.t.rtl
-        icons = bool(self._settings["game_toolbar_icons"])
+        t = self.t
+        upright = bool(self._settings["game_toolbar_vertical"])
+        if upright != self._flow.upright:       # the way it stands first: the grip's size is measured with it
+            self._flow.upright = upright
+            self._grip.set_upright(upright)
         self._grip.setAccessibleName(t("tb_move"))
         self._grip.setToolTip(t("tb_move"))
+        self._orient.setAccessibleName(t("tb_horizontal" if upright else "tb_vertical"))
+        self._orient.setToolTip(t("tb_horizontal" if upright else "tb_vertical"))
+        for b, key in self._buttons():
+            self._paint_icon(b, key)
+        self._gear.setAccessibleName(t("tbs_title"))
+        self._gear.setToolTip(t("tbs_title"))
+        self._close.setAccessibleName(t("tb_close"))
+        self._close.setToolTip(t("tb_close"))
+        self._measure()
+        self._apply_size()
+
+    def _label(self, icons: bool) -> None:
+        """The buttons' words (a small icon beside each, the tip in the tooltip), or their icons alone (the name in
+        the tooltip and the accessible name, for what the icon is)."""
+        t, rtl = self.t, self.t.rtl
         for b, key in self._buttons():
             name = t(key)
-            self._paint_icon(b, key)
             if icons:
-                b.setText("")                            # the name stays in the tooltip, for what the icon is
+                b.setText("")
                 b.setIconSize(QSize(ICON_PX, ICON_PX))
                 b.setToolTip(name)
             else:
@@ -793,69 +911,119 @@ class GameToolbar(EdgeResize, QWidget):
                 b.setIconSize(QSize(WORD_ICON_PX, WORD_ICON_PX))
                 b.setToolTip(t(key + "_tip"))
             b.setAccessibleName(name)
-        self._gear.setAccessibleName(t("tbs_title"))
-        self._gear.setToolTip(t("tbs_title"))
-        self._close.setAccessibleName(t("tb_close"))
-        self._close.setToolTip(t("tb_close"))
-        self._apply_width()
+            if b.property("iconOnly") != icons:
+                b.setProperty("iconOnly", icons)         # its padding (qss)
+                b.style().unpolish(b)
+                b.style().polish(b)
+        self._icons_shown = icons
 
-    # ------------------------------------------------------------ width (the bar wraps)
+    def _measure(self) -> None:
+        """Every item's size with words and with icons alone, so the bar knows which fit a length before it shows
+        them (the language, the accent's bold lit text and the look change them; a drag doesn't)."""
+        items = [self._flow.itemAt(i) for i in range(self._flow.count())]
+        for icons in (False, True):
+            self._label(icons)
+            self._sizes[icons] = [(FlowLayout._width(it), it.sizeHint().height()) for it in items if not it.isEmpty()]
 
-    def _width_limits(self) -> tuple[int, int]:
-        """The narrowest the bar can be — its widest single button — and its natural one-row width."""
-        widest, total, n = 0, 0, 0
-        for i in range(self._flow.count()):
-            item = self._flow.itemAt(i)
-            if item.isEmpty():
-                continue
-            w = FlowLayout._width(item)
-            widest, total, n = max(widest, w), total + w, n + 1
-        return widest + 2 * SIDE, total + FLOW_GAP * max(0, n - 1) + 2 * SIDE
+    # ------------------------------------------------------------ its length (the buttons wrap)
 
-    def _apply_width(self) -> None:
-        """The width the settings give — None: the natural one-row width — clamped to the widest single button
-        and to the screen; the height follows the rows that width wraps the buttons into."""
-        min_w, natural = self._width_limits()
+    def _upright(self) -> bool:
+        return self._flow.upright
+
+    def _pads(self) -> tuple[int, int]:
+        """The margins along the bar's length and across it."""
+        return (TOP + BOTTOM, 2 * SIDE) if self._upright() else (2 * SIDE, TOP + BOTTOM)
+
+    def _wants_icons(self, length: int) -> bool:
+        """Icons alone: the ⚙ asks for them, or this length would wrap the words into more than WORD_LINES_MAX
+        lines."""
+        if self._settings["game_toolbar_icons"]:
+            return True
+        axis = 1 if self._upright() else 0
+        return _lines([s[axis] for s in self._sizes[False]], length - self._pads()[0], FLOW_GAP) > WORD_LINES_MAX
+
+    def _limits(self) -> tuple[int, int]:
+        """The shortest the bar goes along its length — its biggest single item with icons alone — and its natural
+        one-line length (with words, unless the ⚙ asks for icons)."""
+        axis = 1 if self._upright() else 0
+        pad = self._pads()[0]
+        line = self._sizes[bool(self._settings["game_toolbar_icons"])]
+        return (max(s[axis] for s in self._sizes[True]) + pad,
+                sum(s[axis] for s in line) + FLOW_GAP * (len(line) - 1) + pad)
+
+    def _apply_size(self) -> None:
+        """The length the settings give (None: its natural one-line length), clamped to its biggest item and to the
+        screen; words or icons as that length leaves room for, and as wide (tall) as the lines take."""
+        upright = self._upright()
+        shortest, natural = self._limits()
         screen = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
-        room = screen.availableGeometry().width()
+        room = screen.availableGeometry().height() if upright else screen.availableGeometry().width()
         try:
-            want = int(self._settings["game_toolbar_width"])
+            want = int(self._settings["game_toolbar_height" if upright else "game_toolbar_width"])
         except (TypeError, ValueError):
             want = None
-        w = min(max(natural if want is None else want, min_w), room)
-        self._width_set = w
-        self.setMinimumWidth(min_w)
-        self.setMaximumWidth(room)
-        self._fitting = True
-        try:
-            self.resize(w, self.layout().totalHeightForWidth(w))
-        finally:
-            self._fitting = False
+        length = min(max(natural if want is None else want, shortest), room)
+        self._length_set = length
+        if upright:
+            self.setMinimumSize(1, shortest)
+            self.setMaximumSize(QT_MAX, room)
+        else:
+            self.setMinimumSize(shortest, 1)
+            self.setMaximumSize(room, QT_MAX)
+        self._fit(length)
+
+    def _fit(self, length: int) -> None:
+        """The bar at this length: words or icons alone as it leaves room for, and across only as much as the
+        lines they wrap into take."""
+        icons = self._wants_icons(length)
+        if icons != self._icons_shown:
+            self._label(icons)
+        along, across = self._pads()
+        other = self._flow.extent(length - along) + across
+        size = QSize(other, length) if self._upright() else QSize(length, other)
+        if size != self.size():
+            self._fitting = True
+            try:
+                self.resize(size)
+            finally:
+                self._fitting = False
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         if self._fitting:
             return
-        self._widths.start()               # the player's drag: remembered once it settles
-        h = self.layout().totalHeightForWidth(self.width())
-        if h > 0 and h != self.height():
-            self._fitting = True
-            try:
-                self.resize(self.width(), h)   # only as tall as the rows this width wraps the buttons into
-            finally:
-                self._fitting = False
+        self._lengths.start()              # the player's drag: remembered once it settles
+        self._refit.start()
 
     def _edges_at(self, pos) -> Qt.Edge:
-        """Only the bar's sides: its height follows its rows, never dragged."""
-        return Qt.Edge(super()._edges_at(pos) & (Qt.LeftEdge | Qt.RightEdge))
+        """Only the bar's two ends along its length (its sides; its top and bottom upright): across, it is as big
+        as its lines, never dragged."""
+        ends = (Qt.TopEdge | Qt.BottomEdge) if self._upright() else (Qt.LeftEdge | Qt.RightEdge)
+        return Qt.Edge(super()._edges_at(pos) & ends)
 
-    def _remember_width(self) -> None:
-        """The dragged width kept in game_toolbar_width (the natural one-row width kept as None, so a bigger
-        font still fits); the settings' own width, applied by _apply_width, is not the player's to keep."""
-        if not self._placed or self.width() == self._width_set:
+    def _remember_length(self) -> None:
+        """The dragged length kept in game_toolbar_width (game_toolbar_height upright), the natural one-line length
+        kept as None so a bigger font still fits; the settings' own length, applied by _apply_size, is not the
+        player's to keep."""
+        length = self.height() if self._upright() else self.width()
+        if not self._placed or length == self._length_set:
             return
-        _, natural = self._width_limits()
-        self._settings["game_toolbar_width"] = self.width() if self.width() != natural else None
+        _, natural = self._limits()
+        self._settings["game_toolbar_height" if self._upright() else "game_toolbar_width"] = \
+            length if length != natural else None
+        self._length_set = length
+
+    def _orient_clicked(self, _=False) -> None:
+        """The ◯: the bar upright (a column, its height dragged) or lying (a row, its width dragged), its top-left
+        corner kept and the whole bar still on its screen."""
+        self._lengths.stop()
+        self._remember_length()
+        self._settings["game_toolbar_vertical"] = not bool(self._settings["game_toolbar_vertical"])
+        self._retext()
+        screen = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        self.move(min(max(self.x(), area.left()), area.right() - self.width() + 1),
+                  min(max(self.y(), area.top()), area.bottom() - self.height() + 1))
 
     # ------------------------------------------------------------ the buttons
 
@@ -971,8 +1139,8 @@ class GameToolbar(EdgeResize, QWidget):
         if self._placed:             # turned off or the app closing: keep the place now, not 400 ms later
             self._geom.stop()
             self._remember()
-            self._widths.stop()
-            self._remember_width()
+            self._lengths.stop()
+            self._remember_length()
         if self._panel is not None:
             self._panel.hide()
         super().hideEvent(e)
@@ -987,8 +1155,8 @@ class GameToolbar(EdgeResize, QWidget):
         """Show or hide from the setting (its ✕, its key, the tray item or Settings flipped it), the NPCs-here
         button back in step with the window's own (its ✕ turned it off), the width the settings give (its buttons
         wrapping into rows), and the glass at the opacity the player picked."""
-        if self._restyle():
-            self._retext()        # the icons in the new accent's text colour, words or icons as the mode says
+        if self._restyle() or bool(self._settings["game_toolbar_vertical"]) != self._flow.upright:
+            self._retext()        # the icons in the new accent's text colour, words or icons, the way it stands
         try:
             self._opacity = min(OPACITY_MAX, max(OPACITY_MIN, float(self._settings["npc_overlay_opacity"])))
         except (TypeError, ValueError):
@@ -1002,7 +1170,7 @@ class GameToolbar(EdgeResize, QWidget):
             if self.isVisible():
                 self.hide()
             return
-        self._apply_width()
+        self._apply_size()
         if not self.isVisible():
             self._place()
             self.show()
