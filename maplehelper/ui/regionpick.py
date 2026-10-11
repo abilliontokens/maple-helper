@@ -141,7 +141,7 @@ class RegionPicker(QWidget):
             p.setCompositionMode(QPainter.CompositionMode_Clear)
             p.fillRect(box, Qt.transparent)
             p.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            p.setPen(QPen(QColor(theme.ORANGE), 2))
+            p.setPen(QPen(QColor(theme.ACCENT), 2))
             p.drawRect(box.adjusted(1, 1, -1, -1))
             p.setPen(QColor(255, 255, 255))
             anchor = box.bottomLeft() + QPoint(0, 20)

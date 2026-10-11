@@ -279,9 +279,9 @@ def test_reader_html_for_a_hebrew_guide():
          "blocks": [{"h2": "סקילים של Warrior"}, {"p": "[[img:a.png]] **Power Strike** פוגע ב-2 מובים"},
                     {"note": "הערה"}, {"guide": "fighter-class-guide", "text": "להמשיך ל-Fighter"},
                     {"table": [["סקיל", "Max"], ["Power Strike", "20"]]}, {"img": "y.png", "w": 100, "h": 50}]}
-    h = guides.book_html(b, "dark")
+    h = guides.book_html(b)
     assert "dir='rtl'" in h and "<b>" in h and "a.png" in h and "href='guide:fighter-class-guide'" in h
-    assert "[[img:" not in h and guides.NOTE_COLORS["dark"]["note"] in h and "y.png" in h and "<table" in h
+    assert "[[img:" not in h and guides.note_colors()["note"] in h and "y.png" in h and "<table" in h
 
 
 def test_hovering_a_guide_picture_finds_it():

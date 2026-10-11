@@ -631,7 +631,8 @@ class Overlay(EdgeResize, QWidget):
         return path
 
     def paintEvent(self, e):
-        """Liquid glass: an opaque neutral tint, a light-catching sheen and rim (paint_glass)."""
+        """Liquid glass: the glass colour picked in Settings > Look at its picked opacity, a light-catching sheen
+        and rim (paint_glass)."""
         paint_glass(self, None)
 
     # ------------------------------------------------------------------ layout
@@ -688,7 +689,7 @@ class Overlay(EdgeResize, QWidget):
         self.history_btn = self._icon_button(theme.ICON["search"])
         self.history_btn.clicked.connect(self.history_requested.emit)
         tb.addWidget(self.history_btn)
-        # MapleStory Classic news: its own window; orange while there is news the player hasn't read
+        # MapleStory Classic news: its own window; in the accent while there is news the player hasn't read
         from .newsview import glyph as news_glyph
         self.news_btn = self._icon_button(news_glyph())
         self.news_btn.clicked.connect(self.news_requested.emit)
@@ -987,6 +988,7 @@ class Overlay(EdgeResize, QWidget):
         from . import terms
         self.t = I18n(self.settings["language"] or "he")
         terms.LANG = self.t.lang            # the "?" explanations follow the switch too
+        terms.setup()                       # and the "?" badge the look's accent (Settings may have changed it)
         self.setLayoutDirection(Qt.RightToLeft if self.t.rtl else Qt.LeftToRight)
         # the gutter between the cards and the scrollbar is on the scrollbar's side, which Qt moves to the left in
         # Hebrew; layout margins don't mirror, so in Hebrew the cards touched the bar and the gap sat on the right
@@ -1822,7 +1824,7 @@ class Overlay(EdgeResize, QWidget):
         import re
         text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
         d = "rtl" if self.t.rtl else "ltr"
-        from .. import glossary          # the same orange "?" badge as beside game terms
+        from .. import glossary          # the same "?" badge as beside game terms
         self.shot_hint.setText(f"<div dir='{d}' align='{'right' if self.t.rtl else 'left'}'>{glossary.MARK}&nbsp; {text}</div>")
         self.shot_hint.show()
 

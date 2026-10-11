@@ -117,10 +117,14 @@ def no_real_world():
 
 @pytest.fixture(autouse=True)
 def no_high_contrast(monkeypatch):
-    """theme.set_mode() follows Windows high contrast on every call: on a PC with a Contrast theme on, "light" came
-    out dark and the light-theme tests failed. Off for every test; the ones about it patch it themselves."""
+    """theme.set_look() follows Windows high contrast on every call: on a PC with a Contrast theme on, the white glass
+    came out dark and the light-theme tests failed. Off for every test; the ones about it patch it themselves. And
+    every test starts in the default look (Settings' defaults: the white glass, orange, opaque), whatever look the
+    test before it left."""
+    from maplehelper.store import DEFAULT_SETTINGS
     from maplehelper.ui import theme
     monkeypatch.setattr(theme, "high_contrast", lambda: None)
+    theme.set_look(DEFAULT_SETTINGS["app_tint"], DEFAULT_SETTINGS["app_accent"], DEFAULT_SETTINGS["app_opacity"])
 
 
 @pytest.fixture(autouse=True)

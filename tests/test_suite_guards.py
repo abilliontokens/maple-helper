@@ -37,11 +37,8 @@ def test_no_name_lookup_leaves_the_machine():
 
 def test_windows_high_contrast_stays_out_of_the_tests():
     from maplehelper.ui import theme
-    theme.set_mode("light")
-    try:
-        assert theme.high_contrast() is None and theme.MODE == "light"
-    finally:
-        theme.set_mode("dark")
+    theme.set_look("white", "orange", 1.0)
+    assert theme.high_contrast() is None and theme.MODE == "light" and not theme.HIGH_CONTRAST
 
 
 def test_no_lost_line_continuation_in_the_code():

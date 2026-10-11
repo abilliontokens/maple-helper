@@ -4,7 +4,7 @@ import json
 
 def test_settings_defaults_and_persistence(isolated_store):
     s = isolated_store.Settings()
-    assert s["appearance"] == "light" and s["language"] is None and "hotkey_toggle" not in s.data
+    assert s["app_tint"] == "white" and s["language"] is None and "hotkey_toggle" not in s.data
     s["language"] = "en"
     assert json.loads(isolated_store.Settings.path.read_text(encoding="utf-8"))["language"] == "en"
     assert isolated_store.Settings()["language"] == "en"
@@ -13,7 +13,32 @@ def test_settings_defaults_and_persistence(isolated_store):
 def test_settings_keep_new_defaults_for_old_files(isolated_store):
     isolated_store.Settings.path.write_text('{"language": "he"}', encoding="utf-8")
     s = isolated_store.Settings()
-    assert s["language"] == "he" and s["appearance"] == "light"
+    assert s["language"] == "he" and s["app_tint"] == "white"
+
+
+def test_the_default_settings_give_the_light_look(isolated_store):
+    """A new player's app windows look as they always did: the white glass, opaque, in the orange accent."""
+    from maplehelper.ui import theme
+    s = isolated_store.Settings()
+    assert (s["app_tint"], s["app_accent"], s["app_opacity"]) == ("white", "orange", 1.0)
+    theme.set_look(s["app_tint"], s["app_accent"], s["app_opacity"])
+    assert theme.MODE == "light" and theme.P()["glass"] == theme.TINTS["white"][1] and theme.P()["solid_alpha"] == 1.0
+    assert theme.P()["text"] == theme.PALETTES["light"]["text"] and theme.ACCENT == theme.ACCENTS["orange"][1]
+
+
+def test_the_old_appearance_becomes_the_app_tint_once(isolated_store):
+    p = isolated_store.Settings.path
+    p.write_text('{"appearance": "dark", "language": "en"}', encoding="utf-8")
+    s = isolated_store.Settings()
+    assert s["app_tint"] == "dark" and "appearance" not in s.data and s["language"] == "en"
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["app_tint"] == "dark" and "appearance" not in saved          # out of the file too: once
+    p.write_text('{"appearance": "light"}', encoding="utf-8")
+    assert isolated_store.Settings()["app_tint"] == "white"
+    # an older version, run after this one, wrote its appearance back: the tint picked since stays
+    p.write_text('{"appearance": "dark", "app_tint": "forest"}', encoding="utf-8")
+    s = isolated_store.Settings()
+    assert s["app_tint"] == "forest" and "appearance" not in s.data
 
 
 def test_provider_defaults_to_claude(isolated_store):
@@ -238,9 +263,9 @@ def test_alt_with_a_longer_name_is_never_merged(isolated_store):
 def test_damaged_files_never_crash_the_start(isolated_store):
     p = isolated_store.Settings.path
     p.write_bytes(b"\xff\xfe broken")
-    assert isolated_store.Settings()["appearance"] == "light"
+    assert isolated_store.Settings()["app_tint"] == "white"
     p.write_text("[1, 2]", encoding="utf-8")
-    assert isolated_store.Settings()["appearance"] == "light"
+    assert isolated_store.Settings()["app_tint"] == "white"
     isolated_store.Profiles.path.write_text("[1]", encoding="utf-8")
     assert isolated_store.Profiles().characters == []
 
@@ -431,12 +456,12 @@ def test_history_record_after_a_torn_line_is_kept(isolated_store):
 def test_settings_of_the_wrong_type_load_as_the_default(isolated_store):
     # LIF-9: "font_size": "big" crashed every start in the stylesheet
     isolated_store.Settings.path.write_text(json.dumps({
-        "font_size": "big", "start_with_windows": 1, "language": "he", "pins": [], "appearance": None,
+        "font_size": "big", "start_with_windows": 1, "language": "he", "pins": [], "appearance": None, "app_opacity": "x",
         "usage_warned": [123, "high"], "api_key_fallback": True, "window": {"x": 1}, "future_key": 5}),
         encoding="utf-8")
     s = isolated_store.Settings()
     assert s["font_size"] == 14 and s["start_with_windows"] is False and s["pins"] == {}
-    assert s["appearance"] == "light" and s["language"] == "he"
+    assert s["app_tint"] == "white" and s["app_opacity"] == 1.0 and "appearance" not in s.data and s["language"] == "he"
     # shapes kept on purpose, None-default settings and unknown keys are untouched
     assert s["usage_warned"] == [123, "high"] and s.api_key_mode("claude") and s["window"] == {"x": 1}
     assert s.data["future_key"] == 5

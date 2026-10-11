@@ -23,7 +23,7 @@ from .controls import BalancedRow, FlowLayout, Section, Segmented, Stepper, Swit
 from .glass import GlassDialog, no_default_buttons
 from .location import LOCATION
 from .widgets import (MARKET_REQUESTS, changed_tag, chip_row, fit_picture, info_tag, mesos_text, mesos_tip, name_lv, source_tag, source_tags,
-                      tip_html, updated_tag, vote_tag, zoom_on_hover)
+                      solid, tip_html, updated_tag, vote_tag, zoom_on_hover)
 from .patchnotes import gutter
 
 # "shop": the Shop page (ui/shoppage.py), what the Cash Shop sells now and for how many NX; the Pets page is a tab
@@ -32,7 +32,6 @@ PAGES = ("train", "exp", "farm", "loot", "quests", "crafting", "town", "build", 
 # stats editor, a monster picker and 9 empty cells stood above a small grey "you need a character", TOOL-03)
 CHAR_PAGES = ("train", "exp", "farm", "quests", "town", "build", "calc")
 MAX_QUESTS = 40
-CURRENT_ROW = {"light": "#FFD3A3", "dark": "#7A4615"}     # the build table row for the player's level
 CHANGED_CHIP = {"light": ("#0A6CD6", "#E3F0FD"), "dark": ("#64B5FF", "#1B3350")}   # its "Changed in COT2" chips
 
 
@@ -153,7 +152,7 @@ class EntityPicker(QLineEdit):
             f"QListView {{ background: {bg}; color: {c['text']}; border: 1px solid {c['stroke']}; border-radius: 10px;"
             f" padding: 4px; outline: none; }}"
             f"QListView::item {{ padding: 4px 6px; border-radius: 8px; color: {c['text']}; }}"
-            f"QListView::item:selected, QListView::item:hover {{ background: rgba(255,149,51,0.22); color: {c['text']}; }}")
+            f"QListView::item:selected, QListView::item:hover {{ background: {theme.accent_rgba(0.22)}; color: {c['text']}; }}")
         comp.setModel(model)          # after the style: polishing a full list measured every row
         comp.activated.connect(lambda *_: QTimer.singleShot(0, self._chosen))
         self.setCompleter(comp)
@@ -168,7 +167,7 @@ class EntityPicker(QLineEdit):
         # a chevron says "this opens a list" before anyone clicks
         arrow = self.addAction(self._chevron(), QLineEdit.TrailingPosition)
         arrow.triggered.connect(self.open_list)
-        # an orange X beside it while something is typed: Qt's own clear button didn't show (the owner)
+        # an X in the accent beside it while something is typed: Qt's own clear button didn't show (the owner)
         self._clear = self.addAction(self._cross(), QLineEdit.TrailingPosition)
         self._clear.triggered.connect(lambda: (self.clear(), self.setFocus()))
         self._clear.setVisible(False)
@@ -199,7 +198,7 @@ class EntityPicker(QLineEdit):
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(theme.ORANGE_DEEP), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setPen(QPen(QColor(theme.accent_text(deep=True)), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.drawPolyline([QPoint(5, 8), QPoint(10, 13), QPoint(15, 8)])
         p.end()
         return QIcon(pm)
@@ -234,7 +233,7 @@ class EntityPicker(QLineEdit):
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(theme.ORANGE_DEEP), 2.2, Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(QColor(theme.accent_text(deep=True)), 2.2, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPoint(6, 6), QPoint(14, 14))
         p.drawLine(QPoint(14, 6), QPoint(6, 14))
         p.end()
@@ -635,7 +634,7 @@ class ToolsDialog(GlassDialog):
                 out.append("<p style='margin:0; font-size:5px;'>&nbsp;</p>")
                 continue
             out.append(bidi.paragraph_html(line, d).replace("margin:0 0 4px 0;", "margin:0 0 3px 0; line-height:135%;"))
-        return glossary.annotate("".join(out), self.t.lang, seen=seen)
+        return glossary.annotate("".join(out), self.t.lang, color=theme.accent_text(deep=True), seen=seen)
 
     def _set(self, label: QLabel, text: str, seen: set | None = None):
         label.setText(self._html(text, seen))
@@ -687,9 +686,10 @@ class ToolsDialog(GlassDialog):
         v.setAlignment(Qt.AlignCenter)
         text = html.escape(label)
         if term:
-            text += (f"<a href='g:{html.escape(term)}' style='color:#F07A12; text-decoration:none;'>"
+            text += (f"<a href='g:{html.escape(term)}' style='color:{theme.accent_text(deep=True)}; text-decoration:none;'>"
                      f"&nbsp;{glossary.MARK}</a>")
-        lb = QLabel(glossary.annotate(text, self.t.lang) if explain and not term else text, objectName="BigStatLabel")
+        lb = QLabel(glossary.annotate(text, self.t.lang, color=theme.accent_text(deep=True)) if explain and not term
+                    else text, objectName="BigStatLabel")
         lb.setAlignment(Qt.AlignCenter)
         terms.watch(lb, self.t.lang)
         box.addWidget(v)
@@ -1155,7 +1155,7 @@ class ToolsDialog(GlassDialog):
         key, tables = buildplan.tables(self.kb, c.base_class, c.job, c.level, t.lang)
         self._build_key = key
         self.build_guide_btn.setVisible(bool(key))
-        # no tables (a Beginner): the head says so, with no "plan from the guide" or "orange row" it doesn't have,
+        # no tables (a Beginner): the head says so, with no "plan from the guide" or "highlighted row" it doesn't have,
         # and the empty box is hidden (its one line was cut at the baseline, TL1-2)
         self._set(self.build_head, t("build_head", job=c.job_label or c.base_class, n=c.level) if tables
                   else t("build_none"))
@@ -1178,7 +1178,7 @@ class ToolsDialog(GlassDialog):
         he = t.lang != "en"
         icons = self._skill_icons()
         changed = sitedata.changes_for(self.kb, c.base_class, c.job)
-        col = guides.NOTE_COLORS.get(theme.MODE, guides.NOTE_COLORS["light"])
+        col = guides.note_colors()
         side = "dir='rtl' align='right'" if he else ""
         out = []
         split = [(path, part) for tb in tables for path, part in buildplan.split_paths(self.kb, tb)]
@@ -1195,9 +1195,10 @@ class ToolsDialog(GlassDialog):
             names = icons + self._short_skill_icons(rows, icons) if tb.kind == "sp" else icons
             chips = self._change_chips(rows, changed) if tb.kind == "sp" else {}
             for n, row in enumerate(rows):
-                # the player's row: a clear orange, bold (the guides' cream note color was too faint here)
+                # the player's row: a clear tint of the accent, bold (the guides' cream note color was too faint here);
+                # opaque, as rich text can't read rgba()
                 now = n == tb.current
-                bg = f" bgcolor='{col['head']}'" if n == 0 else (f" bgcolor='{CURRENT_ROW[theme.MODE]}'" if now else "")
+                bg = f" bgcolor='{col['head']}'" if n == 0 else (f" bgcolor='{solid(theme.accent_rgba(0.4))}'" if now else "")
                 tagname = "th" if n == 0 else "td"
                 weight = "font-weight:700;" if now else ""
                 cells.append("<tr>" + "".join(
@@ -1318,7 +1319,7 @@ class ToolsDialog(GlassDialog):
                 shown = value if value and value != "N/A" else t("tier_none")
                 chip = info_tag(t, grade or "—", f"{name}: {shown}", kind)
                 chip.setFixedWidth(30)
-                # the name with an orange "?" that explains it on hover, as the other explained terms
+                # the name with a "?" that explains it on hover, as the other explained terms
                 badge = terms._badge_uri()
                 text = html.escape(bidi.plain(name, t.rtl))
                 if tip and badge:
@@ -1913,7 +1914,7 @@ class ToolsDialog(GlassDialog):
             return (self.kb.get(m) or {}).get("props", {}).get("Level") or 0
         t, c = self.t, self.c
         side = "dir='rtl' align='right'" if t.rtl else "dir='ltr' align='left'"
-        good, warn = theme.GOOD_TEXT.get(theme.MODE, theme.GOOD_TEXT["light"]), theme.WARN_TEXT.get(theme.MODE, "#C9620A")
+        good, warn = theme.GOOD_TEXT.get(theme.MODE, theme.GOOD_TEXT["light"]), theme.WARN_TEXT[theme.MODE]
         fit_color = {"easy": good, "range": theme.P()["muted"], "hard": warn}
         blocks = []
         for x in needs:
@@ -3639,7 +3640,7 @@ class ToolsDialog(GlassDialog):
     # an item's droppers and its price; an NPC's map (the owner)
 
     def _links_row(self, acts: list, flow: bool = True) -> FlowLayout | QHBoxLayout:
-        """(text key, action) as orange links in the reading order. A flow that wraps: four links in one row made
+        """(text key, action) as accent links in the reading order. A flow that wraps: four links in one row made
         each English monster card 561 px in a 514 px page, cutting "Ask in chat" and the stats steppers (UX-1); no
         dots between them, so a wrapped line never starts with one. flow=False: one row, for a short pair of links
         beside a name in a row (a flow there is given one link's width and stacks them)."""
@@ -4286,7 +4287,7 @@ class ToolsDialog(GlassDialog):
         if badge:
             name += f"&nbsp;<img src='{badge}' width='13' height='13' style='vertical-align: middle'>"
         lines = value.split("\n")
-        tail = f" <span style='color:#F07A12'>{html.escape(extra)}</span>" if extra else ""
+        tail = f" <span style='color:{theme.accent_text(deep=True)}'>{html.escape(extra)}</span>" if extra else ""
         if len(lines) == 1:
             body = f"<p {side} style='margin:0'>{name}: {html.escape(bidi.plain(value, t.rtl))}{tail}</p>"
         else:                               # several lines: each its own label under the name, at the reading start

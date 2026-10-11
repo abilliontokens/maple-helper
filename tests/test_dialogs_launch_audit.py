@@ -137,7 +137,7 @@ def test_a_language_saved_in_settings_reaches_the_ai_at_once(qapp):
     from maplehelper import app
     fake = MagicMock()
     fake.settings = {"language": "en", "provider": "claude", "telemetry": False, "presence": False, "saver_mode": False, "hotkey_voice": "F10",
-                     "appearance": "dark", "font_size": 14}
+                     "app_tint": "dark", "app_accent": "orange", "app_opacity": 1.0, "font_size": 14}
     fake.brain = SimpleNamespace(ui_lang="he", prewarm=lambda: None)
     app.MapleHelperApp.on_settings_changed(fake)
     assert fake.brain.ui_lang == "en"
@@ -148,27 +148,32 @@ def test_a_language_saved_in_settings_reaches_the_ai_at_once(qapp):
 
 def test_a_save_that_keeps_the_look_doesnt_restyle_the_chat(qapp):
     """PERF-02: every Save restyled the chat and ran apply_language (~1.6 s with a long chat), even for the
-    microphone; only a new language, appearance or text size does now."""
+    microphone; only a new language, look (glass colour, accent, opacity) or text size does now."""
     from unittest.mock import MagicMock
 
     from maplehelper import app
     fake = MagicMock()
     fake.settings = {"language": "en", "provider": "claude", "telemetry": False, "presence": False, "saver_mode": False,
-                     "appearance": "dark", "font_size": 14}
-    fake._look, fake._look_provider = ("en", "dark", 14), "claude"
+                     "app_tint": "dark", "app_accent": "orange", "app_opacity": 1.0, "font_size": 14}
+    fake._look, fake._look_provider = ("en", "dark", "orange", 1.0, 14), "claude"
     app.MapleHelperApp.on_settings_changed(fake)
     assert not fake.overlay.setStyleSheet.called and not fake.overlay.apply_language.called
     assert fake.apply_autostart.called                     # the rest of the settings still apply
-    fake.settings["appearance"] = "light"
+    fake.settings["app_tint"] = "white"
     app.MapleHelperApp.on_settings_changed(fake)
     assert fake.overlay.setStyleSheet.called and fake.overlay.apply_language.called
     assert fake._reopen_windows_in_new_look.called
     # only the AI changed: the texts that name it, without the slow restyle (review ONB-R2)
     fake.overlay.reset_mock()
-    fake._look = ("en", "light", 14)               # (what _reopen_windows_in_new_look records)
+    fake._look = ("en", "white", "orange", 1.0, 14)       # (what _reopen_windows_in_new_look records)
     fake.settings["provider"] = "codex"
     app.MapleHelperApp.on_settings_changed(fake)
     assert fake.overlay.apply_language.called and not fake.overlay.setStyleSheet.called
+    # the glass's opacity alone is a new look too (Settings' slider)
+    fake.overlay.reset_mock()
+    fake.settings["app_opacity"] = 0.6
+    app.MapleHelperApp.on_settings_changed(fake)
+    assert fake.overlay.setStyleSheet.called
 
 
 # --- DLG-7: Grok's key prefix in Hebrew ----------------------------------------------------------------------------

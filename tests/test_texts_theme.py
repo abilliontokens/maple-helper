@@ -1,5 +1,6 @@
-"""Text contrast in both appearances (WCAG AA), the menu rows' own states, Windows high contrast, short English
-names kept whole in Hebrew, Mac wording (⌘V, System Settings, fn+F9) and the wording fixes of the audit."""
+"""Text contrast in every look (WCAG AA), the looks Settings picks (set_look), the menu rows' own states, Windows high
+contrast, short English names kept whole in Hebrew, Mac wording (⌘V, System Settings, fn+F9) and the wording fixes of
+the audit."""
 import os
 import re
 import sys
@@ -22,13 +23,6 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-@pytest.fixture(autouse=True)
-def no_system_contrast(monkeypatch):
-    monkeypatch.setattr(theme, "high_contrast", lambda: None)     # the test machine's own setting stays out
-    yield
-    theme.set_mode("dark")
-
-
 def _rgb(color: str, over=(255, 255, 255)):
     """'#RRGGBB' or 'rgba(r,g,b,a)' as an opaque color over a background."""
     if color.startswith("#"):
@@ -46,16 +40,9 @@ def _contrast(fg, bg) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-ORANGE_RGB = _rgb(theme.ORANGE)
-
-
-def _tint(alpha, base):        # the orange-tinted notes and chips: orange at 10-18% over a surface
-    return tuple(round(o * alpha + b * (1 - alpha)) for o, b in zip(ORANGE_RGB, base))
-
-
 def _menu(app):
     from maplehelper.ui.widgets import SplitMenu
-    theme.set_mode("light")
+    theme.set_look("white", "orange", 1.0)
     app.setStyleSheet(theme.stylesheet("Rubik", 14))
     menu = SplitMenu()
     menu.add_row("edit", "Edit character", lambda: None)
@@ -80,7 +67,7 @@ def test_menu_rows_show_enabled_disabled_and_hover(app):
     assert _fg(off_label) != _fg(on_label)
     theme.install_focus_ring()
     QApplication.sendEvent(on, QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
-    assert on_label.property("hover") is True and _fg(on_label) == theme.ON_ORANGE.lower()
+    assert on_label.property("hover") is True and _fg(on_label) == theme.ON_ACCENT.lower()
     QApplication.sendEvent(on, QEvent(QEvent.Leave))
     assert not on_label.property("hover") and _fg(on_label) == theme.P()["text"].lower()
     QApplication.sendEvent(off, QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
@@ -89,15 +76,59 @@ def test_menu_rows_show_enabled_disabled_and_hover(app):
     app.setStyleSheet("")
 
 
-def test_windows_high_contrast_wins_over_the_appearance(monkeypatch):
+def test_windows_high_contrast_wins_over_the_look(monkeypatch):
     monkeypatch.setattr(theme, "high_contrast", lambda: "dark")
-    theme.set_mode("light")
+    theme.set_look("white", "orange", 0.5)
     assert theme.MODE == "dark" and theme.HIGH_CONTRAST
+    assert theme.TINT == theme.TINTS["dark"][1] and theme.OPACITY == 1.0     # glass of its own, nothing seen through
     assert theme.P()["muted"] == theme.P()["text"]          # no see-through grey text
     assert "rgba(255,255,255,0.07)" not in theme.stylesheet("Rubik", 14)   # firmer hairlines
+    theme.set_look("midnight", "orange", 0.5)
+    assert theme.TINT == theme.TINTS["midnight"][1]         # a dark tint suits its light text: kept
     monkeypatch.setattr(theme, "high_contrast", lambda: None)
-    theme.set_mode("light")
-    assert theme.MODE == "light" and not theme.HIGH_CONTRAST and theme.P() is theme.PALETTES["light"]
+    theme.set_look("white", "orange", 0.5)
+    assert theme.MODE == "light" and not theme.HIGH_CONTRAST and theme.OPACITY == 0.5
+    assert {k: theme.P()[k] for k in theme.PALETTES["light"]} == theme.PALETTES["light"]
+
+
+def test_a_look_is_the_tint_the_accent_and_the_opacity():
+    theme.set_look("midnight", "blue", 0.6)
+    c = theme.P()
+    assert theme.MODE == "dark" and c["text"] == theme.PALETTES["dark"]["text"]      # light text on the dark glass
+    assert c["glass"] == theme.TINT == theme.TINTS["midnight"][1] and theme.dialog_background() == "#11182B"
+    assert c["solid_alpha"] == c["glass_alpha"] == theme.OPACITY == 0.6               # paint_glass: see-through
+    assert (theme.ACCENT, theme.ON_ACCENT) == theme.ACCENTS["blue"][1:]
+    assert theme.qcolor(theme.ACCENT_DEEP).valueF() < theme.qcolor(theme.ACCENT).valueF()
+    assert theme.accent_rgba(0.5) == "rgba(61,139,214,0.5)"
+    css = theme.stylesheet("Rubik", 14).upper()
+    assert theme.ACCENTS["blue"][1] in css
+    assert not any(orange in css for orange in ("#FF9533", "#F07A12", "#FFA24A", "#F58A2A"))   # the old brand orange
+
+
+def test_the_white_glass_takes_dark_text_and_darker_accent_text():
+    theme.set_look("white", "teal", 1.0)
+    assert theme.MODE == "light" and theme.P()["text"] == theme.PALETTES["light"]["text"]
+    assert theme.P()["glass"] == theme.TINTS["white"][1]
+    assert theme.qcolor(theme.accent_text()).valueF() < theme.qcolor(theme.ACCENT).valueF()
+
+
+def test_a_name_the_catalog_doesnt_know_and_an_opacity_out_of_range():
+    theme.set_look("neon", "gold", 0.05)
+    assert theme.TINT == theme.TINTS["white"][1] and theme.ACCENT == theme.ACCENTS["orange"][1]
+    assert theme.OPACITY == theme.OPACITY_MIN
+    theme.set_look("dark", "green", 7)
+    assert theme.OPACITY == theme.OPACITY_MAX
+
+
+@pytest.mark.parametrize("tint", list(theme.TINTS))
+def test_the_accent_as_text_reads_on_every_glass(tint):
+    """Links and the accent's chips' text, in every accent, plain and deep: >= 4.5:1 on a card of that glass (darkened
+    on the white one, the accent itself or lighter on the dark ones: purple on slate was too dark)."""
+    for accent in theme.ACCENTS:
+        theme.set_look(tint, accent, 1.0)
+        card = _rgb(theme.P()["fill1"], over=theme.TINT)
+        for deep in (False, True):
+            assert _contrast(_rgb(theme.accent_text(deep)), card) >= 4.5, (tint, accent, deep)
 
 
 def test_the_real_high_contrast_check_answers_without_failing():

@@ -135,7 +135,7 @@ def explain(term: str, lang: str) -> str | None:
     return re.sub(r"\*\*", "", text) if text else None
 
 
-# what follows a term: ui/terms.py swaps in an orange "?" badge image once Qt runs; text fallback until then
+# what follows a term: ui/terms.py swaps in a "?" badge image in the accent once Qt runs; text fallback until then
 MARK = "<b style='font-size:large;'>&nbsp;?</b>"
 
 _PATTERN = re.compile(r"(?<![\w.])(" + "|".join(re.escape(t) for t in sorted(TERMS, key=len, reverse=True)) + r")(?![\w])")
@@ -147,9 +147,13 @@ _TERM_COLON = re.compile(_PATTERN.pattern + rf"(:(?:[ \u00a0]?{_VALUE})?)?")
 _BLOCK_VALUE = re.compile(rf"{bidi.RLM}?:[ \u00a0]?{bidi.LRE}{_VALUE}{bidi.PDF}{bidi.RLM}?")
 
 
-def annotate(html_text: str, lang: str, color: str = "#F07A12", seen: set | None = None, limit: int = 6) -> str:
+def annotate(html_text: str, lang: str, color: str | None = None, seen: set | None = None, limit: int = 6) -> str:
     """Put a small "?" link after the first appearance of each known term in an HTML text.
-    Links are "g:<term>"; the widget shows explain(term) on hover / click. Tags are left alone."""
+    Links are "g:<term>"; the widget shows explain(term) on hover / click. Tags are left alone.
+    color: the links' colour; by default the look's accent as text (theme.accent_text(deep=True)), read now."""
+    if color is None:
+        from .ui import theme      # here, not at the top: no Qt for the callers that pass their own colour
+        color = theme.accent_text(deep=True)
     seen = set() if seen is None else seen
     count = [0]
 

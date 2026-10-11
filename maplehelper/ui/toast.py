@@ -82,13 +82,13 @@ class Toast(QWidget):
         self._timer = QTimer(self, singleShot=True, interval=timeout_ms, timeout=self.dismiss)
 
     def restyle(self) -> None:
-        """The text colors of the current theme (the glass itself is painted from it each time): a toast up during
-        a theme switch kept white text on the new light glass."""
+        """The text colors and accent of the current look (the glass itself is painted from it each time): a toast up
+        during a look switch kept white text on the new light glass."""
         c = theme.P()
         self.setStyleSheet(f"""
             * {{ font-family: "{self._font_family}"; color: {c['text']}; }}
             #Card {{ background: transparent; border: none; }}
-            #Accent {{ background: {theme.ORANGE}; border-radius: 2px; }}
+            #Accent {{ background: {theme.ACCENT}; border-radius: 2px; }}
             #Title {{ font-size: 14px; font-weight: 600; color: {c['text']}; }}
             #Body {{ font-size: 13px; color: {c['text']}; }}
             #Brand {{ font-size: 11px; color: {c['muted']}; }}

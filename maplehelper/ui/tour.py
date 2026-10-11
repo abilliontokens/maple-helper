@@ -100,7 +100,7 @@ class Tour(QWidget):
         c = theme.P()
         self.card.setStyleSheet(f"""
             #TourCard {{ background: {"#2C2C2E" if theme.MODE == "dark" else "#FFFFFF"};
-                         border: 1px solid rgba(255,149,51,0.55); border-radius: 14px; }}
+                         border: 1px solid {theme.accent_rgba(0.55)}; border-radius: 14px; }}
             #TourCount {{ color: {theme.accent_text()}; font-size: 11px; font-weight: 600; }}
             #TourTitle {{ color: {c['text']}; font-weight: 700; }}
             #TourBody {{ color: {c['muted']}; }}
@@ -188,7 +188,7 @@ class Tour(QWidget):
             shade = shade.subtracted(hole)
         p.fillPath(shade, QColor(0, 0, 0, 150))
         if r is not None:
-            p.setPen(QPen(QColor(255, 149, 51), 2))
+            p.setPen(QPen(QColor(theme.ACCENT), 2))
             p.drawRoundedRect(QRectF(r).adjusted(1, 1, -1, -1), 12, 12)
 
     def mousePressEvent(self, e):

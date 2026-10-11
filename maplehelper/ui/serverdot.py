@@ -18,12 +18,13 @@ from PySide6.QtWidgets import QWidget
 
 from .. import dates, serverstatus
 from ..osapi import open_url
-from . import theme
 
 POLL_MINUTES = 5
 MAX_MINUTES = 60
 MIN_GAP_SECONDS = 60      # reopening the chat right after a check doesn't ask again
-COLORS = {"up": "#34C759", "maintenance": theme.ORANGE, "issues": theme.ORANGE}     # the rest: grey
+# the status's own colours, Apple's system green / orange (grey below), never the look's accent: a green or blue
+# accent would make maintenance read as "up"
+COLORS = {"up": "#34C759", "maintenance": "#FF9500", "issues": "#FF9500"}     # the rest: grey
 
 
 class StatusPoller(QObject):

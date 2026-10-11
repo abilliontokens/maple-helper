@@ -1,6 +1,7 @@
-"""The app's glass material: every window (the chat, dialogs, toasts) is painted with paint_glass, an opaque
-neutral tint with a soft shadow, sheen and rim, the same with the system's transparency effects on or off. The
-windows show in screenshots and recordings like any app.
+"""The app's glass material: every window (the chat, dialogs, toasts) is painted with paint_glass, the tint of the
+app's look (theme.set_look) at its opacity, with a soft shadow, sheen and rim, the same with the system's
+transparency effects on or off. Below full opacity the desktop shows through. The windows show in screenshots and
+recordings like any app.
 """
 from __future__ import annotations
 
@@ -29,8 +30,9 @@ def glass_path(widget, radius: float = None) -> QPainterPath:
 
 
 def paint_glass(widget, backdrop=None, strength: float = 0.6, radius: float = None) -> None:
-    """The one material every window uses: soft shadow, blurred backdrop, neutral tint, sheen, rim.
-    strength (0.4–1.0) scales the tint: higher = more opaque, easier to read over busy scenes."""
+    """The one material every window uses: soft shadow, blurred backdrop, the look's tint at its opacity (P():
+    "glass", "solid_alpha" / "glass_alpha"), sheen, rim.
+    strength (0.4–1.0) scales the tint over a backdrop: higher = more opaque, easier to read over busy scenes."""
     c = theme.P()
     r = theme.RADIUS if radius is None else radius
     p = QPainter(widget)

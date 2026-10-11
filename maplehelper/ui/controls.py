@@ -306,7 +306,7 @@ def track_slider(slider, rtl: bool) -> None:
     track = "rgba(255,255,255,0.22)" if theme.MODE == "dark" else "rgba(0,0,0,0.13)"
     slider.setStyleSheet(f"""
         QSlider::sub-page:horizontal {{ background: {track}; border-radius: 3px; }}
-        QSlider::add-page:horizontal {{ background: {theme.ORANGE}; border-radius: 3px; }}
+        QSlider::add-page:horizontal {{ background: {theme.ACCENT}; border-radius: 3px; }}
     """)
 
 

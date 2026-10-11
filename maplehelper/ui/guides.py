@@ -559,7 +559,8 @@ class GuidesDialog(GlassDialog):
         opt.setTextDirection(Qt.RightToLeft if rtl else Qt.LeftToRight)
         self.browser.document().setDefaultTextOption(opt)
         from .. import glossary
-        self.browser.setHtml(glossary.annotate(guides.book_html(b, theme.MODE, t.rtl), t.lang, limit=30))
+        self.browser.setHtml(glossary.annotate(guides.book_html(b, t.rtl), t.lang,
+                                               color=theme.accent_text(deep=True), limit=30))
         self.browser.verticalScrollBar().setValue(0)
         self.stack.setCurrentIndex(1)
         fit_tables(self.browser)

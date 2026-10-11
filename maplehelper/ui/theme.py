@@ -1,7 +1,9 @@
-"""Liquid-glass look in two neutral appearances: light (white glass, dark text) and
-dark (black glass, white text). Maple orange is the only accent.
+"""The app's own windows (the chat, Settings, the tools, guides, toasts, menus) in liquid glass: one of the tints the
+windows over the game take too (TINTS: the dark ones under light text, the white one under dark text), lit and
+selected things in one accent (ACCENTS), the glass at an opacity. Settings picks the three (set_look), apart from the
+bar's ⚙ panel, which picks the windows over the game's (npcoverlay).
 
-Tokens follow Apple's system colors (label / secondaryLabel / fills) for each appearance.
+Tokens follow Apple's system colors (label / secondaryLabel / fills) for each of the two text families.
 """
 from __future__ import annotations
 
@@ -13,14 +15,31 @@ from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QProxySt
 
 from ..store import ASSETS
 
-ORANGE = "#FF9533"
-ORANGE_DEEP = "#F07A12"
-CREAM = "#FFF4E6"
 RADIUS = 22
 
+# the colours a window can take: the glass tints (the dark ones under light text, the white one under dark text:
+# LIGHT_TINTS) and the accents that light a lit or selected button, each with the text colour that reads on it. A name
+# either doesn't know falls back to the look its windows had before it could be picked: "dark"/"green" over the game
+# (npcoverlay), "white"/"orange" in the app's own windows (set_look)
+TINTS = {"dark": ("tbs_tint_dark", (24, 24, 27)),
+         "midnight": ("tbs_tint_midnight", (17, 24, 43)),
+         "forest": ("tbs_tint_forest", (13, 31, 22)),
+         "wine": ("tbs_tint_wine", (38, 17, 27)),
+         "slate": ("tbs_tint_slate", (36, 39, 44)),
+         "white": ("tbs_tint_white", (246, 246, 248))}
+ACCENTS = {"green": ("tbs_accent_green", "#2E9E5B", "#07230F"),
+           "blue": ("tbs_accent_blue", "#3D8BD6", "#082138"),
+           "purple": ("tbs_accent_purple", "#8265D6", "#180C2C"),
+           "orange": ("tbs_accent_orange", "#E08A3C", "#2F1706"),
+           "pink": ("tbs_accent_pink", "#D65C8E", "#2F081A"),
+           "teal": ("tbs_accent_teal", "#2FA8A0", "#062623")}
+LIGHT_TINTS = {"white"}     # the glass colours whose text is dark (TINTS)
+OPACITY_MIN, OPACITY_MAX = 0.3, 1.0     # the app's glass's opacity as Settings offers it (set_look keeps it in)
+
+# the two text families, by the glass under them: light text on the dark tints ("dark"), dark text on the white one
+# ("light"), each with the glass's sheen and rim (paint_glass); the glass's own colour and opacity are the look's (P())
 PALETTES = {
     "dark": {
-        "glass": (28, 28, 30), "glass_alpha": 1.0, "solid_alpha": 1.0,
         "sheen": 14, "rim_top": 60, "rim": 22,
         "text": "#F5F5F7", "muted": "rgba(235,235,245,0.64)", "faint": "rgba(235,235,245,0.40)",
         "fill1": "rgba(255,255,255,0.08)", "fill2": "rgba(255,255,255,0.12)", "fill3": "rgba(255,255,255,0.20)",
@@ -28,7 +47,6 @@ PALETTES = {
         "scroll": "rgba(255,255,255,0.25)",
     },
     "light": {
-        "glass": (242, 242, 247), "glass_alpha": 1.0, "solid_alpha": 1.0,
         "sheen": 0, "rim_top": 40, "rim": 30,
         "text": "#1D1D1F", "muted": "rgba(60,60,67,0.66)", "faint": "rgba(60,60,67,0.42)",
         "fill1": "#FFFFFF", "fill2": "#FFFFFF", "fill3": "#E5E5EA",
@@ -36,14 +54,32 @@ PALETTES = {
         "scroll": "rgba(0,0,0,0.25)",
     },
 }
-MODE = "dark"
-HIGH_CONTRAST = False      # Windows high contrast is on (set_mode): no see-through grey text, firmer borders
+GOOD_TEXT_LIGHT = "#2E9E5B"
+# the warning / good chips' text (#TagWarn, #TagGood, the vote marks): the light-glass colors read 2.4-3.4:1 on
+# dark glass (the class grade letters were dim), so dark gets its own lighter ones (>= 4.5:1 on a card's tint)
+WARN_TEXT = {"light": "#C9620A", "dark": "#FFB066"}
+GOOD_TEXT = {"light": GOOD_TEXT_LIGHT, "dark": "#4CD07D"}
+CHANGED = {"light": "#0A6CD6", "dark": "#64B5FF"}    # the "Changed in COT2" chip's text, readable on either glass
+
+# The look now, read at call time as theme.X (never imported by name: they change with the look). set_look sets them;
+# until the app calls it, the default look (Settings' defaults: the white glass, orange, opaque).
+MODE = "light"              # "light": dark text on the white glass; "dark": light text on a dark tint
+HIGH_CONTRAST = False       # Windows high contrast is on (set_look): no see-through grey text or glass, firmer borders
+TINT = TINTS["white"][1]    # the glass's colour (r, g, b)...
+OPACITY = OPACITY_MAX       # ... and its opacity: below 1 the desktop shows through it (paint_glass)
+ACCENT = ACCENTS["orange"][1]       # a lit, selected or primary thing's fill
+ACCENT_DEEP = ACCENT                # its deeper shade: pressed, the foot of a lit gradient (set by _use)
+ON_ACCENT = ACCENTS["orange"][2]    # text and icons on an ACCENT fill: the accent's own text colour
+TEXT = PALETTES["light"]["text"]    # P()["text"] and P()["muted"] by name (the toasts, the dialogs)
+MUTED = PALETTES["light"]["muted"]
+_PALETTE = PALETTES["light"]        # what P() gives (_use: with the glass's colour and opacity)
+_ACCENT_TEXT = (ACCENT, ACCENT)     # what accent_text() gives, plain and deep (set by _use)
 
 
-def _contrast(c: dict) -> dict:
-    """A palette for high contrast: secondary text in the full text color, the faint (disabled) grey as the
+def _contrast(c: dict, dark: bool) -> dict:
+    """A text family for high contrast: secondary text in the full text color, the faint (disabled) grey as the
     normal muted one, and borders a reader can see."""
-    rgb = "235,235,245" if c is PALETTES["dark"] else "0,0,0"
+    rgb = "235,235,245" if dark else "0,0,0"
     return {**c, "muted": c["text"], "faint": c["muted"], "stroke": f"rgba({rgb},0.60)", "hair": f"rgba({rgb},0.35)"}
 
 
@@ -60,34 +96,79 @@ def qcolor(css: str):
 
 
 def P() -> dict:
-    c = PALETTES.get(MODE, PALETTES["dark"])
-    return _contrast(c) if HIGH_CONTRAST else c
-
-
-ORANGE_TEXT_LIGHT = "#C9620A"     # orange as text on white: #FF9533 / #F07A12 are too faint to read there
-# text and icons on an orange fill (the player's bubble, Primary / Send buttons, a checked chip, a hovered menu
-# row): white, the brand look the owner chose (a darker text read better but changed the look)
-ON_ORANGE = "#FFFFFF"
-GOOD_TEXT_LIGHT = "#2E9E5B"
-# the warning / good chips' text (#TagWarn, #TagGood, the vote marks): the light-glass colors read 2.4-3.4:1 on
-# dark glass (the class grade letters were dim), so dark gets its own lighter ones (>= 4.5:1 on a card's tint)
-WARN_TEXT = {"light": "#C9620A", "dark": "#FFB066"}
-GOOD_TEXT = {"light": GOOD_TEXT_LIGHT, "dark": "#4CD07D"}
-CHANGED = {"light": "#0A6CD6", "dark": "#64B5FF"}    # the "Changed in COT2" chip's text, readable on either glass
+    """The colours to draw in now: the glass's text family, with the glass's colour ("glass") and opacity
+    ("glass_alpha", "solid_alpha"). Read when a style sheet is built or a window paints, never kept."""
+    return _PALETTE
 
 
 def accent_text(deep: bool = False) -> str:
-    """Orange for text (links, chips, small marks): the brand orange on dark glass, a darker one on light.
-    Orange fills (primary buttons, the user's bubble) keep the brand colors."""
-    if MODE == "light":
-        return ORANGE_TEXT_LIGHT
-    return ORANGE_DEEP if deep else ORANGE
+    """The accent as text (links, chips, small marks) that reads on the glass now: darkened on the white glass, on a
+    dark tint the accent itself (lighter where it is too dark to read there). deep: from its deeper shade (a link under
+    the mouse, a lit chip's text). Accent fills (primary buttons, the user's bubble) take ACCENT itself."""
+    return _ACCENT_TEXT[1 if deep else 0]
 
 
-# legacy names still used by toasts/dialogs (resolved at call time through P())
-TEXT = "#F5F5F7"
-MUTED = "rgba(235,235,245,0.64)"
-BORDER = "rgba(255,149,51,0.55)"
+def accent_rgba(alpha: float) -> str:
+    """The accent at an opacity, "rgba(r,g,b,a)": a tinted fill or border (a lit chip, a hovered card's edge)."""
+    return _rgba(ACCENT, alpha)
+
+
+def _rgb(color: str) -> tuple[int, int, int]:
+    """A "#RRGGBB" colour as (r, g, b)."""
+    return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+
+
+def _hex(rgb) -> str:
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+
+def _rgba(color: str, alpha: float) -> str:
+    """A "#RRGGBB" colour at an opacity, "rgba(r,g,b,a)"."""
+    return "rgba({},{},{},{})".format(*_rgb(color), alpha)
+
+
+def _lighter(color: str, k: float) -> str:
+    """A lighter shade: the colour mixed with white by k (0-1)."""
+    return _hex(round(v + (255 - v) * k) for v in _rgb(color))
+
+
+def _deeper(color: str) -> str:
+    """A deeper shade (HSV value x0.85): pressed, the foot of a lit gradient."""
+    h, s, v, _ = QColor(color).getHsvF()
+    return QColor.fromHsvF(max(h, 0.0), s, v * 0.85).name().upper()
+
+
+def _over(css: str, under: tuple[int, int, int]) -> tuple[int, int, int]:
+    """A palette colour ("#RRGGBB" or "rgba(...)") as the opaque colour it shows over (r, g, b)."""
+    c = qcolor(css)
+    a = c.alphaF()
+    return tuple(round(f * a + b * (1 - a)) for f, b in zip((c.red(), c.green(), c.blue()), under))
+
+
+def _ratio(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    """WCAG contrast ratio of two (r, g, b)."""
+    def lum(rgb):
+        ch = [v / 255 for v in rgb]
+        ch = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _as_text(color: str, on_white: bool, card: tuple[int, int, int]) -> str:
+    """An accent colour as text that reads on the glass. On the white glass darkened and its colour deepened, as
+    npcoverlay.ink does for the windows over the game (an accent is too light to read on white); on a dark tint as it
+    is, or mixed toward white just enough to read on a card there (`card`): WCAG AA's 4.5:1 (purple on slate, the
+    deep shades)."""
+    if on_white:
+        h, s, v, _ = QColor(color).getHsvF()
+        return QColor.fromHsvF(max(h, 0.0), min(1.0, s * 1.1 + 0.15), v * 0.55).name().upper()
+    for step in range(21):
+        out = _lighter(color, step / 20)
+        if _ratio(_rgb(out), card) >= 4.5:
+            break
+    return out
+
 
 FONT_FAMILY = "Rubik"
 ICON_FONT = "Segoe Fluent Icons"
@@ -124,14 +205,38 @@ def high_contrast() -> str | None:
         return None
 
 
-def set_mode(mode: str) -> None:
-    """The appearance from Settings, unless Windows high contrast is on: then the matching light or dark look in
-    its high-contrast palette (checked on every restyle, so turning it on applies when a window next opens)."""
-    global MODE, TEXT, MUTED, HIGH_CONTRAST
-    hc = high_contrast()
-    HIGH_CONTRAST = hc is not None
-    MODE = hc or (mode if mode in PALETTES else "dark")
-    TEXT, MUTED = P()["text"], P()["muted"]
+def set_look(tint: str, accent: str, opacity: float) -> None:
+    """The app's own windows' look from Settings (app_tint, app_accent, app_opacity). A tint or accent name this
+    doesn't know (a hand edit, a newer version's) is the white glass or orange; the opacity is kept within
+    OPACITY_MIN..OPACITY_MAX. Windows high contrast wins: the system's light or dark text in its high-contrast
+    palette, on opaque glass (the picked tint when its text is that one). Checked on every restyle, so turning it on
+    applies when a window next opens."""
+    _use(tint, accent, opacity, high_contrast())
+
+
+def _use(tint: str, accent: str, opacity: float, contrast: str | None) -> None:
+    """Every global of the look, from Settings' names; `contrast`: Windows high contrast's text ("light" / "dark"),
+    None when it is off."""
+    global MODE, HIGH_CONTRAST, TINT, OPACITY, ACCENT, ACCENT_DEEP, ON_ACCENT, TEXT, MUTED, _PALETTE, _ACCENT_TEXT
+    tint = tint if tint in TINTS else "white"
+    MODE = "light" if tint in LIGHT_TINTS else "dark"
+    HIGH_CONTRAST = contrast is not None
+    if HIGH_CONTRAST:
+        if contrast != MODE:          # the system's text on a glass of its own: the white one, or the plain dark one
+            tint, MODE = ("white" if contrast == "light" else "dark"), contrast
+        opacity = OPACITY_MAX         # and nothing seen through it
+    TINT = TINTS[tint][1]
+    OPACITY = min(max(float(opacity), OPACITY_MIN), OPACITY_MAX)
+    _, ACCENT, ON_ACCENT = ACCENTS.get(accent, ACCENTS["orange"])
+    ACCENT_DEEP = _deeper(ACCENT)
+    family = _contrast(PALETTES[MODE], MODE == "dark") if HIGH_CONTRAST else PALETTES[MODE]
+    _PALETTE = {**family, "glass": TINT, "glass_alpha": OPACITY, "solid_alpha": OPACITY}
+    card = _over(_PALETTE["fill1"], TINT)       # what accent text mostly sits on: a card, a group of rows
+    _ACCENT_TEXT = (_as_text(ACCENT, MODE == "light", card), _as_text(ACCENT_DEEP, MODE == "light", card))
+    TEXT, MUTED = _PALETTE["text"], _PALETTE["muted"]
+
+
+_use("white", "orange", OPACITY_MAX, None)      # the default look, until the app sets the player's
 
 
 def load_fonts() -> str:
@@ -158,10 +263,14 @@ def app_font(size: int = 14) -> QFont:
     return f
 
 
-def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
+def stylesheet(font_family: str, size: int) -> str:
     s, c = size, P()
-    ot, otd = accent_text(), accent_text(deep=True)      # orange text: darker on white for contrast
+    ot, otd = accent_text(), accent_text(deep=True)      # the accent as text: darker on the white glass
     good, warn = GOOD_TEXT[MODE], WARN_TEXT[MODE]
+    # a lit fill (a primary button, the player's bubble, a checked chip): a lighter shade of the accent down to its
+    # deep one; under the mouse a lighter pair, pressed the deep one
+    lit = f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {_lighter(ACCENT, 0.12)}, stop:1 {ACCENT_DEEP})"
+    lit_hover = f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {_lighter(ACCENT, 0.25)}, stop:1 {ACCENT})"
     install_focus_ring()
     return f"""
     QPushButton, QToolButton {{ outline: none; }}
@@ -171,22 +280,22 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     #SaverBadge {{ font-size: {s - 4}px; font-weight: 600; color: {good}; background: rgba(52,199,89,0.14);
                    border-radius: 8px; padding: 1px 7px; }}
     QProgressBar#ExpBar {{ background: {c['fill3']}; border: none; border-radius: 3px; }}
-    QProgressBar#ExpBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FFA24A, stop:1 {ORANGE_DEEP});
+    QProgressBar#ExpBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {_lighter(ACCENT, 0.12)}, stop:1 {ACCENT_DEEP});
                                   border-radius: 3px; }}
     #ExpText {{ color: {c['muted']}; font-size: {s - 3}px; }}
     #PlanHead {{ color: {c['muted']}; font-size: {s - 2}px; font-weight: 600; padding-top: 6px; }}
     QPushButton#PlanLink {{ background: transparent; border: none; padding: 2px 0; text-align: left; color: {c['text']}; }}
     QPushButton#PlanLink:hover {{ color: {ot}; }}
     QTextBrowser#GuideText {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 14px;
-                               padding: 10px 12px; color: {c['text']}; selection-background-color: {ORANGE};
-                               selection-color: {ON_ORANGE}; }}
+                               padding: 10px 12px; color: {c['text']}; selection-background-color: {ACCENT};
+                               selection-color: {ON_ACCENT}; }}
     #PinAnswer {{ color: {c['text']}; font-size: {s - 1}px; }}
     QFrame#ShareCard {{ background: {c['fill1']}; border: 1px solid {c['stroke']}; border-radius: 18px; }}
     #ShareName {{ font-size: {s + 8}px; font-weight: 700; color: {c['text']}; }}
     #ShareMeta {{ font-size: {s + 1}px; font-weight: 500; color: {c['muted']}; }}
     #ShareBrand {{ font-size: {s - 3}px; font-weight: 600; color: {ot}; }}
     #BetaBadge {{ font-size: {s - 5}px; font-weight: 700; color: {accent_text()}; background: transparent;
-                  border: 1px solid rgba(255,149,51,0.6); border-radius: 5px; padding: 0 4px; min-height: 0; }}
+                  border: 1px solid {accent_rgba(0.6)}; border-radius: 5px; padding: 0 4px; min-height: 0; }}
     #ScopeNote {{ color: {c['faint']}; font-size: {s - 4}px; }}
     #Version {{ font-size: {s - 3}px; font-weight: 300; color: {c['muted']}; background: transparent; }}
     #ProfilePill {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 12px;
@@ -198,14 +307,14 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QToolButton#Icon:hover {{ background: {c['fill2']}; color: {c['text']}; }}
     QToolButton#Icon:pressed {{ background: {c['fill3']}; }}
     QToolButton#Icon[active="true"] {{ color: #FF453A; }}
-    QToolButton#Icon[unread="true"] {{ color: {ORANGE}; }}
+    QToolButton#Icon[unread="true"] {{ color: {ACCENT}; }}
     QToolButton#Icon[wished="true"] {{ color: {ot}; }}
     QToolButton#Icon[dismiss="true"] {{ font-size: 12px; }}
     #HeaderSep {{ background: {c['stroke']}; border: none; }}
     QToolButton#IconClose {{ font-family: "{ICON_FONT}"; font-size: 12px; color: {ot}; background: transparent;
                              border: none; border-radius: 14px; min-width: 28px; min-height: 28px; }}
-    QToolButton#IconClose:hover {{ background: {ORANGE}; color: #FFFFFF; }}
-    QToolButton#IconClose:pressed {{ background: {ORANGE_DEEP}; color: #FFFFFF; }}
+    QToolButton#IconClose:hover {{ background: {ACCENT}; color: {ON_ACCENT}; }}
+    QToolButton#IconClose:pressed {{ background: {ACCENT_DEEP}; color: {ON_ACCENT}; }}
 
     QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
     QScrollBar:vertical {{ background: transparent; width: 6px; margin: 4px 1px; }}
@@ -231,13 +340,13 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QLineEdit#StepValue {{ background: transparent; border: none; font-weight: 600; padding: 0; color: {c['text']}; }}
     #JobFixed {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 8px; min-height: 28px;
                  max-height: 28px; padding: 0 12px; font-weight: 500; color: {c['text']}; }}
-    #InfoNote {{ background: {"rgba(255,149,51,0.12)" if MODE == "dark" else "rgba(255,149,51,0.10)"};
-                 border: 1px solid rgba(255,149,51,0.35); border-radius: 12px; }}
+    #InfoNote {{ background: {accent_rgba(0.12 if MODE == "dark" else 0.10)};
+                 border: 1px solid {accent_rgba(0.35)}; border-radius: 12px; }}
     #InfoIcon {{ font-family: "{ICON_FONT}"; font-size: 15px; color: {ot}; }}
     #InfoText {{ color: {c['text']}; font-size: {s - 1}px; }}
     #JobHint {{ color: {c['muted']}; font-size: {s - 3}px; }}
     #ProfileCard {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 16px; }}
-    #ProfileCard:hover, #ProfileCard[active="true"] {{ border: 1px solid rgba(255,149,51,0.7); }}
+    #ProfileCard:hover, #ProfileCard[active="true"] {{ border: 1px solid {accent_rgba(0.7)}; }}
     QToolButton#Refresh {{ font-family: "{ICON_FONT}"; font-size: 15px; color: {c['muted']}; background: transparent;
                            border: none; border-radius: 15px; min-width: 30px; max-width: 30px; min-height: 30px;
                            max-height: 30px; }}
@@ -246,38 +355,38 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QToolButton#Refresh:checked {{ color: {ot}; background: {c['fill3']}; }}
     #ProfileName {{ font-size: {s + 1}px; font-weight: 600; color: {c['text']}; }}
     #ProfileMeta {{ font-size: {s - 1}px; font-weight: 500; color: {c['muted']}; }}
-    #BubbleUser {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFA24A, stop:1 {ORANGE_DEEP});
+    #BubbleUser {{ background: {lit};
                    border-radius: 15px; min-height: 32px; }}
-    #BubbleUser QLabel {{ color: {ON_ORANGE}; }}
+    #BubbleUser QLabel {{ color: {ON_ACCENT}; }}
     #BubbleBot {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 15px; min-height: 32px; }}
     /* a failed answer: tinted, with a warning icon, so it doesn't read like an answer (CHAT-02) */
     #BubbleBot[error="true"] {{ background: {"rgba(255,69,58,0.12)" if MODE == "dark" else "rgba(255,59,48,0.07)"};
                                 border: 1px solid rgba(255,69,58,0.40); }}
     #BubbleErrIcon {{ font-family: "{ICON_FONT}"; font-size: 15px; color: #FF453A; }}
-    QPushButton#NewPill {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFA24A, stop:1 {ORANGE_DEEP});
-                           color: {ON_ORANGE}; border: none; border-radius: 13px; min-height: 26px; max-height: 26px;
+    QPushButton#NewPill {{ background: {lit};
+                           color: {ON_ACCENT}; border: none; border-radius: 13px; min-height: 26px; max-height: 26px;
                            padding: 0 14px; font-size: {s - 2}px; font-weight: 600; }}
-    QPushButton#NewPill:hover {{ background: {ORANGE_DEEP}; }}
+    QPushButton#NewPill:hover {{ background: {ACCENT_DEEP}; }}
     #SystemLine {{ color: {c['muted']}; font-size: {s - 2}px; }}
 
     #Card {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 14px; }}
-    #Card:hover {{ background: {c['fill2']}; border: 1px solid rgba(255,149,51,0.7); }}
+    #Card:hover {{ background: {c['fill2']}; border: 1px solid {accent_rgba(0.7)}; }}
     #GroupHeader {{ background: transparent; border: 1px solid transparent; border-radius: 10px; }}
-    #GroupHeader:hover {{ border: 1px solid rgba(255,149,51,0.7); }}
+    #GroupHeader:hover {{ border: 1px solid {accent_rgba(0.7)}; }}
     #TileGridTitle {{ color: {c['muted']}; font-size: {s - 2}px; font-weight: 600; }}
-    #BubbleTag {{ color: rgba(255,255,255,0.85); font-size: {s - 3}px; font-weight: 600; }}
-    #FocusBar {{ background: rgba(255,149,51,0.12); border: 1px solid rgba(255,149,51,0.55); border-radius: 12px; }}
+    #BubbleTag {{ color: {_rgba(ON_ACCENT, 0.85)}; font-size: {s - 3}px; font-weight: 600; }}
+    #FocusBar {{ background: {accent_rgba(0.12)}; border: 1px solid {accent_rgba(0.55)}; border-radius: 12px; }}
     QPushButton#TagChip {{ background: {"rgba(255,255,255,0.10)" if MODE == "dark" else "#FFFFFF"};
-                           border: 1px solid rgba(255,149,51,0.55); border-radius: 12px; min-height: 24px;
+                           border: 1px solid {accent_rgba(0.55)}; border-radius: 12px; min-height: 24px;
                            max-height: 24px; padding: 0 8px; font-size: {s - 2}px; font-weight: 600; color: {c['text']}; }}
-    QPushButton#TagChip:hover {{ background: rgba(255,149,51,0.20); }}
+    QPushButton#TagChip:hover {{ background: {accent_rgba(0.20)}; }}
     #FocusText {{ color: {c['text']}; font-size: {s - 1}px; }}
     #TileGrid {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 14px; }}
     #Tile {{ background: {"rgba(255,255,255,0.05)" if MODE == "dark" else "#F7F7F9"}; border: 1px solid {c['hair']};
              border-radius: 10px; }}
-    #Tile:hover {{ border: 1px solid rgba(255,149,51,0.7); }}
+    #Tile:hover {{ border: 1px solid {accent_rgba(0.7)}; }}
     #Card[selected="true"], #Tile[selected="true"], #GroupHeader[selected="true"] {{
-        border: 2px solid {ORANGE}; background: rgba(255,149,51,0.12); }}
+        border: 2px solid {ACCENT}; background: {accent_rgba(0.12)}; }}
     #TileName {{ font-size: {s - 1}px; font-weight: 500; color: {c['text']}; }}
     #StatPill {{ font-size: {s - 2}px; font-weight: 500; color: {c['text']}; background: {c['fill3']};
                  border-radius: 7px; padding: 1px 7px; }}
@@ -291,8 +400,8 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
                         min-height: 28px; max-height: 28px; padding: 0 13px; font-size: {s - 2}px; font-weight: 500; color: {c['text']}; }}
     QPushButton#Chip:hover {{ background: {c['fill3']}; }}
     QPushButton#Chip:pressed {{ background: {c['pressed']}; }}
-    QPushButton#Chip:checked {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFA24A, stop:1 {ORANGE_DEEP});
-                                border: 1px solid {ORANGE_DEEP}; color: {ON_ORANGE}; font-weight: 700; }}
+    QPushButton#Chip:checked {{ background: {lit};
+                                border: 1px solid {ACCENT_DEEP}; color: {ON_ACCENT}; font-weight: 700; }}
     QPushButton#SubChip {{ background: transparent; border: 1px solid {c['stroke']}; border-radius: 10px;
                            min-height: 26px; max-height: 26px; padding: 0 10px; font-size: {s - 3}px; font-weight: 500;
                            color: {c['muted']}; }}
@@ -300,57 +409,58 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
                             min-height: 26px; max-height: 26px; padding: 0 4px; font-size: {s - 4}px; font-weight: 500;
                             color: {c['muted']}; }}
     QPushButton#ProfChip:hover {{ background: {c['fill3']}; color: {c['text']}; }}
-    QPushButton#ProfChip:checked {{ background: rgba(255,149,51,0.14); border: 1.5px solid {ORANGE}; color: {otd};
+    QPushButton#ProfChip:checked {{ background: {accent_rgba(0.14)}; border: 1.5px solid {ACCENT}; color: {otd};
                                     font-weight: 700; }}
     QPushButton#SubChip:hover {{ background: {c['fill3']}; color: {c['text']}; }}
-    QPushButton#SubChip:checked {{ background: rgba(255,149,51,0.14); border: 1.5px solid {ORANGE}; color: {otd};
+    QPushButton#SubChip:checked {{ background: {accent_rgba(0.14)}; border: 1.5px solid {ACCENT}; color: {otd};
                                    font-weight: 700; }}
     #Tag, #TagGood, #TagWarn, #TagAccent {{ font-size: {s - 3}px; font-weight: 600; border-radius: 8px; padding: 2px 8px; }}
     #Tag {{ color: {c['muted']}; background: {c['fill3']}; }}
     #TagGood {{ color: {good}; background: rgba(52,199,89,0.16); }}
+    /* a warning stays orange whatever the accent: it warns, it isn't the player's pick */
     #TagWarn {{ color: {warn}; background: rgba(255,149,51,0.18); }}
-    #TagAccent {{ color: {otd}; background: rgba(255,149,51,0.12); }}
-    /* where a datum comes from (sources.py): the BETA badge's look, orange outline and letters (the owner's call) */
+    #TagAccent {{ color: {otd}; background: {accent_rgba(0.12)}; }}
+    /* where a datum comes from (sources.py): the BETA badge's look, the accent's outline and letters (the owner's call) */
     #SourceTag {{ font-size: {s - 5}px; font-weight: 700; color: {accent_text()}; background: transparent;
-                  border: 1px solid rgba(255,149,51,0.6); border-radius: 5px; padding: 0 4px; min-height: 0; }}
+                  border: 1px solid {accent_rgba(0.6)}; border-radius: 5px; padding: 0 4px; min-height: 0; }}
     /* a community drop's votes: "16 ✓" in green, "single report" (one player alone) in the warning colour */
     #VoteTag {{ font-size: {s - 4}px; font-weight: 600; color: {good}; background: transparent; padding: 0 1px; }}
     #VoteTag[single="true"] {{ color: {warn}; }}
-    #UpdatedTag {{ font-size: {s - 4}px; font-weight: 700; color: {otd}; background: rgba(255,149,51,0.14);
-                   border: 1px solid rgba(255,149,51,0.45); border-radius: 7px; padding: 1px 5px; }}
-    /* a skill whose values changed between two builds (sitedata.py): blue, apart from the orange "Updated" */
+    #UpdatedTag {{ font-size: {s - 4}px; font-weight: 700; color: {otd}; background: {accent_rgba(0.14)};
+                   border: 1px solid {accent_rgba(0.45)}; border-radius: 7px; padding: 1px 5px; }}
+    /* a skill whose values changed between two builds (sitedata.py): blue, apart from the accent's "Updated" */
     #ChangedTag {{ font-size: {s - 4}px; font-weight: 700; color: {CHANGED[MODE]}; background: rgba(10,132,255,0.12);
                    border: 1px solid rgba(10,132,255,0.40); border-radius: 7px; padding: 1px 5px; }}
     #BigStat {{ font-size: {s + 10}px; font-weight: 700; letter-spacing: -0.4px; color: {c['text']}; }}
     #BigStatLabel {{ font-size: {s - 3}px; color: {c['muted']}; }}
-    QPushButton#NowChip {{ background: rgba(255,149,51,0.12); border: 1px solid rgba(255,149,51,0.55); border-radius: 12px;
+    QPushButton#NowChip {{ background: {accent_rgba(0.12)}; border: 1px solid {accent_rgba(0.55)}; border-radius: 12px;
                            min-height: 24px; max-height: 24px; padding: 0 11px; font-size: {s - 2}px; font-weight: 600;
                            color: {otd}; }}
-    QPushButton#NowChip:hover {{ background: rgba(255,149,51,0.22); }}
-    QPushButton#NowChip:pressed {{ background: rgba(255,149,51,0.32); }}
+    QPushButton#NowChip:hover {{ background: {accent_rgba(0.22)}; }}
+    QPushButton#NowChip:pressed {{ background: {accent_rgba(0.32)}; }}
     #ShotHint {{ color: {c['muted']}; font-size: {s - 3}px; padding: 0 6px 2px 6px; }}
     #ToolHeader {{ font-size: {s - 1}px; color: {c['muted']}; }}
 
     #Capsule {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 21px; }}
-    #Capsule[focus="true"] {{ border: 1px solid rgba(255,149,51,0.85); }}
+    #Capsule[focus="true"] {{ border: 1px solid {accent_rgba(0.85)}; }}
     #Capsule[voice="true"] {{ border: 1px solid #FF453A; }}
     #VoiceChip {{ color: {c['text']}; background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 9px;
                   padding: 2px 10px; font-size: {s - 3}px; }}
     #VoiceChip[voice="true"] {{ background: rgba(255,69,58,0.14); border: 1px solid rgba(255,69,58,0.55); }}
-    QPlainTextEdit#Input {{ background: transparent; border: none; padding: 0 2px; selection-background-color: {ORANGE};
-                       selection-color: {ON_ORANGE};
+    QPlainTextEdit#Input {{ background: transparent; border: none; padding: 0 2px; selection-background-color: {ACCENT};
+                       selection-color: {ON_ACCENT};
                        color: {c['text']}; }}
-    QToolButton#Send {{ font-family: "{ICON_FONT}"; font-size: 13px; color: {ON_ORANGE}; border: none; border-radius: 15px;
+    QToolButton#Send {{ font-family: "{ICON_FONT}"; font-size: 13px; color: {ON_ACCENT}; border: none; border-radius: 15px;
                         min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
-                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFA24A, stop:1 {ORANGE_DEEP}); }}
-    QToolButton#Send:hover {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFB066, stop:1 #F58A2A); }}
-    QToolButton#Send:pressed {{ background: {ORANGE_DEEP}; }}
+                        background: {lit}; }}
+    QToolButton#Send:hover {{ background: {lit_hover}; }}
+    QToolButton#Send:pressed {{ background: {ACCENT_DEEP}; }}
     QToolButton#Send:disabled {{ background: {c['fill2']}; color: {c['faint']}; }}
 
-    QPushButton#Primary {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFA24A, stop:1 {ORANGE_DEEP});
-                           color: {ON_ORANGE}; border: none; border-radius: 12px; min-height: 26px; padding: 4px 18px; font-weight: 600; }}
-    QPushButton#Primary:hover {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFB066, stop:1 #F58A2A); }}
-    QPushButton#Primary:pressed {{ background: {ORANGE_DEEP}; }}
+    QPushButton#Primary {{ background: {lit};
+                           color: {ON_ACCENT}; border: none; border-radius: 12px; min-height: 26px; padding: 4px 18px; font-weight: 600; }}
+    QPushButton#Primary:hover {{ background: {lit_hover}; }}
+    QPushButton#Primary:pressed {{ background: {ACCENT_DEEP}; }}
     QPushButton#Primary:disabled {{ background: {c['fill2']}; color: {c['faint']}; }}
     QPushButton#Danger {{ background: #FF3B30; color: #FFFFFF; border: none; border-radius: 12px; min-height: 26px;
                           padding: 4px 18px; font-weight: 600; }}
@@ -360,20 +470,21 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QPushButton#Secondary:hover {{ background: {c['fill3']}; }}
     QPushButton#Quick {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 14px; min-height: 30px; padding: 4px 12px; }}
     QPushButton#Quick:hover, QToolButton#ClassTile:hover {{ background: {c['fill3']}; }}
-    QPushButton#Quick:checked, QToolButton#ClassTile:checked {{ background: rgba(255,149,51,0.12); border: 2px solid {ORANGE}; font-weight: 600; }}
+    QPushButton#Quick:checked, QToolButton#ClassTile:checked {{ background: {accent_rgba(0.12)}; border: 2px solid {ACCENT}; font-weight: 600; }}
     QToolButton#ClassTile {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 14px; padding: 4px 4px;
                              color: {c['text']}; }}
     QLineEdit {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 10px; padding: 7px 10px; }}
-    QLineEdit:focus {{ border: 1px solid rgba(255,149,51,0.85); }}
+    QLineEdit:focus {{ border: 1px solid {accent_rgba(0.85)}; }}
 
     /* grouped settings (iOS inset-grouped) */
     #SectionHeader {{ color: {c['muted']}; font-size: {s - 2}px; font-weight: 500; padding: 0 14px; }}
     #Group {{ background: {c['fill1']}; border: 1px solid {c['hair']}; border-radius: 14px; }}
     #Separator {{ background: {c['hair']}; border: none; }}
     #RowLabel {{ color: {c['text']}; }}
+    #RowValue {{ color: {c['muted']}; }}
     #DialogBody {{ font-size: {s + 1}px; color: {c['text']}; line-height: 140%; }}
     #RowHint {{ color: {c['muted']}; font-size: {s - 3}px; }}
-    #WarnHint {{ color: {ORANGE if MODE == "dark" else ORANGE_TEXT_LIGHT}; font-size: {s - 3}px; font-weight: 500; }}
+    #WarnHint {{ color: {warn}; font-size: {s - 3}px; font-weight: 500; }}
     #PageTitle {{ font-size: {s + 8}px; font-weight: 700; letter-spacing: -0.3px; color: {c['text']}; }}
     #PageBody {{ color: {c['muted']}; }}
     #FieldLabel {{ color: {c['muted']}; font-size: {s - 2}px; font-weight: 500; }}
@@ -405,7 +516,7 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QPushButton#Chip:disabled, QPushButton#Secondary:disabled, QPushButton#NowChip:disabled,
     QPushButton#Quick:disabled, QPushButton#TagChip:disabled, QPushButton#Select:disabled,
     #ProfilePill:disabled {{ color: {c['faint']}; background: {c['fill1']}; border: 1px solid {c['hair']}; }}
-    QPushButton#Chip:checked:disabled, QPushButton#Quick:checked:disabled {{ border: 1px solid rgba(255,149,51,0.45); }}
+    QPushButton#Chip:checked:disabled, QPushButton#Quick:checked:disabled {{ border: 1px solid {accent_rgba(0.45)}; }}
     QPushButton#Danger:disabled {{ background: rgba(255,59,48,0.35); color: rgba(255,255,255,0.75); }}
     QToolButton#Icon:disabled, QToolButton#IconClose:disabled {{ color: {c['faint']}; background: transparent; }}
     QComboBox {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 10px; min-height: 26px;
@@ -414,7 +525,7 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}
     QComboBox QAbstractItemView {{ background: {"#2C2C2E" if MODE == "dark" else "#FFFFFF"}; color: {c['text']};
                                    border: 1px solid {c['stroke']}; border-radius: 10px; padding: 4px; outline: none;
-                                   selection-background-color: {ORANGE}; selection-color: {ON_ORANGE}; }}
+                                   selection-background-color: {ACCENT}; selection-color: {ON_ACCENT}; }}
     QSpinBox {{ background: {c['fill2']}; border: 1px solid {c['stroke']}; border-radius: 10px; min-height: 26px;
                 padding: 0 8px; color: {c['text']}; }}
     QSpinBox::up-button, QSpinBox::down-button {{ width: 16px; border: none; background: transparent; }}
@@ -423,26 +534,26 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
                                   border-radius: 3px; }}
     QSlider::add-page:horizontal {{ background: {"rgba(255,255,255,0.22)" if MODE == "dark" else "rgba(0,0,0,0.13)"};
                                     border-radius: 3px; }}
-    QSlider::sub-page:horizontal {{ background: {ORANGE}; border-radius: 3px; }}
+    QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
     QSlider::handle:horizontal {{ background: #FFFFFF; width: 24px; height: 24px; margin: -9px 0; border-radius: 12px;
                                   border: 1px solid rgba(0,0,0,0.14); }}
 
     QListWidget {{ background: transparent; border: none; outline: none; }}
     QListWidget::item {{ padding: 8px 4px; border-radius: 8px; color: {c['text']}; }}
     QListWidget::item:hover {{ background: {c['fill1']}; }}
-    QListWidget::item:selected {{ background: rgba(255,149,51,0.22); color: {c['text']}; }}
+    QListWidget::item:selected {{ background: {accent_rgba(0.22)}; color: {c['text']}; }}
 
     QMenu {{ background: {"rgba(44,44,46,0.98)" if MODE == "dark" else "rgba(255,255,255,0.98)"};
              border: 1px solid {c['stroke']}; border-radius: 12px; padding: 5px; }}
     QMenu::item {{ padding: 6px 16px 6px 28px; border-radius: 7px; color: {c['text']}; min-width: 64px; }}
-    QMenu::item:selected {{ background: {ORANGE}; color: {ON_ORANGE}; }}
+    QMenu::item:selected {{ background: {ACCENT}; color: {ON_ACCENT}; }}
     QMenu::item:disabled {{ color: {c['muted']}; font-weight: 600; font-size: {s - 2}px; }}
     QMenu::indicator {{ width: 14px; height: 14px; left: 8px; }}
     QMenu::separator {{ height: 1px; background: {c['hair']}; margin: 4px 8px; }}
     QMenu#SplitMenu {{ background: transparent; border: none; }}
     QMenu#SplitMenu::item {{ margin: 0 5px; }}
     #MenuRow {{ border-radius: 7px; background: transparent; }}
-    #MenuRow:hover {{ background: {ORANGE}; }}
+    #MenuRow:hover {{ background: {ACCENT}; }}
     #MenuRow:disabled {{ background: transparent; }}
     /* Qt ignores a pseudo-state on an ancestor ("#MenuRow:hover #MenuRowText" matched every row, and the
        ":disabled" one painted every label grey), so the label is styled by its own state: a child of a disabled
@@ -450,8 +561,8 @@ def stylesheet(font_family: str, size: int, opacity: float = 1.0) -> str:
     #MenuRowText {{ color: {c['text']}; }}
     #MenuNote {{ color: {c['muted']}; font-size: {s - 2}px; padding: 6px 17px 2px 17px; }}
     #MenuRowText:disabled {{ color: {c['faint']}; }}
-    #MenuRow[active="true"] {{ background: {ORANGE}; }}
-    #MenuRowText[hover="true"], #MenuRow[active="true"] #MenuRowText {{ color: {ON_ORANGE}; }}
+    #MenuRow[active="true"] {{ background: {ACCENT}; }}
+    #MenuRowText[hover="true"], #MenuRow[active="true"] #MenuRowText {{ color: {ON_ACCENT}; }}
     QMenu#SplitMenu::separator {{ margin: 4px 13px; }}
     QToolTip {{ background: {"#2C2C2E" if MODE == "dark" else "#FFFFFF"}; color: {c['text']};
                 border: 1px solid {c['stroke']}; border-radius: 6px; padding: 4px 8px; }}
@@ -488,7 +599,7 @@ class AppStyle(QProxyStyle):
 
 
 def install_focus_ring() -> None:
-    """A subtle orange ring on the button that has keyboard focus (Tab / Shift+Tab), like the web's
+    """A subtle ring in the accent on the button that has keyboard focus (Tab / Shift+Tab), like the web's
     :focus-visible: a click gives no ring. Drawn by a see-through child over the button's own edge, so no
     layout moves and no tight parent clips it (a QFocusFrame outside the button was cut off in a chat row).
     The app's style (AppStyle) hooks it to each button as Qt styles it: only their events reach Python."""
@@ -517,9 +628,9 @@ _MENU_ROW_HOVER = None
 
 
 class MenuRowHover(QObject):
-    """A menu row's label turns dark on the row's orange hover. The stylesheet can't say it ("#MenuRow:hover
-    #MenuRowText" is matched by every row: Qt ignores an ancestor's pseudo-state), so the label gets a hover
-    property here and is re-polished."""
+    """A menu row's label takes the accent's own text colour on the row's accent hover. The stylesheet can't say
+    it ("#MenuRow:hover #MenuRowText" is matched by every row: Qt ignores an ancestor's pseudo-state), so the label
+    gets a hover property here and is re-polished."""
 
     def eventFilter(self, obj, e):
         t = e.type()
@@ -545,7 +656,7 @@ class _Ring(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        color = QColor(ORANGE if MODE == "dark" else ORANGE_DEEP)
+        color = QColor(ACCENT if MODE == "dark" else ACCENT_DEEP)
         color.setAlphaF(0.9)
         p.setPen(QPen(color, 2))
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
@@ -600,13 +711,14 @@ class FocusRing(QObject):
 
 
 def dialog_background() -> str:
-    return "#1C1C1E" if MODE == "dark" else "#F2F2F7"
+    """The glass's colour, "#RRGGBB" (the tint the look paints, opaque)."""
+    return _hex(TINT)
 
 
 def dismiss_button(tip: str = "", name: str = ""):
     """The ✕ that takes a note, a tip, a pin or a toast away: one glyph at one size everywhere, grey (only the
-    window's own close is orange, at the same size). Each place had its own: a 14 px glyph, a text "✕" in another
-    font, an 11 px window close (VIS-13)."""
+    window's own close is in the accent, at the same size). Each place had its own: a 14 px glyph, a text "✕" in
+    another font, an 11 px window close (VIS-13)."""
     from PySide6.QtWidgets import QToolButton
     b = QToolButton(objectName="Icon", text=ICON["close"])
     b.setProperty("dismiss", True)
