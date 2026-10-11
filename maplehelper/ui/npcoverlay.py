@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
                                QSizePolicy, QStyle, QStyleOptionButton, QStylePainter, QToolButton, QVBoxLayout,
                                QWidget)
@@ -29,6 +29,7 @@ from . import mapview, theme
 from .controls import FlowLayout
 from .glass import SHADOW, EdgeResize
 from .location import LOCATION
+from .lookpick import line_icon
 from .regionpick import from_capture
 from .theme import ACCENTS, LIGHT_TINTS, TINTS
 from .widgets import fit_picture, zoom_on_hover
@@ -55,7 +56,6 @@ KEYS_CHECK_MS = 400                 # after the filter box asked for the keyboar
 SYMBOL_FONT = "Segoe UI Symbol"     # the glyphs below in one font (Segoe UI lacks ↖ and ↘: a mix looked uneven)
 DOOR = "\U0001F6AA\ufe0e"           # a building's heading (U+FE0E: the plain glyph, not the colour emoji)
 NO_MAP, NO_NPCS = "\U0001F5FA\ufe0e", "\U0001F465\ufe0e"     # the empty list's card: a map, two people
-MAGNIFIER = "\U0001F50D\ufe0e"      # in the filter box
 DOOR_COLOR = "#F5B642"              # a door's orange, as the guide's picture dots it (mapview's portal)
 # the way to the picked NPC, by direction()'s key: an arrow pointing it on the screen (the same in Hebrew: the
 # screen's left is the player's left), or, with no way to point, a mark for where it is
@@ -449,24 +449,6 @@ def _wrapping(name: str) -> QLabel:
     label.setWordWrap(True)
     label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
     return label
-
-
-def _glyph_icon(glyph: str, color: QColor, px: int = 16) -> QIcon:
-    """A font glyph as a small icon (the filter box's magnifier and ✕), drawn at the screen's own pixels."""
-    screen = QGuiApplication.primaryScreen()
-    ratio = screen.devicePixelRatio() if screen is not None else 1.0
-    pm = QPixmap(round(px * ratio), round(px * ratio))
-    pm.setDevicePixelRatio(ratio)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    font = QFont(SYMBOL_FONT)
-    font.setPixelSize(round(px * 0.75))
-    p.setFont(font)
-    p.setPen(color)
-    p.drawText(QRectF(0, 0, px, px), Qt.AlignCenter, glyph)
-    p.end()
-    return QIcon(pm)
 
 
 def _foreground() -> int:
@@ -973,10 +955,11 @@ class NpcOverlay(EdgeResize, QWidget):
         _paint_glass(self, self._opacity)
 
     def _filter_icons(self) -> None:
-        """The filter box's magnifier and ✕ in the palette's muted colour (redrawn when the glass flips)."""
-        muted = theme.qcolor(palette().muted)
-        self._filter_find.setIcon(_glyph_icon(MAGNIFIER, muted))
-        self._filter_clear.setIcon(_glyph_icon(theme.SYMBOL_ICONS["close"], muted))
+        """The filter box's magnifier and ✕ in the palette's muted colour (redrawn when the glass flips): Lucide line
+        icons recoloured as drawn (a font's 🔍 came out as macOS's colour emoji, grey on every glass)."""
+        muted = palette().muted
+        self._filter_find.setIcon(line_icon("search", muted))
+        self._filter_clear.setIcon(line_icon("x", muted))
 
     # ------------------------------------------------------------ text (all of it, for apply_language)
 
