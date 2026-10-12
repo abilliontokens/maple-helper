@@ -109,7 +109,8 @@ def test_a_log_writes_a_pickup_once_no_read_can_change_it(scanner):
     s.end()
     assert sorted(_rows("SELECT kind, amount FROM events WHERE log_id = ?", log_id)) == [("exp", 21), ("mesos", 26)]
     assert _rows("SELECT ended IS NOT NULL FROM logs WHERE id = ?", log_id) == [(1,)]
-    assert lootdb.day(p.active.id, dt.date.today()).value == 26
+    # on the pickup's own day: run just after midnight (CI's 00:01 UTC), 100 s ago was yesterday
+    assert lootdb.day(p.active.id, dt.date.fromtimestamp(settled.t)).value == 26
 
 
 def test_closing_the_app_writes_every_pickup_and_the_log_goes_on_after(scanner, kb):
