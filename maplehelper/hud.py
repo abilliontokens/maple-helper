@@ -23,7 +23,8 @@ _TABLE_FIT = 0.02     # the EXP a level needs, worked out from points / percent,
 _MIN_PCT = 1.0        # under 1% the percentage's two decimals are too coarse to work the level out
 _HP = re.compile(r"HP\W*(\d+)\s*/\s*(\d+)", re.I)
 _MP = re.compile(r"MP\W*(\d+)\s*/\s*(\d+)", re.I)
-_EXP = re.compile(r"EXP\W*(\d+)\s*\[?\s*(\d+(?:[.,]\d+)?)\s*%", re.I)
+# the points may carry a thousands separator, read as "," or "." ("EXP 10.371[35.79%]" live, 2026-10-12: 10,371)
+_EXP = re.compile(r"EXP\W*(\d{1,3}(?:[.,]\d{3})+|\d+)\s*\[?\s*(\d+(?:[.,]\d+)?)\s*%", re.I)
 _CHROME = ("cash shop", "menu", "short-cut", "shortcut", "lv")
 
 _engine_lock = threading.Lock()
@@ -101,7 +102,7 @@ def parse(rows: list[tuple[str, float, float]], table: dict[int, int]) -> Hud | 
     hp, mp, ex = _HP.search(text), _MP.search(text), _EXP.search(text)
     if not ex and not hp:
         return None
-    exp = int(ex.group(1)) if ex else None
+    exp = int(re.sub(r"[.,]", "", ex.group(1))) if ex else None
     pct = float(ex.group(2).replace(",", ".")) if ex else None
     if pct is not None and not 0 <= pct <= 100:
         exp, pct = None, None
@@ -132,9 +133,16 @@ def read(img: Image.Image, table: dict[int, int]) -> Hud | None:
     if img is None or img.height < 100:
         return None
     w, h = img.size
-    strip = np.asarray(img.convert("RGB").crop((0, int(h * (1 - STRIP)), w, h)))
+    return read_strip(img.crop((0, int(h * (1 - STRIP)), w, h)), table)
+
+
+def read_strip(img: Image.Image, table: dict[int, int]) -> Hud | None:
+    """The bar in a grab of only the play area's bottom STRIP (the grind's samples grab just that: ui/lootscan.py);
+    None when it can't be read."""
+    if img is None or not img.width or not img.height:
+        return None
     try:
-        return parse(_rows(strip), table)
+        return parse(_rows(np.asarray(img.convert("RGB"))), table)
     except Exception:  # noqa: BLE001 - a bad read is no read; the caller falls back to the AI
         log.debug("HUD read failed", exc_info=True)
         return None

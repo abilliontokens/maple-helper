@@ -1,18 +1,18 @@
 """The little bar over the game: the NPCs-here window's own switch, the searches — where a monster lives, any NPC,
 any map, any item, and whether an item is safe to sell (each asks the app to open ui/gamesearch.py in that mode) —
-the loot log, and Tools: a little card with the tool windows (Scrolls, Gear, Crafting). Like the NPCs window it
-floats over the game: frameless, always on top, never taking the keyboard from it (clicks still work), glass the
-minimap reads never see. Its ends are draggable (its sides; its top and bottom when the ◯ before the grip stands it
-upright): the buttons wrap into as many lines as the length leaves room for, the other side following, and show their
-icons alone once the words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width
-(game_toolbar_height upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's
-colour: small beside the words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙
-beside the ✕ opens the panel with the look of every window over the game, the icons mode, the bar's show/hide key
-and Cabs & Teleports (_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the
-player left it is kept in game_toolbar_pos; with none saved it opens just above the game's minimap window (found
-at the game's top left, else the box the player drew) and follows it until moved. Every colour is read from
-npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark text on the
-white one."""
+the loot log, the grind bar (ui/grindbar.py), and Tools: a little card with the tool windows (Scrolls, Gear,
+Crafting). Like the NPCs window it floats over the game: frameless, always on top, never taking the keyboard from it
+(clicks still work), glass the minimap reads never see. Its ends are draggable (its sides; its top and bottom when
+the ◯ before the grip stands it upright): the buttons wrap into as many lines as the length leaves room for, the
+other side following, and show their icons alone once the words would take more than WORD_LINES_MAX lines; the
+length is kept in game_toolbar_width (game_toolbar_height upright). Each button has a line icon (assets/icons/toolbar,
+Lucide's) drawn in its text's colour: small beside the words, or alone (a short bar, or the ⚙'s icons mode) with the
+name in the tooltip. The ⚙ beside the ✕ opens the panel with the look of every window over the game, the icons mode,
+the bar's show/hide key and Cabs & Teleports (_SettingsPanel below); the ✕ hides the bar (the app then says how to
+bring it back). Where the player left it is kept in game_toolbar_pos; with none saved it opens just above the game's
+minimap window (found at the game's top left, else the box the player drew) and follows it until moved. Every colour
+is read from npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark
+text on the white one."""
 from __future__ import annotations
 
 import time
@@ -74,8 +74,8 @@ KINDS = {"monster_npc": "tb_monster_npc", "map": "tb_maps", "item": "tb_items", 
 TOOLS = {"scroll_planner": "tb_scrolls", "gear_advisor": "tb_gear", "craft_advisor": "tb_craft"}
 # each button's line icon, by its i18n key: assets/icons/toolbar/<name>.svg (Lucide's, its LICENSE beside them)
 ICONS = {"tb_npcs_here": "users", "tb_monster_npc": "ghost", "tb_maps": "map", "tb_items": "backpack",
-         "tb_sell": "coins", "tb_loot": "scroll-text", "tb_tools": "toolbox", "tb_scrolls": "sparkles",
-         "tb_gear": "shield", "tb_craft": "hammer"}
+         "tb_sell": "coins", "tb_loot": "scroll-text", "tb_grind": "swords", "tb_tools": "toolbox",
+         "tb_scrolls": "sparkles", "tb_gear": "shield", "tb_craft": "hammer"}
 AWAY_MS = 1000          # the mouse this long off the Tools card and its button: the card goes
 AWAY_POLL_MS = 150      # ... checked this often while it is up (it takes no focus to lose)
 ICON_PX = 18            # an icon alone on its button (icons mode)
@@ -705,6 +705,7 @@ class GameToolbar(EdgeResize, QWidget):
     npc_toggled = Signal()             # settings["npc_overlay"] flipped: the NPCs-here window follows
     rides_toggled = Signal()           # the ⚙ panel's Cabs & Teleports flipped settings["game_rides"]: a way shown follows
     loot_toggled = Signal()            # settings["loot_overlay"] flipped: the loot log's window follows
+    grind_toggled = Signal()           # settings["grind_bar"] flipped: the grind bar over the game follows
     tool_toggled = Signal(str)         # a TOOLS setting flipped (the Tools card's buttons): its window follows
     look_changed = Signal()            # a ⚙ panel choice: every window over the game re-styles and repaints
     closed = Signal()                  # the ✕ turned the bar off: Settings' switch and the tray item follow
@@ -777,6 +778,12 @@ class GameToolbar(EdgeResize, QWidget):
         self._loot.setFocusPolicy(Qt.NoFocus)
         self._loot.clicked.connect(self._loot_clicked)
         self._flow.addWidget(self._loot)
+        # the grind bar over the game, as Loot Log is its window's: the checkable button is the setting
+        self._grind = QPushButton(checkable=True)
+        self._grind.setCursor(Qt.PointingHandCursor)
+        self._grind.setFocusPolicy(Qt.NoFocus)
+        self._grind.clicked.connect(self._grind_clicked)
+        self._flow.addWidget(self._grind)
         # Tools: the card with the scroll planner's, gear advisor's and crafting advisor's switches, lit while it is up
         self._tools_btn = QPushButton()
         self._tools_btn.setCursor(Qt.PointingHandCursor)
@@ -809,6 +816,7 @@ class GameToolbar(EdgeResize, QWidget):
         for kind, key in KINDS.items():
             yield self._search[kind], key
         yield self._loot, "tb_loot"
+        yield self._grind, "tb_grind"
         yield self._tools_btn, "tb_tools"
 
     def _paint_icon(self, b: QPushButton, key: str) -> None:
@@ -984,6 +992,11 @@ class GameToolbar(EdgeResize, QWidget):
         self._settings["loot_overlay"] = self._loot.isChecked()
         self.loot_toggled.emit()
 
+    def _grind_clicked(self, _=False) -> None:
+        """The grind bar on or off: the button is the setting (the bar has its own Start, Pause and Stop)."""
+        self._settings["grind_bar"] = self._grind.isChecked()
+        self.grind_toggled.emit()
+
     def _tools_clicked(self, _=False) -> None:
         """Tools: its card with the tool windows beside the button, or gone when it is up."""
         if self._menu.isVisible():
@@ -1137,6 +1150,7 @@ class GameToolbar(EdgeResize, QWidget):
         self.opacity_followed()
         self._npcs.setChecked(bool(self._settings["npc_overlay"]))
         self._loot.setChecked(bool(self._settings["loot_overlay"]))
+        self._grind.setChecked(bool(self._settings["grind_bar"]))
         for key, b in self._tools.items():
             b.setChecked(bool(self._settings[key]))
         if not self._settings["game_toolbar"]:

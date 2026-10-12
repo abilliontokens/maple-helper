@@ -188,6 +188,12 @@ DEFAULT_SETTINGS = {
     "loot_overlay": False,        # the loot log's window over the game (ui/lootoverlay.py); a log starting turns it on
     "loot_overlay_pos": None,     # ... where the player left it: {"x","y"} in screen pixels
     "loot_overlay_folded": False,  # ... folded to its title row (its – button)
+    "grind_bar": False,           # the grind bar over the game (ui/grindbar.py), the bar's Grind button; on: an EXP read starts a run
+    "grind_bar_geom": None,       # ... where the player left it and its size: {"x","y","w","h"}; None: over the game's bottom
+    "grind_window": False,        # the grind window over the game (ui/grindwindow.py): the bar clicked opens it
+    "grind_window_geom": None,    # ... where the player left it: {"x","y","w","h"}; None: where it first opens
+    "grind_goals": [],            # the player's grind goals (grindlive.Goal.to_json): a level, an item count, mesos
+    "grind_low_hp": 0.3,          # a toast when HP drops under this share of the max during a run (0: never)
     "scroll_planner": False,      # the scroll planner's window over the game (ui/scrollplanner.py): the bar's Tools > Scrolls
     "scroll_planner_geom": None,  # ... where the player left it: {"x","y","w","h"}; None: under the bar
     "gear_advisor": False,        # the gear upgrade advisor's window over the game (ui/gearadvisor.py): the bar's Tools > Gear

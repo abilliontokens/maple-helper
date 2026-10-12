@@ -213,6 +213,61 @@ def test_old_events_stay_in_the_totals(monkeypatch):
     assert lootlog.Log.from_json(json.loads(json.dumps(lg.to_json()))).totals()[1] == 50
 
 
+def test_an_events_map_kill_and_level_are_kept_and_an_older_event_loads_without_them():
+    ev = lootlog.Event(5.0, "exp", 21, map="102000000", monster="monster/dark-stump", level=12)
+    assert lootlog.Event.from_json(json.loads(json.dumps(ev.to_json()))) == ev
+    old = lootlog.Event.from_json({"t": 5.0, "kind": "mesos", "amount": 27})
+    assert (old.map, old.monster, old.level) == ("", "", None)
+    assert lootlog.Event.from_json({"t": 5.0, "kind": "exp", "amount": 3, "level": True}).level is None
+
+
+def test_a_logs_bar_reads_and_pauses_are_kept(monkeypatch):
+    monkeypatch.setattr(lootlog, "MAX_SAMPLES", 3)
+    lg = lootlog.Log(start=0.0)
+    for i in range(5):
+        lg.add_sample(lootlog.HudSample(float(i), "102000000", 10, 200 + i, 11.5, 431, 444))
+    lg.add_sample(lootlog.HudSample(5.0))                   # a read with nothing but its time
+    assert [s.t for s in lg.samples] == [3.0, 4.0, 5.0]     # the newest kept
+    assert not lg.paused
+    lg.pause(10.0)
+    lg.pause(11.0)                                          # already paused: the same pause
+    lg.resume(20.0)
+    lg.resume(21.0)                                         # not paused: nothing to end
+    lg.pause(30.0)
+    assert lg.paused and lg.pauses == [[10.0, 20.0], [30.0, None]]
+    back = lootlog.Log.from_json(json.loads(json.dumps(lg.to_json())))
+    assert back.samples == lg.samples and back.pauses == lg.pauses and back.paused
+    assert back.samples[0] == lootlog.HudSample(3.0, "102000000", 10, 203, 11.5, 431, 444)
+    assert back.samples[-1] == lootlog.HudSample(5.0)
+
+
+def test_an_older_loot_json_log_loads_without_bar_reads_pauses_or_maps(isolated_store):
+    """loot.json as the version before kept it: the running log goes on, with none of the grind's fields."""
+    old = {"start": 1000.0, "ended": None, "db_id": 4, "events": [{"t": 1010.0, "kind": "exp", "amount": 21}],
+           "base": {"exp": 5, "mesos": 0, "items": {}}}
+    lootlog.Store.path.write_text(json.dumps({"active": {"c1": old}, "recent": {}}), encoding="utf-8")
+    lg = lootlog.Store().running("c1")
+    assert lg.samples == [] and lg.pauses == [] and not lg.paused and lg.db_id == 4 and lg.totals()[0] == 26
+    assert (lg.events[0].map, lg.events[0].monster, lg.events[0].level) == ("", "", None)
+    # what isn't a bar read or a pause loads as none
+    lg = lootlog.Log.from_json(old | {"samples": [{"map": "x"}, "y", {"t": 1.0, "hp": "5"}],
+                                      "pauses": [[1.0], [2.0, "z"], [3.0, None]]})
+    assert lg.samples == [lootlog.HudSample(1.0)] and lg.pauses == [[3.0, None]]
+
+
+@needs_kb
+def test_a_log_ended_while_paused_ends_its_pause(kb, isolated_store):
+    st = lootlog.Store()
+    lg = st.start("c1", kb, now=1000.0)
+    lg.add([lootlog.Event(1010.0, "exp", 21, map="102000000", level=12)])
+    lg.pause(1100.0)
+    st.put("c1", lg)
+    st.start("c2", kb, now=1300.0)                          # (another log ends it, as loot.json has it)
+    ended = lootlog.Store().log("c1")
+    assert ended.ended == 1300.0 and ended.pauses == [[1100.0, 1300.0]] and not ended.paused
+    assert (ended.events[0].map, ended.events[0].level) == ("102000000", 12)
+
+
 @needs_kb
 def test_value_counts_mesos_and_what_an_npc_pays(kb):
     lg = lootlog.Log(start=0, ended=600)

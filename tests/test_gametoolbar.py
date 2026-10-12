@@ -178,13 +178,14 @@ def test_each_tool_in_the_tools_card_is_its_windows_setting(bar, key, text):
 
 
 def test_tools_opens_its_card_under_the_bar_and_a_pick_tools_again_or_a_move_closes_it(bar):
-    """Tools, after Loot Log, lit while its card is up; the card under the lying bar holds the three tools. It goes
-    on a pick (the window opening), on Tools again, and when the bar is dragged away."""
+    """Tools, after Loot Log and Grind, lit while its card is up; the card under the lying bar holds the three tools.
+    It goes on a pick (the window opening), on Tools again, and when the bar is dragged away."""
     from maplehelper.ui import gametoolbar
     w, s = bar
     w.refresh()
     keys = [key for _, key in w._buttons()]
-    assert keys[keys.index("tb_loot") + 1] == "tb_tools" and w._tools_btn.text() == "Tools"
+    at = keys.index("tb_loot")
+    assert keys[at + 1:at + 3] == ["tb_grind", "tb_tools"] and w._tools_btn.text() == "Tools"
     assert [b.text() for b in w._tools.values()] == ["Scrolls", "Gear", "Crafting"] and not w._menu.isVisible()
     w._tools_btn.click()
     m = w._menu
