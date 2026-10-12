@@ -11,6 +11,10 @@ from maplehelper import lootlog
 FIX = Path(__file__).resolve().parent / "fixtures"
 REAL_KB = Path(__file__).resolve().parent.parent / "data" / "kb"
 needs_kb = pytest.mark.skipif(not (REAL_KB / "index.json").exists(), reason="no real knowledge base")
+# the two Cash hats the live KB has and cut-off reads were matched to (59 Green Mushroom Caps logged as the hat): a KB
+# from before them gets them as the live one has them
+LIVE_HATS = {"item/3551": "Green Mushroom Hat", "item/3285": "Blue Mushroom Hat"}
+GREEN_CAP = "item/360"
 
 
 @pytest.fixture(scope="module")
@@ -21,6 +25,28 @@ def kb():
     return KnowledgeBase(REAL_KB)
 
 
+@pytest.fixture(scope="module")
+def live_kb():
+    """The real KB with the live KB's Cash hats (its own copy: the other tests' KB stays as it is)."""
+    if not (REAL_KB / "index.json").exists():
+        pytest.skip("no real knowledge base")
+    from maplehelper.kb import KnowledgeBase
+    kb = KnowledgeBase(REAL_KB)
+    for key, name in LIVE_HATS.items():
+        kb.entities.setdefault(key, {"key": key, "id": key.split("/")[1], "name": name, "category": "item",
+                                     "type": "Cash Equip / Cash Hat"})
+    return kb
+
+
+def _items(**names: str) -> dict[str, str]:
+    """item_names' shape for a few names: {lower name: key, "\\0" + lower: name}."""
+    out = {}
+    for key, name in names.items():
+        out[name.lower()] = key.replace("_", "/")
+        out["\0" + name.lower()] = name
+    return out
+
+
 def _live_reads() -> dict[float, list]:
     """Every read (2 a second for 5 minutes) of a live session's messages box: OCR rows (text, y centre, height)."""
     raw = json.loads((FIX / "loot_reads_live.json").read_text(encoding="utf-8"))
@@ -28,7 +54,7 @@ def _live_reads() -> dict[float, list]:
 
 
 def _replay(kb, reads: dict, step: int = 1) -> lootlog.Log:
-    tr = lootlog.Tracker(lootlog.item_names(kb))
+    tr = lootlog.Tracker(lootlog.item_names(kb), lootlog.drop_keys(kb))
     lg = lootlog.Log(start=0)
     for t in sorted(reads)[::step]:
         lg.add(tr.read(reads[t], t))
@@ -213,12 +239,16 @@ def test_old_events_stay_in_the_totals(monkeypatch):
     assert lootlog.Log.from_json(json.loads(json.dumps(lg.to_json()))).totals()[1] == 50
 
 
-def test_an_events_map_kill_and_level_are_kept_and_an_older_event_loads_without_them():
-    ev = lootlog.Event(5.0, "exp", 21, map="102000000", monster="monster/dark-stump", level=12)
+def test_an_events_map_and_level_are_kept_and_an_older_event_loads_without_them():
+    ev = lootlog.Event(5.0, "exp", 21, map="102000000", level=12)
     assert lootlog.Event.from_json(json.loads(json.dumps(ev.to_json()))) == ev
     old = lootlog.Event.from_json({"t": 5.0, "kind": "mesos", "amount": 27})
-    assert (old.map, old.monster, old.level) == ("", "", None)
+    assert (old.map, old.level) == ("", None)
     assert lootlog.Event.from_json({"t": 5.0, "kind": "exp", "amount": 3, "level": True}).level is None
+    # an EXP gain saved with the kill it was matched to (before kills went): loads, the kill left out
+    tagged = lootlog.Event.from_json({"t": 5.0, "kind": "exp", "amount": 21, "map": "102000000",
+                                      "monster": "monster/dark-stump", "level": 12})
+    assert tagged == ev and "monster" not in tagged.to_json() and not hasattr(tagged, "monster")
 
 
 def test_a_logs_bar_reads_and_pauses_are_kept(monkeypatch):
@@ -248,7 +278,7 @@ def test_an_older_loot_json_log_loads_without_bar_reads_pauses_or_maps(isolated_
     lootlog.Store.path.write_text(json.dumps({"active": {"c1": old}, "recent": {}}), encoding="utf-8")
     lg = lootlog.Store().running("c1")
     assert lg.samples == [] and lg.pauses == [] and not lg.paused and lg.db_id == 4 and lg.totals()[0] == 26
-    assert (lg.events[0].map, lg.events[0].monster, lg.events[0].level) == ("", "", None)
+    assert (lg.events[0].map, lg.events[0].level) == ("", None)
     # what isn't a bar read or a pause loads as none
     lg = lootlog.Log.from_json(old | {"samples": [{"map": "x"}, "y", {"t": 1.0, "hp": "5"}],
                                       "pauses": [[1.0], [2.0, "z"], [3.0, None]]})
@@ -277,3 +307,67 @@ def test_value_counts_mesos_and_what_an_npc_pays(kb):
     leaf = next(i for i in sm.items if i[0] == "Leaf")
     assert leaf[3] and sm.value == 100 + 3 * leaf[3] and sm.picked == 4
     assert sm.mesos_h == 600 and sm.value_h == round(sm.value * 6)
+
+
+# ------------------------------------------------------------ item names
+
+@needs_kb
+def test_a_cut_off_name_is_the_monster_drop_never_a_cash_item(live_kb):
+    """Live: 59 Green Mushroom Caps were logged as the Green Mushroom Hat (a Cash Hat) and 14 Blue Mushroom Caps as
+    the Blue Mushroom Hat: a read cut off to "Green Mushroom" is as close to either name, and difflib took the hat."""
+    kb = live_kb
+    assert {k: kb.get(k)["name"] for k in LIVE_HATS} == LIVE_HATS
+    names = lootlog.item_names(kb)
+    tr = lootlog.Tracker(names, lootlog.drop_keys(kb))
+    blue = names["blue mushroom cap"]
+    assert tr.resolve("Green Mushroom") == ("Green Mushroom Cap", GREEN_CAP)
+    assert tr.resolve("Blue Mushroom") == ("Blue Mushroom Cap", blue) and blue != "item/3285"
+    assert tr.resolve("Green Mushroom Cap") == tr.resolve("green mushroom cap") == ("Green Mushroom Cap", GREEN_CAP)
+    # no Cash item is a name a pickup message has: never one's key, by its own name or any read
+    cash = lootlog.unpickable_keys(kb)
+    assert set(LIVE_HATS) <= cash and len(cash) > 100 and GREEN_CAP not in cash
+    assert not cash & {v for n, v in names.items() if not n.startswith("\0")}
+    for key in sorted(cash)[::25] + sorted(LIVE_HATS):
+        assert tr.resolve(kb.get(key)["name"])[1] not in cash, key
+
+
+def test_names_tied_for_the_closest_are_no_guess_unless_one_is_a_drop():
+    items = _items(item_1="Green Mushroom Cap", item_2="Green Mushroom Hat")
+    assert lootlog.Tracker(items).resolve("Green Mushroom") == ("Green Mushroom", "")
+    assert lootlog.Tracker(items, {"item/7"}).resolve("Green Mushroom") == ("Green Mushroom", "")
+    assert lootlog.Tracker(items, {"item/2"}).resolve("Green Mushroom") == ("Green Mushroom Hat", "item/2")
+    assert lootlog.Tracker(items, {"item/1", "item/2"}).resolve("Green Mushroom") == ("Green Mushroom", "")
+    # the closest alone is taken, a drop or not; too far from any name, none
+    assert lootlog.Tracker(items).resolve("Green Mushroom Ca") == ("Green Mushroom Cap", "item/1")
+    assert lootlog.Tracker(items).resolve("Blue Snail Shell") == ("Blue Snail Shell", "")
+    assert lootlog.Tracker(items).resolve("") == ("", "")
+    # a pickup line read as the tie counts with the read name, no key (never another item's)
+    tr = lootlog.Tracker(items)
+    tr.read([("You received EXP (+30)", 128.0, 14.0)], 0.0)
+    new = tr.read([("You received EXP (+30)", 100.0, 14.0), ("Green Mushroom x1 earned. (Etc)", 128.0, 14.0)], 0.5)
+    assert [(e.kind, e.name, e.key) for e in new] == [("item", "Green Mushroom", "")]
+
+
+def test_the_store_names_again_items_logged_as_one_no_pickup_names(isolated_store):
+    """loot.json's logs and Recent logs' tops: the Cash hat a cut-off read was matched to becomes the cap."""
+    tr = lootlog.Tracker(_items(item_360="Green Mushroom Cap", item_358="Leaf"), {GREEN_CAP})
+    bad = {"item/3551"}
+    lg = lootlog.Log(start=0.0, events=[lootlog.Event(1.0, "item", 1, "Green Mushroom Hat", "item/3551", saved=True),
+                                         lootlog.Event(2.0, "item", 2, "Leaf", "item/358"),
+                                         lootlog.Event(3.0, "exp", 5),
+                                         lootlog.Event(4.0, "item", 1, "Mystery Hat", "item/3551")])
+    lg.base["items"] = {"Green Mushroom Hat": [4, "item/3551"], "Green Mushroom Cap": [1, GREEN_CAP]}
+    rec = {"start": 0.0, "seconds": 60, "exp": 0, "mesos": 0, "picked": 64, "value": 0,
+           "top": [["Green Mushroom Hat", 59], ["Leaf", 3], ["Green Mushroom Cap", 2]]}
+    lootlog.Store.path.write_text(json.dumps({"active": {"c1": lg.to_json()}, "recent": {"c1": [rec]}}),
+                                  encoding="utf-8")
+    assert lootlog.Store().repair(tr.resolve, bad) == 3     # an event, the older ones' totals, a top
+    st = lootlog.Store()
+    got = st.log("c1")
+    assert [(e.name, e.key, e.saved) for e in got.events if e.kind == "item"] == [
+        ("Green Mushroom Cap", GREEN_CAP, True), ("Leaf", "item/358", False),
+        ("Mystery Hat", "item/3551", False)]                # (no item it reads as: kept as it was)
+    assert got.totals()[2] == {"Green Mushroom Cap": [6, GREEN_CAP], "Leaf": [2, "item/358"],
+                               "Mystery Hat": [1, "item/3551"]}
+    assert st.recent("c1")[0]["top"] == [["Green Mushroom Cap", 61], ["Leaf", 3]]
+    assert st.repair(tr.resolve, bad) == 0                  # nothing left to fix

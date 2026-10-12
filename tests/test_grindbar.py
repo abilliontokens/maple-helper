@@ -1,4 +1,4 @@
-"""The grind bar over the game (ui/grindbar.py): shown from its own setting, its six segments filled from
+"""The grind bar over the game (ui/grindbar.py): shown from its own setting, its five segments filled from
 grindlive.live (every figure "–" with no run, the first goal still to reach in the right slot), the dot's colour by how
 the run stands, Pause / Resume / Stop / Start asking the scanner, a click on its body (never on a button or its dots)
 opening the grind window, every size following its height, its default size the game's megaphone strip, its place
@@ -64,14 +64,14 @@ class FakeScanner(QObject):
 
 
 def _live(running=True, **kw):
-    """A grindlive.Live as the bar reads it: Ant Tunnel I, 42:10, 18,400 / 412 / 14,200 an hour, Lv. 31 at 63 %."""
-    rates = SimpleNamespace(exp_h=18400, kills_h=412, mesos_h=9000, loot_h=6400, potions_h=1200, profit_h=14200,
+    """A grindlive.Live as the bar reads it: Ant Tunnel I, 42:10, 18,400 / 14,200 an hour, Lv. 31 at 63 %, the last
+    drop 4.2 an hour."""
+    rates = SimpleNamespace(exp_h=18400, mesos_h=9000, loot_h=6400, potions_h=1200, profit_h=14200,
                             active_s=42 * 60 + 10)
     base = dict(running=running, state="running" if running else "stopped", map_id="105070001",
                 map_name="Ant Tunnel I", wall_s=2700.0, session=rates, recent=rates, level=31, exp_pct=63.4,
-                to_level_s=38 * 60, kills=[], last_drop=("Horny Mushroom Cap", "item/4000020", 18), capacity_h=None,
-                kill_share=None, warnings=[], deaths=0, potions=0, potion_cost=0, level_ups=[], goals=[],
-                move_on=None)
+                to_level_s=38 * 60, last_drop=("Horny Mushroom Cap", "item/4000020", 4.2), warnings=[], deaths=0,
+                potions=0, potion_cost=0, level_ups=[], goals=[], move_on=None)
     return SimpleNamespace(**{**base, **kw})
 
 
@@ -132,13 +132,13 @@ def test_its_right_click_hide_turns_the_setting_off_and_says_so(bar):
 
 # ------------------------------------------------------------ what it shows
 
-def test_its_six_segments_say_the_run(bar):
+def test_its_five_segments_say_the_run(bar):
     w = bar.w
     w.refresh()
     assert w.texts() == {"map": ("ANT TUNNEL I", "42:10"), "exp": ("EXP / HR", "18,400"),
-                         "kills": ("KILLS / HR", "412"), "profit": ("PROFIT / HR", "14,200"),
+                         "profit": ("PROFIT / HR", "14,200"),
                          "level": ("LV. 31 → 32 · ABOUT 38 MIN", "63%"),
-                         "slot": ("LAST DROP · 1 IN 18", "Horny Mushroom Cap")}
+                         "slot": ("LAST DROP · 4.2 / HR", "Horny Mushroom Cap")}
     assert w._progress.value == pytest.approx(0.634)
     assert bar.asked[-1] == (None, [])              # the scanner's log for its character, the settings' goals
 
@@ -148,7 +148,7 @@ def test_with_no_run_every_figure_is_a_dash_and_start_shows(bar):
     bar.shown["live"] = _live(running=False)
     w.refresh()
     texts = w.texts()
-    assert [v for _label, v in texts.values()] == ["–"] * 6
+    assert [v for _label, v in texts.values()] == ["–"] * 5
     assert texts["map"][0] == "MAP" and texts["level"][0] == "LEVEL" and texts["slot"][0] == "LAST DROP"
     assert w._progress.value is None
     assert w._start.isVisibleTo(w) and not w._pause.isVisibleTo(w) and not w._stop.isVisibleTo(w)
@@ -157,13 +157,21 @@ def test_with_no_run_every_figure_is_a_dash_and_start_shows(bar):
 
 def test_long_figures_are_shortened_and_an_hour_shows_in_the_clock(bar):
     w = bar.w
-    rates = SimpleNamespace(exp_h=1_840_000, kills_h=4120, profit_h=-1200, active_s=3 * 3600 + 42 * 60 + 10)
+    rates = SimpleNamespace(exp_h=1_840_000, profit_h=-1200, active_s=3 * 3600 + 42 * 60 + 10)
     bar.shown["live"] = _live(session=rates, to_level_s=75 * 60, last_drop=("Horny Mushroom Cap", "item/4000020", None))
     w.refresh()
     t = w.texts()
-    assert t["map"][1] == "3:42:10" and t["exp"][1] == "1.84M" and t["kills"][1] == "4,120"
+    assert t["map"][1] == "3:42:10" and t["exp"][1] == "1.84M"
     assert t["profit"][1] == "-1,200" and t["level"][0] == "LV. 31 → 32 · ABOUT 1:15 H"
-    assert t["slot"][0] == "LAST DROP"              # no rate known yet: no "1 in"
+    assert t["slot"][0] == "LAST DROP"              # under a minute: no rate yet
+
+
+@pytest.mark.parametrize("per_h,said", [(0.25, "0.2"), (4.2, "4.2"), (9.96, "10"), (18.4, "18"), (1234.6, "1,235")])
+def test_the_last_drops_rate_has_one_decimal_under_ten_and_is_whole_above(bar, per_h, said):
+    w = bar.w
+    bar.shown["live"] = _live(last_drop=("Horny Mushroom Cap", "item/4000020", per_h))
+    w.refresh()
+    assert w.texts()["slot"] == (f"LAST DROP · {said} / HR", "Horny Mushroom Cap")
 
 
 def test_the_first_goal_still_to_reach_takes_the_right_slot(bar):
@@ -324,7 +332,7 @@ def test_in_hebrew_the_row_is_mirrored_and_the_progress_fills_from_the_right(bar
     _pump()
     assert w.layoutDirection() == Qt.RightToLeft
     x = lambda part: part.mapTo(w, part.rect().topLeft()).x()
-    assert x(w._grip) > x(w._map) > x(w._exp) > x(w._kills) > x(w._profit) > x(w._level) > x(w._slot)
+    assert x(w._grip) > x(w._map) > x(w._exp) > x(w._profit) > x(w._level) > x(w._slot)
     assert x(w._slot) > x(w._pause) > x(w._stop)
     assert x(w._grip) + w._grip.width() > w.width() - 2 * w.unit       # at the edge, not just right of the middle
     assert w._progress.isRightToLeft()
@@ -341,13 +349,13 @@ def test_in_hebrew_the_labels_are_hebrew_and_the_figures_keep_their_digits(bar):
     w.apply_language(I18n("he"))
     texts = {k: (_bare(label), _bare(value)) for k, (label, value) in w.texts().items()}
     assert texts == {"map": ("Ant Tunnel I", "42:10"), "exp": ("EXP לשעה", "18,400"),
-                     "kills": ("הריגות לשעה", "412"), "profit": ("רווח לשעה", "14,200"),
+                     "profit": ("רווח לשעה", "14,200"),
                      "level": ("רמה 31 → 32 · בערך 38 דק'", "63%"),
-                     "slot": ("השלל האחרון · 1 לכל 18", "Horny Mushroom Cap")}
+                     "slot": ("השלל האחרון · 4.2 לשעה", "Horny Mushroom Cap")}
     # each figure one left-to-right block in its right-to-left line: "42:10" and "18,400" never read backwards
-    for fig, shown in ((w._time, "42:10"), (w._exp_fig, "18,400"), (w._kills_fig, "412"), (w._profit_fig, "14,200"),
-                       (w._pct, "63%")):
+    for fig, shown in ((w._time, "42:10"), (w._exp_fig, "18,400"), (w._profit_fig, "14,200"), (w._pct, "63%")):
         assert fig.text() == f"{bidi.RLM}{bidi.LRI}{shown}{bidi.PDI}{bidi.RLM}"
+    assert f"{bidi.LRI}4.2{bidi.PDI}" in w._slot.label.full()                    # the last drop's rate, too
     assert f"{bidi.LRI}31\u00a0→\u00a032{bidi.PDI}" in w._level_label.text()   # the arrow at the new level
     assert w._map_label.text() == f"{bidi.RLM}{bidi.LRI}Ant Tunnel I{bidi.PDI}{bidi.RLM}"
     assert w._slot.value.full() == f"{bidi.RLM}{bidi.LRI}Horny Mushroom Cap{bidi.PDI}{bidi.RLM}"
@@ -363,9 +371,8 @@ def test_in_hebrew_with_no_run_the_dashes_sit_under_their_labels(bar):
     bar.shown["live"] = _live(running=False)
     w.apply_language(I18n("he"))
     texts = w.texts()
-    assert [_bare(label) for label, _v in texts.values()] == ["מפה", "EXP לשעה", "הריגות לשעה", "רווח לשעה", "רמה",
-                                                             "השלל האחרון"]
-    assert [v for _label, v in texts.values()] == [f"{bidi.RLM}–{bidi.RLM}"] * 6
+    assert [_bare(label) for label, _v in texts.values()] == ["מפה", "EXP לשעה", "רווח לשעה", "רמה", "השלל האחרון"]
+    assert [v for _label, v in texts.values()] == [f"{bidi.RLM}–{bidi.RLM}"] * 5
     assert w._start.isVisibleTo(w) and _bare(w._start.text()).strip() == "התחלה"
 
 

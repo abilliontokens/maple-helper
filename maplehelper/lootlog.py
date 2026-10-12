@@ -177,8 +177,8 @@ def agree(a: Line, b: Line) -> bool:
 
 @dataclass
 class Event:
-    """A gain, counted once: kind, value and when; where, the player's level then, and for EXP the kill it was (the
-    scanner tags them as it counts them: ui/lootscan.py)."""
+    """A gain, counted once: kind, value and when; where, and the player's level then (the scanner tags them as it
+    counts them: ui/lootscan.py)."""
     t: float
     kind: str
     amount: int = 0             # EXP / mesos; an item's count
@@ -186,7 +186,6 @@ class Event:
     key: str = ""               # the KB item, "" when unknown
     saved: bool = False         # written to the loot database (lootdb.py)
     map: str = ""               # the map id it came on ("102000000"), "" when unknown
-    monster: str = ""           # an EXP gain's kill: the KB monster grindlive.Matcher matched, "" when none
     level: int | None = None    # the player's level then, None when unknown
 
     def to_json(self) -> dict:
@@ -197,14 +196,14 @@ class Event:
 
     @classmethod
     def from_json(cls, raw) -> Event | None:
+        # (an older log's EXP gains carry a "monster": the kill matched then, no longer kept)
         if not isinstance(raw, dict) or raw.get("kind") not in ("exp", "mesos", "item"):
             return None
         t, amount = raw.get("t"), raw.get("amount", 0)
         if not isinstance(t, (int, float)) or not isinstance(amount, int) or isinstance(amount, bool):
             return None
         return cls(float(t), raw["kind"], amount, str(raw.get("name") or ""), str(raw.get("key") or ""),
-                   raw.get("saved") is True, str(raw.get("map") or ""), str(raw.get("monster") or ""),
-                   _opt_int(raw.get("level")))
+                   raw.get("saved") is True, str(raw.get("map") or ""), _opt_int(raw.get("level")))
 
 
 @dataclass(frozen=True)
@@ -251,9 +250,10 @@ class Tracker:
     `read(rows, now)` takes the read lines (text, y centre, height) and returns the new Events; a later read may
     still correct an Event it returned (its value, from a clearer read of the same line)."""
 
-    def __init__(self, items: dict[str, str] | None = None):
+    def __init__(self, items: dict[str, str] | None = None, drops: set[str] | None = None):
         self._items = items or {}               # lower-case KB item name -> key
         self._names = [n for n in self._items if not n.startswith("\0")]
+        self._drops = drops or set()            # the item keys some monster drops (drop_keys)
         self._lines: list[_Tracked] = []
         self._bottom: float | None = None       # the bottom row's y (the newest message's), learned
         self._pitch: float | None = None        # px between two rows, learned
@@ -347,14 +347,31 @@ class Tracker:
         self._lines = kept
         return new
 
-    def _item(self, name: str) -> tuple[str, str]:
-        """(KB name, key) of a read item name: exact, else the closest KB name; else the read name, no key."""
+    def resolve(self, name: str) -> tuple[str, str]:
+        """(KB name, key) of a read item name: exact, else the closest KB name at ITEM_FUZZY or more; else the read
+        name, no key. Names tied for the closest are no guess (a cut-off "Green Mushroom" is as close to "Green
+        Mushroom Cap" as to "... Hat", and difflib took the hat, by string order: seen live), unless exactly one of
+        them is an item a monster drops."""
         low = name.lower()
         if low in self._items:
             return self._title(low), self._items[low]
-        close = difflib.get_close_matches(low, self._names, n=1, cutoff=ITEM_FUZZY) if low else []
-        if close:
-            return self._title(close[0]), self._items[close[0]]
+        if not low:
+            return name, ""
+        best, tied = ITEM_FUZZY, []
+        sm = difflib.SequenceMatcher()
+        sm.set_seq2(low)                        # (as difflib.get_close_matches scores them)
+        for n in self._names:
+            sm.set_seq1(n)
+            if sm.real_quick_ratio() >= best and sm.quick_ratio() >= best:
+                r = sm.ratio()
+                if r > best or (r == best and not tied):
+                    best, tied = r, [n]
+                elif r == best:
+                    tied.append(n)
+        if len(tied) > 1:
+            tied = [n for n in tied if self._items[n] in self._drops]
+        if len(tied) == 1:
+            return self._title(tied[0]), self._items[tied[0]]
         return name, ""
 
     def _title(self, low: str) -> str:
@@ -366,7 +383,7 @@ class Tracker:
         if ln.kind == "item":
             if not ln.name:
                 return None
-            name, key = self._item(ln.name)
+            name, key = self.resolve(ln.name)
             return Event(now, "item", ln.qty or 1, name, key)
         return Event(now, ln.kind, ln.amount) if ln.amount is not None else None
 
@@ -377,7 +394,7 @@ class Tracker:
         if ev is None:
             return
         if ev.kind == "item":
-            names = [self._item(ln.name) for ln in tr.reads if ln.name]
+            names = [self.resolve(ln.name) for ln in tr.reads if ln.name]
             known = [n for n in names if n[1]] or names
             if known:
                 ev.name, ev.key = _vote(known)
@@ -398,16 +415,32 @@ def _vote(values: list):
     return max(counts, key=lambda v: (counts[v], -values.index(v)))
 
 
+def _cash(e: dict) -> bool:
+    """A Cash Shop item ("Cash Equip / Cash Hat", "Cash"): no pickup message ever names one."""
+    return str(e.get("type") or "").startswith("Cash")
+
+
 def item_names(kb) -> dict[str, str]:
-    """Lower-case KB item name -> key, with each name's own spelling under "\\0" + lower (for the log's text)."""
+    """Lower-case KB item name -> key, with each name's own spelling under "\\0" + lower (for the log's text): the
+    items a pickup message can name (no Cash item: "Green Mushroom Hat" took 59 Green Mushroom Caps, seen live)."""
     out: dict[str, str] = {}
     for k, e in kb.entities.items():
-        if e.get("category") == "item" and e.get("name"):
+        if e.get("category") == "item" and e.get("name") and not _cash(e):
             low = e["name"].strip().lower()
             if low not in out:
                 out[low] = k
                 out["\0" + low] = e["name"].strip()
     return out
+
+
+def drop_keys(kb) -> set[str]:
+    """The item keys some monster drops (kb.droppers): a tie of read names goes to the one of them (Tracker)."""
+    return {k for k, ms in kb.droppers.items() if ms}
+
+
+def unpickable_keys(kb) -> set[str]:
+    """The item keys no pickup message names (Cash items): a log or database row with one was misread."""
+    return {k for k, e in kb.entities.items() if e.get("category") == "item" and _cash(e)}
 
 
 # ---------------------------------------------------------------- a log and its totals
@@ -456,6 +489,26 @@ class Log:
                "items": {n: list(v) for n, v in self.base["items"].items()}}
         _total(self.events, out)
         return out["exp"], out["mesos"], out["items"]
+
+    def repair(self, resolve, bad_keys: set[str]) -> int:
+        """Its items read as one no pickup names (`bad_keys`: unpickable_keys) named again (`resolve`: a Tracker's),
+        when that gives an item that isn't one of them; the events and the older ones' totals fixed."""
+        fixed = 0
+        for e in self.events:
+            if e.kind == "item" and e.key in bad_keys:
+                name, key = resolve(e.name)
+                if key and key not in bad_keys:
+                    e.name, e.key = name, key
+                    fixed += 1
+        items = self.base["items"]
+        for old, (n, key) in list(items.items()):
+            if key in bad_keys:
+                name, new = resolve(old)
+                if new and new not in bad_keys:
+                    del items[old]
+                    items.setdefault(name, [0, new])[0] += n
+                    fixed += 1
+        return fixed
 
     def seconds(self, now: float | None = None) -> float:
         return max(0.0, (self.ended or now or time.time()) - self.start)
@@ -611,6 +664,40 @@ class Store:
         self._active.pop(cid, None)
         self._recent.pop(cid, None)
         self.save()
+
+    def repair(self, resolve, bad_keys: set[str]) -> int:
+        """Every saved log's items read as one no pickup names fixed (Log.repair), and the Recent logs' tops (names
+        only: one `resolve` names as another, keyed item that isn't in `bad_keys`: a KB name resolves to itself, an
+        unmatched read name to no key). Saved when something changed; returns the entries fixed."""
+        fixed = 0
+        for cid, raw in self._active.items():
+            lg = Log.from_json(raw)
+            n = lg.repair(resolve, bad_keys) if lg else 0
+            if n:
+                self._active[cid] = lg.to_json()
+                fixed += n
+        for recs in self._recent.values():
+            for rec in recs if isinstance(recs, list) else ():
+                top = rec.get("top") if isinstance(rec, dict) else None
+                if not isinstance(top, list):
+                    continue
+                counts: dict[str, int] = {}
+                renamed = 0
+                for row in top:
+                    if not (isinstance(row, list) and len(row) == 2 and isinstance(row[0], str)):
+                        continue
+                    name, key = resolve(row[0])
+                    if key and key not in bad_keys and name != row[0]:
+                        renamed += 1
+                    else:
+                        name = row[0]
+                    counts[name] = counts.get(name, 0) + _int(row[1])
+                if renamed:
+                    rec["top"] = [[n, c] for n, c in sorted(counts.items(), key=lambda kv: -kv[1])]
+                    fixed += renamed
+        if fixed:
+            self.save()
+        return fixed
 
     def save(self) -> None:
         _write_json(self.path, {"active": self._active, "recent": self._recent})

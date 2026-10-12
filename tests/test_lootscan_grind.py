@@ -1,8 +1,10 @@
-"""The loot scanner as the grind's run (ui/lootscan.py): each pickup tagged with the map, the player's level and an EXP
-gain's kill; the bottom bar sampled while the run counts (hud.read_strip); the grind bar's watch starting a run on
-the first EXP gain; the player's pause."""
+"""The loot scanner as the grind's run (ui/lootscan.py): each pickup tagged with the map and the player's level; the
+bottom bar sampled while the run counts (hud.read_strip); the grind bar's watch starting a run on the first EXP gain;
+the player's pause; the names of items logged as one no pickup names repaired when it starts and on a new KB."""
+import json
+import logging
 import os
-import sys
+import sqlite3
 import time
 import types
 from pathlib import Path
@@ -13,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from maplehelper import hud, lootlog
+from maplehelper import hud, lootdb, lootlog
 from maplehelper.minimap import Here
 from maplehelper.ui.location import LOCATION
 
@@ -21,7 +23,6 @@ app = QApplication.instance() or QApplication([])
 FIXTURES = Path(__file__).parent / "fixtures"
 TABLE = {9: 1242, 10: 1716, 11: 2360, 30: 98000}
 MAP = "102000000"
-KILLS = {21: "monster/dark-stump", 32: "monster/axe-stump"}     # what the stand-in Matcher answers
 BOX = {"x": 0, "y": 0, "w": 300, "h": 200}
 MESOS = "You have gained mesos (+27)"
 EXP21 = "You received EXP (+21)"
@@ -30,32 +31,7 @@ LEAF = "Leaf x1 earned. (Etc)"
 
 
 @pytest.fixture
-def matchers(monkeypatch):
-    """grindlive.Matcher swapped for one answering KILLS; the list of those made (one per run)."""
-    try:
-        from maplehelper import grindlive
-    except ImportError:             # (grindlive.py not written yet: a module of its own stands in)
-        import maplehelper
-        grindlive = types.ModuleType("maplehelper.grindlive")
-        monkeypatch.setitem(sys.modules, "maplehelper.grindlive", grindlive)
-        monkeypatch.setattr(maplehelper, "grindlive", grindlive, raising=False)
-    made = []
-
-    class Matcher:
-        def __init__(self, kb):
-            self.asked = []
-            made.append(self)
-
-        def monster(self, map_id, exp):
-            self.asked.append((map_id, exp))
-            return KILLS.get(exp, "")
-
-    monkeypatch.setattr(grindlive, "Matcher", Matcher, raising=False)
-    return made
-
-
-@pytest.fixture
-def scan(isolated_store, kb, matchers, monkeypatch):
+def scan(isolated_store, kb, monkeypatch):
     """The scanner of a level 20 character, on MAP as the minimap reads say."""
     from maplehelper.ui.lootscan import LootScanner
     monkeypatch.setattr(LOCATION, "here", Here(MAP))
@@ -96,63 +72,94 @@ def test_the_bars_strip_alone_reads_as_the_whole_picture():
 
 # ------------------------------------------------------------ tags
 
-def test_a_counted_exp_gain_gets_the_map_the_level_and_the_matchers_kill(scan, matchers):
+def test_a_counted_pickup_gets_the_map_and_the_level(scan):
     scan.start()
     t = time.time()
     _deliver(scan, t, MESOS)                                # on screen when the log started: not counted
     _deliver(scan, t + 0.5, MESOS, EXP21)
     (ev,) = scan._log.events
-    assert (ev.kind, ev.amount, ev.map, ev.monster, ev.level) == ("exp", 21, MAP, KILLS[21], 20)   # (no bar read yet)
+    assert (ev.kind, ev.amount, ev.map, ev.level) == ("exp", 21, MAP, 20)      # (no bar read yet)
+    assert not hasattr(ev, "monster")                       # (no kill: a pickup message never says what was killed)
     _deliver(scan, t + 1.0, MESOS, EXP21, "You have gained mesos (+5)")
     mesos = scan._log.events[-1]
-    assert (mesos.kind, mesos.amount, mesos.map, mesos.monster, mesos.level) == ("mesos", 5, MAP, "", 20)
-    assert len(matchers) == 1 and matchers[0].asked == [(MAP, 21)]      # EXP gains only, one Matcher for the run
+    assert (mesos.kind, mesos.amount, mesos.map, mesos.level) == ("mesos", 5, MAP, 20)
     # the level from the latest bar read that showed one (one without it changes nothing)
     scan._hud_deliver(hud.Hud(31, None, None, 100, 5.0, (50, 60)), time.time())
     scan._hud_deliver(hud.Hud(None, None, None, None, None, (40, 60)), time.time())
     _deliver(scan, t + 1.5, MESOS, EXP21, "You have gained mesos (+5)", EXP8)
-    assert scan._log.events[-1].level == 31 and scan._log.events[-1].monster == ""   # (8 EXP: no kill it matches)
-    # a new run, a new Matcher
-    scan.start()
-    _deliver(scan, t + 2.0, EXP8)
-    _deliver(scan, t + 2.5, EXP8, "You received EXP (+32)")
-    assert scan._log.events[-1].monster == KILLS[32] and len(matchers) == 2
+    assert (scan._log.events[-1].amount, scan._log.events[-1].level) == (8, 31)
+    assert not any(hasattr(e, "monster") for e in scan._log.events)
 
 
-def test_an_exp_gain_a_later_read_corrects_is_matched_again(scan, matchers):
-    """The first read of a line said "+28", the next ones "+21": the vote makes it 21, and its kill follows."""
-    scan.start()
-    t = time.time()
-    _deliver(scan, t, MESOS)
-    _deliver(scan, t + 0.5, MESOS, "You received EXP (+28)")
-    ev = scan._log.events[0]
-    assert (ev.amount, ev.monster) == (28, "")
-    _deliver(scan, t + 1.0, MESOS, EXP21)
-    _deliver(scan, t + 1.5, MESOS, EXP21)
-    assert (ev.amount, ev.monster) == (21, KILLS[21]) and matchers[0].asked == [(MAP, 28), (MAP, 21)]
-    assert len(scan._log.events) == 1
-
-
-def test_an_unknown_map_tags_no_kill_and_a_failing_matcher_loses_no_pickup(scan, matchers, monkeypatch):
+def test_an_unknown_map_tags_none(scan, monkeypatch):
     monkeypatch.setattr(LOCATION, "here", None)
     scan.start()
     t = time.time()
     _deliver(scan, t, MESOS)
     _deliver(scan, t + 0.5, MESOS, EXP21)
-    assert (scan._log.events[0].map, scan._log.events[0].monster) == ("", "") and not matchers  # (never asked)
-    monkeypatch.setattr(LOCATION, "here", Here(MAP))
-    from maplehelper import grindlive
+    assert _counted(scan) == [("exp", 21)] and scan._log.events[0].map == ""
 
-    def broken(self, map_id, exp):
-        raise KeyError("monster/none")
-    monkeypatch.setattr(grindlive.Matcher, "monster", broken)
-    _deliver(scan, t + 1.0, MESOS, EXP21, EXP8)
-    assert _counted(scan) == [("exp", 21), ("exp", 8)] and scan._log.events[-1].monster == ""
+
+# ------------------------------------------------------------ item names repaired
+
+def test_the_item_names_are_repaired_when_it_starts_and_on_a_new_kb(isolated_store, kb, monkeypatch, caplog):
+    """Items logged as a Cash item (a cut-off read matched to the Green Mushroom Hat, live) are named again: in the
+    database and loot.json, by the KB's own tracker, once when the scanner starts and again for a new KB."""
+    from maplehelper.ui.lootscan import LootScanner
+    calls = []
+
+    def repair(resolve, bad, price=None):
+        calls.append((resolve, bad))
+        return 3
+    monkeypatch.setattr(lootdb, "repair_items", repair)
+    monkeypatch.setattr(lootlog, "unpickable_keys", lambda kb: {"item/3551"})
+    caplog.set_level(logging.INFO, logger="maplehelper")
+    s = LootScanner(kb, isolated_store.Profiles(), isolated_store.Settings())
+    try:
+        assert len(calls) == 1 and calls[0][1] == {"item/3551"}
+        assert calls[0][0].__self__ is s._tracker and calls[0][0]("Red Potion") == ("Red Potion", "item/2000000")
+        assert "loot: repaired 3 item names" in caplog.messages
+        s.set_kb(kb)
+        assert len(calls) == 2 and calls[1][0].__self__ is s._tracker
+    finally:
+        for timer in (s._timer, s._hud_timer, s._save_timer):
+            timer.stop()
+
+
+def test_a_running_log_is_repaired_before_it_goes_on(isolated_store, kb, monkeypatch):
+    """loot.json's running log: its pickups of an item no pickup names are the right item when the scanner takes it
+    up; a failing database repair is a warning, never a scanner that won't start."""
+    from maplehelper.ui.lootscan import LootScanner
+    monkeypatch.setattr(lootlog, "unpickable_keys", lambda kb: {"item/9"})
+    now = time.time()
+    older = lootdb.open_log("", "", now - 600)              # an older log's pickup, in the database
+    lootdb.add_events(older, [lootlog.Event(now - 590, "item", 1, "Red Potions", "item/9")], kb)
+    lg = lootlog.Log(start=now - 60, events=[lootlog.Event(now - 30, "item", 1, "Red Potions", "item/9")])
+    lootlog.Store.path.write_text(json.dumps({"active": {"": lg.to_json()}, "recent": {}}), encoding="utf-8")
+    works = lootdb.repair_items
+
+    def broken(resolve, bad, price=None):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(lootdb, "repair_items", broken)
+    s = LootScanner(kb, isolated_store.Profiles(), isolated_store.Settings())
+    try:
+        assert s.running("") and [(e.name, e.key) for e in s._log.events] == [("Red Potion", "item/2000000")]
+        assert any("loot repair" in m for m in s._logged)
+        # (the running log went into the database fixed; the older pickup waits for a repair that works)
+        assert [(r.item, r.item_key) for r in lootdb.events("")] == [("Red Potions", "item/9"),
+                                                                    ("Red Potion", "item/2000000")]
+        monkeypatch.setattr(lootdb, "repair_items", works)
+        s.set_kb(kb)
+        assert [(r.item, r.item_key) for r in lootdb.events("")] == [("Red Potion", "item/2000000")] * 2
+        assert [(e.name, e.key) for e in s.store.log("").events] == [("Red Potion", "item/2000000")]
+    finally:
+        for timer in (s._timer, s._hud_timer, s._save_timer):
+            timer.stop()
 
 
 # ------------------------------------------------------------ the grind bar's watch
 
-def test_the_grind_bar_watches_and_the_first_exp_gain_starts_a_run(scan, matchers):
+def test_the_grind_bar_watches_and_the_first_exp_gain_starts_a_run(scan):
     assert not scan._timer.isActive()                       # no log, no grind bar: nothing is read
     scan._settings["grind_bar"] = True
     scan.restart()                                          # (the app, when the setting flips)
@@ -168,7 +175,7 @@ def test_the_grind_bar_watches_and_the_first_exp_gain_starts_a_run(scan, matcher
     assert scan.running(scan.cid()) and changed
     lg = scan._log
     assert _counted(scan) == [("exp", 21)] and lg.start == lg.events[0].t
-    assert (lg.events[0].map, lg.events[0].monster) == (MAP, KILLS[21])
+    assert lg.events[0].map == MAP
     assert scan._hud_timer.isActive() and scan.store.running(scan.cid()) is not None and lg.db_id is not None
     # the reads go on from it (no new baseline): the next pickup counts
     _deliver(scan, t + 2.0, MESOS, LEAF, "You have gained mesos (+5)", EXP21, "You have gained mesos (+9)")

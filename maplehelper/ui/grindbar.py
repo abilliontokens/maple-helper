@@ -1,10 +1,10 @@
 """The grind bar over the game: one slim row of glass in the proportions of the game's own megaphone strip (1568 x 86
 on a 2734 x 1568 game) with the grind at a glance, the grind window (ui/grindwindow.py) one click away. Left to right
 (mirrored in Hebrew): the dots that drag it; the map over a dot that says how the run stands (green running, grey
-paused, red for 10 s after a death) and the grind time; EXP, kills and profit per hour; the level and the time to the
-next one over a progress bar lit in the accent and the level's percent; the last drop and how often it drops (with
-goals set: the first one still to reach and when); then Pause (Resume) and Stop, or Start with no run, every figure
-"–" then.
+paused, red for 10 s after a death) and the grind time; EXP and profit per hour; the level and the time to the next
+one over a progress bar lit in the accent and the level's percent; the last drop and how many of it come an hour
+(with goals set: the first one still to reach and when); then Pause (Resume) and Stop, or Start with no run, every
+figure "–" then.
 
 Its figures are grindlive.live's, of the loot log's run (the grind session IS that run: ui/lootscan.LootScanner), read
 again on every scanner change and every second while it shows (the time and the rates move). Everything in it scales
@@ -49,8 +49,9 @@ BUTTON_K = 0.17                     # the buttons' words
 FIT_MIN = 0.6                       # a figure wider than its segment steps its font down, never below this share
 TALL_K = 1.15                       # the content follows the height up to this much over the strip's proportions (a bar
                                     # dragged taller keeps that size, centred: its words would not fit across it)
-# each segment's share of the row's width: fixed shares, so nothing shifts as the figures change
-STRETCH = {"map": 14, "exp": 10, "kills": 9, "profit": 10, "level": 19, "slot": 21}
+# each segment's share of the row's width: fixed shares, so nothing shifts as the figures change (the last drop's
+# item name takes the most)
+STRETCH = {"map": 16, "exp": 11, "profit": 11, "level": 20, "slot": 25}
 RUN, DEAD = "#4CD07D", "#FF6B6B"    # the dot running, and for the 10 s after a death (ink()ed on the white glass)
 FLASH_MS = 1500                     # a tracked item's drop or a level-up: the right slot's accent outline pulses this long
 DASH = "–"
@@ -63,6 +64,13 @@ def _num(n: int | None) -> str:
     if abs(n) >= 1_000_000:
         return f"{n / 1_000_000:.2f}M"
     return f"{n:,}"
+
+
+def per_hour(v: float) -> str:
+    """How many of an item come an hour: one decimal under 10 ("4.2"), whole above ("18"), as the bar and the grind
+    window's Drops tab say it."""
+    tenths = round(v, 1)
+    return f"{tenths:.1f}" if tenths < 10 else f"{round(v):,}"
 
 
 def _clock(secs: float) -> str:
@@ -296,8 +304,8 @@ class _Progress(QWidget):
 
 
 class _Slot(QWidget):
-    """The right slot: the last drop and how often it drops, or the first goal still to reach, over the item's name
-    or when. On a tracked item's drop or a level-up its accent outline pulses once (flash)."""
+    """The right slot: the last drop and how many of it come an hour, or the first goal still to reach, over the
+    item's name or when. On a tracked item's drop or a level-up its accent outline pulses once (flash)."""
 
     def __init__(self, bar: GrindBar):
         super().__init__()
@@ -401,17 +409,15 @@ class GrindBar(EdgeResize, QWidget):
         self._dot = _Dot()
         self._time = _Figure()
         self._map, self._map_label, map_row = _segment((self._dot, 0), (self._time, 1))
-        self._exp_fig, self._kills_fig, self._profit_fig = _Figure(), _Figure(), _Figure()
+        self._exp_fig, self._profit_fig = _Figure(), _Figure()
         self._exp, self._exp_label, _ = _segment((self._exp_fig, 1))
-        self._kills, self._kills_label, _ = _segment((self._kills_fig, 1))
         self._profit, self._profit_label, _ = _segment((self._profit_fig, 1))
         self._progress = _Progress(self)
         self._pct = _Figure()
         self._pct.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)     # "100%" wide (_scale): the bar the rest
         self._level, self._level_label, level_row = _segment((self._progress, 1), (self._pct, 0))
         self._slot = _Slot(self)
-        segs = {"map": self._map, "exp": self._exp, "kills": self._kills, "profit": self._profit,
-                "level": self._level, "slot": self._slot}
+        segs = {"map": self._map, "exp": self._exp, "profit": self._profit, "level": self._level, "slot": self._slot}
         self._dividers: list[QFrame] = []
         for i, (key, seg) in enumerate(segs.items()):
             if i:
@@ -460,7 +466,7 @@ class GrindBar(EdgeResize, QWidget):
         for b in (self._pause, self._stop, self._start):
             b.setFixedHeight(round(0.48 * u))
         self._restyle(force=True)
-        for f in (self._time, self._exp_fig, self._kills_fig, self._profit_fig, self._pct):
+        for f in (self._time, self._exp_fig, self._profit_fig, self._pct):
             f.px = round(VALUE_K * u)
         f = QFont(self._pct.font())
         f.setPixelSize(self._pct.px)
@@ -542,9 +548,8 @@ class GrindBar(EdgeResize, QWidget):
         self._dot.setToolTip(t(f"gb_state_{self._dot.state}"))
         self._time.setText(fig(_clock(live.session.active_s)) if on else dash)
         self._time.setAccessibleName(f"{t(f'gb_state_{self._dot.state}')}: {self._time.text()}")
-        # EXP, kills and profit per hour
+        # EXP and profit per hour
         for line, figure, key, n in ((self._exp_label, self._exp_fig, "gb_exp_h", live.session.exp_h),
-                                     (self._kills_label, self._kills_fig, "gb_kills_h", live.session.kills_h),
                                      (self._profit_label, self._profit_fig, "gb_profit_h", live.session.profit_h)):
             line.set(label(t(key)))
             figure.setText(fig(_num(n)) if on and n is not None else dash)
@@ -565,7 +570,8 @@ class GrindBar(EdgeResize, QWidget):
         self._fill_buttons(on)
 
     def _fill_slot(self, live, on: bool) -> None:
-        """The first goal still to reach (over when, or how far), else the last drop (over its name)."""
+        """The first goal still to reach (over when, or how far), else the last drop (over its name) and how many of
+        it come an hour (its figure one left-to-right block in Hebrew)."""
         t, rtl = self.t, self.t.rtl
         slot, dash = self._slot, bidi.plain(DASH, rtl)
         goal = next((g for g in live.goals if not g.done), None)
@@ -588,8 +594,8 @@ class GrindBar(EdgeResize, QWidget):
             return
         drop = live.last_drop if on else None
         words = t("gb_last_drop")
-        if drop is not None and drop[2]:
-            words += " · " + t("gb_one_in", n=f"{drop[2]:,}")
+        if drop is not None and drop[2] is not None:
+            words += " · " + t("gb_per_h", n=bidi.ltr_block(per_hour(drop[2]), rtl))
         slot.label.set(bidi.plain(self._up(words), rtl))
         if drop is not None and drop[0]:
             slot.value.set(drop[0], lambda s: bidi.ltr_name(s, rtl))
@@ -607,7 +613,6 @@ class GrindBar(EdgeResize, QWidget):
         """What each segment says now, its label over its value, whole (before any "…")."""
         return {"map": (self._map_label.full(), self._time.text()),
                 "exp": (self._exp_label.full(), self._exp_fig.text()),
-                "kills": (self._kills_label.full(), self._kills_fig.text()),
                 "profit": (self._profit_label.full(), self._profit_fig.text()),
                 "level": (self._level_label.full(), self._pct.text()),
                 "slot": (self._slot.label.full(), self._slot.value.full())}
