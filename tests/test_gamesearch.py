@@ -57,9 +57,17 @@ def kb(_own_kb):
 
 
 def pump(qapp, ms):
-    """Wait out a debounce (the typing, the geometry) the way a live event loop would."""
+    """Wait out a debounce (the typing, the geometry) the way a live event loop would; then, on a slow machine (macOS
+    CI read the rows before a 150 ms typing pause had run, 50 ms into the margin), on until no search window's typing
+    pause is still pending (2 s at most)."""
+    from maplehelper.ui.gamesearch import GameSearch
     end = time.monotonic() + ms / 1000
     while time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.005)
+    end += 2.0
+    while time.monotonic() < end and any(w._typing.isActive() for w in qapp.topLevelWidgets()
+                                         if isinstance(w, GameSearch)):
         qapp.processEvents()
         time.sleep(0.005)
 
