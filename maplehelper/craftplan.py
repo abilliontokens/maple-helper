@@ -1,7 +1,9 @@
 """The crafting advisor's plan (the window is ui/craftadvisor.py, modelled on maplestorycrafting.com's
 planner): what a chosen set of crafts still needs — from the player's bag first, then from monsters' drops or
 an NPC's shop — in what order to craft it (materials, the profession level-ups the plan itself needs, the
-final items) and what it all costs, every number from the KB's tables or the player's own input.
+final items) and what it all costs, every number from the KB's tables or the player's own input. The window's
+Professions tab reads one profession on its own here too: the character's progress to its next level (progress)
+and its recipes (profession_recipes).
 
 Qt-free. The choices the plan makes, all deterministic (same inputs → same plan):
 
@@ -207,7 +209,7 @@ class ExpLevel:
 
     level: int
     exp: int | None  # EXP from this level to the next
-    char_level: int | None  # character level reaching the next level asks for
+    char_level: int | None  # the character level this level asks for (reaching it from the one below)
     measured: bool  # True = the player's own number, False = the KB's
 
 
@@ -223,6 +225,64 @@ def exp_needs(kb, overrides: dict | None = None) -> tuple[ExpLevel, ...]:
     return tuple(
         ExpLevel(lv, mine.get(lv, table.get(lv, (None, None))[0]), table.get(lv, (None, None))[1], lv in mine) for lv in levels
     )
+
+
+# ------------------------------------------------------------------ one profession on its own (the Professions tab)
+
+_CAP = re.compile(r"Crafting currently caps at level (\d+)")
+
+
+def top_level(kb) -> int:
+    """The highest crafting level, as the KB's Crafting Levels page words it ("Crafting currently caps at level 8.",
+    pages/formula/leveling.md: 10 before 2026-10-11); LEVEL_CAP when the page doesn't say. Read once per kb."""
+    got = kb.__dict__.get("_craftplan_top")
+    if got is None:
+        m = _CAP.search(kb.page("formula/leveling"))
+        got = kb.__dict__["_craftplan_top"] = int(m.group(1)) if m else LEVEL_CAP
+    return got
+
+
+@dataclass(frozen=True)
+class Progress:
+    """Where a character stands in one profession: its level and Mastery bar %, and the way to the next level —
+    the EXP it takes (the player's measured number winning over the KB's) and the character level it asks for."""
+
+    level: int  # one not learned counts 1, as the plan counts it; a saved level past the top counts the top
+    pct: int  # the Mastery bar % as the player typed it, 0-100
+    next: int | None  # the level it climbs to; None at the top (top_level)
+    exp: int | None  # the EXP from this level to the next; None: neither the KB nor the player says
+    have: int  # the EXP the bar % stands for (the plan counts it off the same way)
+    char_level: int | None  # the character level the next level asks for; None: the table doesn't say
+    measured: bool  # exp is the player's own number
+
+    @property
+    def left(self) -> int | None:
+        """The EXP still to earn before the next level."""
+        return None if self.exp is None else max(0, self.exp - self.have)
+
+
+def progress(kb, character, profession: str, overrides: dict | None = None) -> Progress:
+    """One profession's Progress for the character (Character.crafts / craft_pct, keyed "smithing"), from the KB's
+    Crafting Levels table and the player's measured EXP (settings["craft_exp_table"])."""
+    top = top_level(kb)
+    level = min(top, max(1, int((getattr(character, "crafts", {}) or {}).get(profession, 0) or 0)))
+    pct = min(100, max(0, int((getattr(character, "craft_pct", {}) or {}).get(profession, 0) or 0)))
+    if level >= top:
+        return Progress(level, pct, None, None, 0, None, False)
+    rows = {e.level: e for e in exp_needs(kb, overrides)}
+    now, nxt = rows.get(level), rows.get(level + 1)
+    exp = now.exp if now is not None else None
+    have = math.floor(exp * pct / 100) if exp else 0
+    char_level = nxt.char_level if nxt is not None else None
+    return Progress(level, pct, level + 1, exp, have, char_level, bool(now is not None and now.measured))
+
+
+def profession_recipes(kb, profession: str) -> tuple[Recipe, ...]:
+    """Every recipe of one profession ("smithing"), each variant of a product its own, by the level that opens it,
+    then by name: the recipes table the plan crafts from."""
+    discipline = crafting.NAMES.get(profession, "")
+    got = [r for variants in recipes(kb).values() for r in variants if r.discipline == discipline]
+    return tuple(sorted(got, key=lambda r: (r.prof_lv, r.product.casefold(), r.num)))
 
 
 # ------------------------------------------------------------------ what can be crafted (the item table)

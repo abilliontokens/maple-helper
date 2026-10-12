@@ -154,8 +154,8 @@ def settle() -> None:
 
 def spaced(text: str) -> str:
     """A label's text as read: its no-break spaces as plain ones, and in Hebrew without the direction marks around its
-    English blocks."""
-    for mark in ("\u200f", "\u2066", "\u2069", "\u202a", "\u202c", "\u2060"):
+    English blocks and around a button's words (bidi.button)."""
+    for mark in ("\u200f", "\u2066", "\u2067", "\u2069", "\u202a", "\u202c", "\u2060"):
         text = text.replace(mark, "")
     return text.replace("\u00a0", " ")
 

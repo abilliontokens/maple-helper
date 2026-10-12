@@ -153,13 +153,12 @@ def kb():
 
 @pytest.fixture
 def isolated_store(tmp_path, monkeypatch):
-    """Settings/Profiles/History (and grind sessions) write into tmp_path instead of the shared test APPDATA."""
+    """Settings/Profiles/History (and loot logs) write into tmp_path instead of the shared test APPDATA."""
     from maplehelper import store
     monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
     monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
     monkeypatch.setattr(store, "HISTORY_DIR", tmp_path / "history")
-    from maplehelper import grind, lootdb, lootlog
-    monkeypatch.setattr(grind.Store, "path", tmp_path / "grind.json")
+    from maplehelper import lootdb, lootlog
     monkeypatch.setattr(lootlog.Store, "path", tmp_path / "loot.json")
     monkeypatch.setattr(lootdb, "PATH", tmp_path / "loot.sqlite")
     (tmp_path / "history").mkdir()

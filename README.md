@@ -31,7 +31,7 @@
 
 Maple Helper is a desktop assistant for Windows and macOS that puts a chat overlay on top of MapleStory Classic World. Open it from the Maple Helper icon by the clock (the menu bar on macOS), then type a question or click the microphone to speak (click again to stop). Answers come from your own AI account (Claude, ChatGPT, Gemini or Grok) and draw on a screenshot of your game, your character profile, previous conversations, and a local copy of the NiaMeowDB game database.
 
-Use it to look up drops, find quest NPCs, or ask where to train without switching away from the game. The **play tools** window adds calculators and planners that read the same database: where to train, hit and damage, your build, quests for your level, crafting, citizenship and prices.
+Use it to look up drops, find quest NPCs, or ask where to train without switching away from the game. A **toolbar over the game** adds tools that read the same database, each in its own window: where to train, farming, quests for your level, citizenship, your build and skills, gear upgrades, scrolls, crafting and the Cash Shop, with your hit and damage on any monster's page.
 
 Website: **https://maplehelper.app/** (source: [maple-helper-site](https://github.com/Maple-Helper/maple-helper-site))
 
@@ -171,17 +171,6 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://www.maplehelper.app/assets/shots/en/tools-more-dark.webp">
-    <img src="https://www.maplehelper.app/assets/shots/en/tools-more-light.webp" width="380" alt="Sell or keep">
-  </picture>
-</p>
-<h3 align="center">Sell or keep</h3>
-<p align="center">Open your inventory: the app names every item and says to keep it for a quest, a recipe or as gear, or to sell it to an NPC or on the Free Market, and for how much.</p>
-
-<br>
-
-<p align="center">
-  <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://www.maplehelper.app/assets/shots/en/settings-dark.webp">
     <img src="https://www.maplehelper.app/assets/shots/en/settings-light.webp" width="380" alt="Make it yours">
   </picture>
@@ -205,28 +194,26 @@ Website: **https://maplehelper.app/** (source: [maple-helper-site](https://githu
 - **Conversation memory:** Keep separate chat history and session summaries for each character.
 - **Visual reference cards:** See images of relevant monsters, items, maps, NPCs, and quests alongside answers, grouped under titles (for example, what a monster drops).
 - **Where it is on the map:** The ◎ on a map, NPC or quest (on its card, or its tile under "Maps", "NPCs" or "Quests") opens a window beside the chat. A map shows the map next door with an orange dot on the portal that leads in, as NiaMeowDB marks it ("Leads back here"); an NPC, its map with a green dot where it stands (one inside a shop: the shop's door); a quest, where to start it and where to turn it in. The window reopens wherever you last left it.
-- **Where you are, from the minimap:** Maple Helper finds the game's MINI MAP window at the game's top left on its own (keep it open there) and reads it every second (Settings → "Minimap scan, in seconds": half a second, 1, 2, 5 or 10 seconds), reading the map you're in from the minimap's title, and shows it under your level. While it knows where you are, the ◎ window draws the way there from your map, step by step with your blue dot on the first map (a legend tells it from the portal's orange one), and the play tools' "How to get there" starts from your map.
+- **Where you are, from the minimap:** Maple Helper finds the game's MINI MAP window at the game's top left on its own (keep it open there) and reads it every second (Settings → "Minimap scan, in seconds": half a second, 1, 2, 5 or 10 seconds), reading the map you're in from the minimap's title, and shows it under your level. While it knows where you are, the ◎ window draws the way there from your map, step by step with your blue dot on the first map (a legend tells it from the portal's orange one), and so does a map's page in the toolbar's Maps search.
 - **Tag cards:** Tap one or more cards to ask follow-up questions about them, such as "where is it?" or "which one is easier for me?".
 - **Who drops it:** Ask which monsters drop an item and get the answer grouped by monster, with pictures.
 - **Item details:** The ⓘ on an item's card or tile opens a window to the right of the chat with all the item's stats from its NiaMeowDB page, the monsters that drop it (with their level, map and an "Ask in chat" button), and NiaMeowDB's "Meow Notes". The window reopens wherever you last left it.
 - **Guides library:** 32 full guides (every class, grind maps, the EXP table, the damage formula and more) with skill and item icons, character art, tables and tips, in English and Hebrew. The ones that fit your character come first.
 - **Plan usage:** See how much of your Claude, ChatGPT or Gemini plan is used, with a heads-up in the chat before the 5-hour limit runs out, and a saver mode.
-- **Play tools:** A window of calculators and planners beside the chat, built from the game database and your character, every page linked to the others (a monster's way there, its hit & damage, an item's droppers and price):
-  - **Grind spots:** maps for your level, ranked, with your hit chance, hits to kill, EXP per kill and kills to level.
-  - **Grind tracker:** a grind session measured from screenshots (EXP, mesos and potions per hour, estimated kills, recent sessions to compare). Level and EXP are read off the bottom bar on your computer; the AI is asked only while the inventory is open (mesos, potions, loot).
-  - **Farming:** who drops each item, where and at what level; monsters that drop what your quests, recipes and starred items need come first, then what an NPC pays most for; a farm session counts what lands in your bag.
-  - **Loot log:** press Start and every "You received EXP", "You have gained mesos" and "x1 earned" message is counted on your computer, each one once: EXP, mesos and items picked up, per hour, what an NPC pays for the items, the latest pickups and your saved logs. The messages are found on their own at the game window's bottom right, at any resolution or window size. A small see-through card over the game shows the running totals (drag it anywhere, its × hides it). Every log and pickup is also kept for good in a database on your computer (`loot.sqlite` in the app's data folder), with the time and what an NPC paid for each item, so any day can be looked back on. No AI and no screenshots sent anywhere.
-  - **Quests:** by level, a full card for each quest (where to get it, what to do, what to bring and where to get it, who to finish with, the rewards), daily and weekly quests that come back, and a search that forgives typos.
-  - **Crafting:** each profession's teacher and quests, and every recipe by level, searchable by name or ingredient, with who drops each ingredient.
-  - **Citizenship:** the Henesys and Kerning City quests by citizenship grade, and the town the guide recommends for your class.
-  - **Build plan:** your class guide's AP, SP and gear tables, your level's row highlighted, a table for each 2nd job, and the community tier list for your job.
-  - **Hit & damage:** pick a monster to see the ACC you need to never miss, your hit chance and hits to kill.
-  - **Item price:** NPC buy and sell prices, and what the item actually sells for on the Free Market: completed shop sales MesoWatch read from public streams (the usual price, the last sale and the sale count, with a button to the item's full Free Market card).
-  - **Sell or keep:** open your inventory and the app names each item and says whether to keep it (a quest, a recipe, gear you can wear, a starred item) or sell it to an NPC or on the Free Market, and for how much. No AI: straight from the database.
-  - **How to get there:** the way from your map to any map, monster or NPC, with taxis and boats.
-  - **Cash Shop:** what the game's Cash Shop sells right now and for how many NX, in the game's own tabs (Special, Fashion, Beauty, Pets, Utility) and their sections, each item with what it does and how long it lasts, and what the Founder's Mystery Fashion Crate can give with each item's chance. From the game client's own list (OSMS Data Explorer) and MesoWatch, updating by itself.
-  - **Free Market details:** from an item's price, its full card in a side window: the usual sale price (the median), the last sale, the last 3 sales' average, where to buy it (the shops seen selling it, cheapest first, with the owner's character) and the newest sales.
-  - **Pets** (a tab of the Cash Shop page): lifespan, hunger, commands to level 30 and the fastest command at each stage, Cash Shop prices, and the pet skills.
+- **Tools over the game:** The game controller button in the chat shows or hides a toolbar over the game. Its Tools card opens each tool in its own window, its searches open a monster's, a map's or an item's page, and its Loot Log button the loot log; all built from the game database and your character, and linked to each other (a monster's way there and its hit & damage, an item's droppers and prices):
+  - **Grind spots:** the monsters to grind at your level, ranked by the EXP each of your swings earns with the ACC and damage you type (or read off a screenshot), each with its map, hit chance, hits to kill, EXP, the mesos players reported and kills to the next level.
+  - **Farm:** pick an item (or one you starred) to see who drops it, where and how each sits against your level; your own drop rates per hour from the loot log; and what's worth farming at your level: monsters that drop what your quests, recipes and starred items need come first, then what an NPC pays most for.
+  - **Quests:** by level (this level, skipped, coming up, later, each tab with its count), a full card for each quest (where to get it, what to do, what to bring and who drops it, who to finish with, the rewards), daily and weekly quests that come back, and a search through every quest at once. **Quest chains:** each card shows the questline it is on ("Step 8 of 11 · Next: …"), opening to every step done, open or locked and why; the Chains tab lists the lines you are on with the EXP left and the next step's card, then the ones to start; marking a step done offers to mark the steps before it.
+  - **Citizenship:** the Henesys and Kerning City quests by citizenship grade, the town the guide recommends for your class and why, and where to sign up.
+  - **Build & skills:** your class guide's AP, SP and gear tables, your level's row highlighted, a table for each 2nd job, and the community tier list for your job; the Skills tab has every class line's skill books, each skill with what it does at level 1 and at its max level.
+  - **Gear:** your equip slots laid out like the game's equip window, each counting the upgrades you can wear now; a slot's upgrades as cards, best first, with their stat changes and where to get them (an NPC's price, the Free Market's usual price, the monsters that drop it), and the ones a few levels away.
+  - **Scrolls:** pick a piece of gear, the stat to scroll and how many of its slots to use: which grade is the safe pick, what each grade adds on average and how rarely every slot passes, the odds of each final total, and the cost.
+  - **Crafting:** what your class can craft, with the cost from raw materials and what crafting saves against the NPC's price, and a Forge plan beside it (what to farm first and where it drops, then the crafts in order). The Professions tab shows each profession's level and the EXP to the next, what that level opens, every recipe by level, searchable by name or ingredient, and its teacher, where to craft and its quests.
+  - **Cash shop:** what the game's Cash Shop sells right now and for how many NX, in the game's own tabs (Special, Fashion, Beauty, Pets, Utility) and their sections, each item with what it does and how long it lasts, and what the Founder's Mystery Fashion Crate can give with each item's chance. From the game client's own list (OSMS Data Explorer) and MesoWatch, updating by itself.
+  - **Pets** (the Cash shop's Pets tab): lifespan, hunger, commands to level 30 and the fastest command at each stage, Cash Shop prices, and the pet skills.
+  - **Hit & damage:** on a monster's page in the toolbar's Monsters & NPCs search: your hit chance and the ACC you need to never miss, your damage on it and the hits to kill, the EXP per kill and kills to the next level, and the mesos players reported.
+  - **Free Market details:** from an item's page in the toolbar's Items search, its full card in a side window: the usual sale price (the median), the last sale, the last 3 sales' average, where to buy it (the shops seen selling it, cheapest first, with the owner's character) and the newest sales.
+  - **Loot log:** a small see-through window over the game: press Start and every "You received EXP", "You have gained mesos" and "x1 earned" message is counted on your computer, each one once: EXP, mesos and what an NPC pays for the items, each per hour, every item picked up and the latest pickups. The messages are found on their own at the game window's bottom right, at any resolution or window size. Every log and pickup is also kept for good in a database on your computer (`loot.sqlite` in the app's data folder), with the time and what an NPC paid for each item, so any day can be looked back on. No AI and no screenshots sent anywhere.
 - **News:** MapleStory Classic news with the full articles in the app, in English and Hebrew.
 - **Sources on every number:** a tag says where each value comes from (community reports, the COT1 / COT2 test builds, MSEA, or official game data once it's out).
 - **Game terms explained:** A **?** in your accent colour beside terms like ACC, Avoid or AP shows what they mean on hover.
@@ -311,7 +298,7 @@ Open PowerShell (Windows) or Terminal (macOS) in the repository folder. On macOS
 | **Window buttons** | Minimize the overlay to the taskbar or close it (the tray icon opens it again). |
 | **Tap a card** | Tag it for the next question; tap again to untag. |
 | **Camera button** | Take a fresh screenshot of the game window. |
-| **Game controller button** | Show or hide the toolbar over the game (lit while it is up); its Tools card holds the play tools, each in its own window over the game. |
+| **Game controller button** | Show or hide the toolbar over the game (lit while it is up); its Tools card opens Grind spots, Farm, Quests, Citizenship, Build & skills, Gear, Scrolls, Crafting and the Cash shop, each in its own window over the game. |
 | **Character card** | Open its menu to switch, edit, delete, add or copy characters; **What now?** asks for the best next step. |
 | **Accent-coloured ?** | Hover it to see what a game term means. |
 | **System tray menu** | Show the overlay, open settings, or quit the app. |
@@ -326,7 +313,7 @@ Settings, character profiles, conversation history, speech models, and downloade
 
 When you ask a question, the app sends your chosen AI provider (Anthropic for Claude, OpenAI for ChatGPT, Google for Gemini, xAI for Grok) your question, the available game screenshot, character profile, recent conversation, earlier session summaries, and relevant knowledge-base context. The AI can also read local knowledge-base files to answer the question; it runs read-only and cannot change files or search the web. Claude and Grok can read nothing outside the knowledge base and the screenshot; Gemini is kept out of your own files too. With Codex, Gemini and Grok, the screenshot is written to a temporary file for the run and deleted right after. After a chat session has been closed for 30 minutes, the app may send the session transcript to the same provider to generate a summary for future conversations.
 
-Voice recordings are transcribed locally. The resulting text is used as your question. The Prices tool and the Free Market page read MesoWatch's public market file and its sellers' character pictures (nothing is sent; checked every 15 minutes while the app is open, downloaded compressed only when it changed, kept on disk). The app also checks GitHub Releases for app and knowledge-base updates, and installs an update only when its SHA-256 matches the release's checksums.
+Voice recordings are transcribed locally. The resulting text is used as your question. The Free Market details window reads MesoWatch's public market file and its sellers' character pictures (nothing is sent; checked every 15 minutes while the app is open, downloaded compressed only when it changed, kept on disk). The app also checks GitHub Releases for app and knowledge-base updates, and installs an update only when its SHA-256 matches the release's checksums.
 
 So we know how many people use Maple Helper, every 10 minutes while it runs the app tells our PostHog project that it is running: its version, your OS, and whether this is the first time ever, today or this month. The id it is sent under is random for each run and never stored, so runs can't be linked to each other or to you, and the project discards IP addresses. Turn it off in **Settings → Privacy & system → Count me as a player**. Separately, **Share anonymous usage stats** (on unless you turn it off) also sends which features get used, under a random id kept on your computer. Neither ever sends your questions, answers, screenshots, voice or character names. Setting the environment variable `MAPLEHELPER_NO_TELEMETRY=1` turns both off.
 

@@ -56,21 +56,17 @@ def test_telemetry_hint_names_what_is_sent():
     assert "גרסת" in he and "מזהה אקראי" in he
 
 
-@pytest.mark.parametrize("key,kw", [("news_btn_new", {}), ("sell_summary", {"mesos": "10"}), ("farm_every", {}),
-                                    ("spot_crowd", {}), ("craft_head_all", {"prof": "Smithing"}),
-                                    ("price_mw", {"price": "5", "world": "Windia"}),
-                                    ("shop_status", {"ago": "now"}),
-                                    ("route_walk_alt", {})])
+@pytest.mark.parametrize("key,kw", [("news_btn_new", {}), ("spot_crowd", {}), ("craft_head_all", {"prof": "Smithing"}),
+                                    ("shop_status", {"ago": "now"})])
 def test_a_count_of_one_reads_as_one(key, kw):
     """"1 חדשות", "1 items": a count that can be 1 has its own "_one" string (the audit, HEB-8)."""
     assert f"{key}_one" in STRINGS and "1 " not in I18n("he")(key, n=1, **kw)
     assert I18n("en")(key, n=1, **kw) == STRINGS[f"{key}_one"]["en"].format(n=1, **kw)
 
 
-def test_votes_and_a_mesos_loss_read_right():
+def test_votes_read_right():
     t = I18n("he")
     assert "1 שחקנים" not in t("votes_tip", up=1, down=2)
-    assert "ב--" not in t("grind_tip_mesos_down", n="1,250") and "ירד" in t("grind_tip_mesos_down", n="1,250")
 
 
 def test_hebrew_mac_settings_paths_match_the_english():

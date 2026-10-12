@@ -272,22 +272,6 @@ def test_tag_chip_name_is_one_block_after_a_gap(overlay):
     assert chip.text().startswith(" " + bidi.LRI) and bidi.PDI in chip.text()
 
 
-# ------------------------------------------------------------------ 10: one "?" per term on the prices page
-
-def test_prices_page_explains_a_term_once(isolated_store, kb):
-    from maplehelper.ui.tools import ToolsDialog
-    s, p = isolated_store.Settings(), isolated_store.Profiles()
-    p.add("Elipaz", "Thief", "Assassin", 32)
-    d = ToolsDialog(kb, p, s, "en", "", {}, "prices")
-    d.price_input.setText("Red Potion")
-    d._fill_prices()
-    from PySide6.QtWidgets import QLabel
-    page = d.pages["prices"]
-    marks = sum(lb.text().count("g:NPC") for lb in page.findChildren(QLabel))
-    assert marks == 1
-    d.close()
-
-
 # ------------------------------------------------------------------ low: elided hint, notices, names, i18n
 
 def test_input_hint_is_elided_not_cut(overlay):
@@ -512,6 +496,18 @@ def test_sync_seeing_another_character_stops_at_once_and_asks(overlay):
     assert c.name == "Elipaz" and c.level == 32 and c.job == "Assassin"     # nothing touched yet
 
 
+@pytest.mark.parametrize("new_picture", [True, False])
+def test_a_refresh_that_changed_only_the_picture_says_so(overlay, new_picture):
+    """'Up to date, no changes' showed right after the portrait had changed (the owner's, 2026-10-08)."""
+    said = []
+    overlay.add_system = lambda f: said.append(f(overlay.t))
+    overlay._update_avatar = lambda shot, box, full=None, on_done=None: on_done(new_picture)
+    overlay._sync_cid, overlay._sync_shot = overlay.profiles.active_id, b"jpeg"
+    overlay._on_sync_done(Answer(profile_update={"name": "Elipaz"}))
+    assert (overlay.t("sync_portrait") in said) == new_picture
+    assert (overlay.t("sync_nothing") in said) == (not new_picture)
+
+
 # ------------------------------------------------------------------ O1, O2: another character never overwrites
 
 def test_ayashii_via_sync_is_offered_not_renamed(overlay):
@@ -543,19 +539,6 @@ def test_a_sync_read_asks_before_a_demotion(overlay, update):
     from PySide6.QtWidgets import QPushButton
     yes = bidi.plain(I18n("he")("profile_update_yes"), True)
     assert [b for b in overlay.feed.findChildren(QPushButton) if b.text() == yes]     # update / add as new / cancel
-
-
-@pytest.mark.parametrize("update", MISREADS)
-def test_the_minute_grind_read_never_demotes(overlay, update):
-    c = overlay.profiles.active
-    got = []
-    overlay.grind_read.connect(got.append)
-    overlay._sync_cid = c.id
-    overlay._quiet_grind_read(Answer(text="ok", profile_update=dict(update)))
-    assert (c.base_class, c.job, c.level, c.exp_pct) == ("Thief", "Assassin", 32, None)
-    assert got and not lines(overlay)                         # the tracker still gets its numbers; no prompt
-    overlay._quiet_grind_read(Answer(text="ok", profile_update={"level": 33, "exp_percent": 2.0}))
-    assert (c.level, c.exp_pct) == (33, 2.0)                  # a level up still follows
 
 
 def test_same_character_button_takes_the_hud_name(overlay):

@@ -1,7 +1,8 @@
 The icons in this folder are Lucide icons (https://lucide.dev, https://github.com/lucide-icons/lucide), copied
 unchanged as SVG files named as in Lucide: users, ghost, map, backpack, coins, scroll-text, swords, toolbox, sparkles,
 shield, hammer, settings, x, search, grip-vertical, grip-horizontal, circle, rotate-ccw, check, crosshair, sprout,
-list-checks, landmark, dumbbell and gem. Maple Helper recolours them when it draws them (maplehelper/ui/lookpick.py).
+list-checks, landmark, dumbbell, gem, and the crafting professions' sword, shirt, bow-arrow, footprints and
+wand-sparkles. Maple Helper recolours them when it draws them (maplehelper/ui/lookpick.py).
 Lucide's license follows; x, check and crosshair are among the icons Lucide
 derives from Feather,
 whose MIT license is below it.

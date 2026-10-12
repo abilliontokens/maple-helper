@@ -1,4 +1,4 @@
-"""UX fixes in the Play tools window, the guides, the patch notes and the wishlist (TOOL-xx, PERF-04/05)."""
+"""UX fixes in the chips, the guides, the patch notes and the wishlist (TOOL-xx, PERF-04/05)."""
 import os
 import sys
 from pathlib import Path
@@ -23,25 +23,6 @@ def real_kb():
     return KnowledgeBase(REAL_KB)
 
 
-@pytest.fixture
-def tools(app, real_kb, isolated_store):
-    """open(base_class, job, level, lang="en", page="train"); base None: no character."""
-    from maplehelper.ui.tools import ToolsDialog
-    opened = []
-
-    def open_(base="Thief", job="Assassin", level=35, lang="en", page="train"):
-        p = isolated_store.Profiles()
-        if base:
-            p.set_active(p.add("Kiwi", base, job, level).id)
-        d = ToolsDialog(real_kb, p, isolated_store.Settings(), lang, "", None, page)
-        opened.append(d)
-        return d
-    yield open_
-    for d in opened:
-        d.close()
-    app.processEvents()
-
-
 def test_a_picked_chip_has_room_for_its_bold_text(app):
     """TOOL-02: a picked "All levels" was sized for its regular text and drew "ll levels"."""
     from PySide6.QtGui import QFontMetrics
@@ -63,113 +44,6 @@ def test_a_picked_chip_has_room_for_its_bold_text(app):
     bold.setBold(True)
     assert b.width() >= QFontMetrics(bold).horizontalAdvance("All levels") + 26      # its 13 px padding each side
     w.close()
-
-
-@needs_kb
-def test_no_character_shows_one_card_that_adds_one(tools, app):
-    """TOOL-03: a live stats editor and pickers stood above a grey "you need a character"."""
-    from PySide6.QtWidgets import QPushButton
-    d = tools(base=None, page="train")
-    d.show()
-    app.processEvents()
-    gate = d.stack.currentWidget()
-    assert gate.currentIndex() == 1 and not d.pages["train"].isVisible()
-    asked = []
-    d.add_character_requested.connect(lambda: asked.append(1))
-    add = next(b for b in gate.currentWidget().findChildren(QPushButton) if b.objectName() == "Primary")
-    add.click()
-    assert asked == [1]
-    # a character added: the page itself
-    d.profiles.set_active(d.profiles.add("Kiwi", "Thief", "Assassin", 35).id)
-    d.profile_changed()
-    assert gate.currentIndex() == 0
-    d.show_page(d.nav.id(d.nav.buttons()[1]))           # another character page follows on its first visit
-    assert d.stack.currentWidget().currentIndex() == 0
-
-
-@needs_kb
-def test_grind_links_wait_for_a_monster(tools):
-    """TOOL-17: "How to get there" and "Hit & damage" under an empty monster box did nothing."""
-    d = tools(page="exp")
-    d.refresh("exp")
-    links = [d.grind_links.itemAt(i).widget() for i in range(d.grind_links.count())]
-    d.grind_monster.clear()
-    assert links and not any(b.isEnabled() for b in links)
-    d.grind_monster.setText("Stirge")
-    assert all(b.isEnabled() for b in links)
-
-
-@needs_kb
-def test_citizenship_grade_chips_are_short_and_the_done_toggle_is_on_top(tools):
-    """TOOL-16 / TOOL-10."""
-    from PySide6.QtWidgets import QPushButton
-    d = tools(page="town")
-    d.refresh("town")
-    chips = [d.town_grades.itemAt(i).widget() for i in range(d.town_grades.count())]
-    texts = [b.text() for b in chips if isinstance(b, QPushButton)]
-    assert texts and not any("Citizenship" in x for x in texts) and any(x.endswith("Grade 1") for x in texts)
-    lay = d.pages["town"].widget().layout()
-    at = [lay.indexOf(d.town_done_toggle)] + [i for i in range(lay.count()) if lay.itemAt(i).layout() is d.town_list]
-    assert at[0] < at[1]
-
-
-@needs_kb
-def test_beginner_build_page_leads_to_the_skills_and_guides(tools):
-    """TOOL-19: one grey line on an empty page."""
-    from PySide6.QtWidgets import QPushButton
-    d = tools("Beginner", "Beginner", 8, page="build")
-    d.refresh("build")
-    links = [b for i in range(d.build_tier.count()) if (w := d.build_tier.itemAt(i).widget())
-             for b in w.findChildren(QPushButton)]
-    assert [b.text() for b in links][:1] == ["See the skills"]
-    links[0].click()
-    assert d.build_tabs.value() == "skills" and d.build_stack.currentIndex() == 1
-
-
-@needs_kb
-def test_hit_and_damage_maps_offer_the_way_there(tools):
-    """TOOL-08: three "Ask in chat" links, one a map, asked the AI what the route finder knows."""
-    from PySide6.QtWidgets import QPushButton
-    d = tools(page="calc")
-    d.calc_input.setText("Stirge")
-    d._fill_calc()
-    maps = d.calc_box.itemAt(d.calc_box.count() - 1).widget()
-    texts = [b.text() for b in maps.findChildren(QPushButton)]
-    assert texts and all(x == "How to get there" for x in texts)
-
-
-@needs_kb
-@pytest.mark.parametrize("lang", ["en", "he"])
-def test_the_price_card_shows_mesowatch_sales_with_its_credit(tools, monkeypatch, lang):
-    import time
-
-
-    from maplehelper import mesowatch
-    snap = mesowatch.Snapshot("Windia", time.time() - 600, {})
-    ore = mesowatch.Sales(4010001, "Iron Ore", 375, 299, 499, 2243, False, 500, trend_pct=-22, trend_days=3,
-                          shops=[mesowatch.Shop("The Rain-Forest East of Henesys", 399, 1, 8, time.time() - 300)],
-                          mw_id="basil:04010001", asks=2243, listing_shops=1170, days=4, last3=420,
-                          recent=[mesowatch.Sale(450, 1, "Free Market 2", time.time() - 120),
-                                  mesowatch.Sale(400, 2, "", time.time() - 600), mesowatch.Sale(410)])
-    monkeypatch.setattr(mesowatch, "for_item", lambda kb, key, *a, **k: (snap, ore))
-    from maplehelper.ui.widgets import MARKET_REQUESTS
-    asked = []
-    MARKET_REQUESTS.requested.connect(asked.append)
-    d = tools(page="prices", lang=lang)
-    d.price_input.setText("Iron Ore")
-    d._fill_prices()
-    assert "MesoWatch" in d.mw_label.text()                              # checking…, before the lookup is in
-    d._on_mesowatch((d._price_key, (snap, ore)))
-    text = d.mw_label.text()
-    assert "375" in text and "Windia" in text
-    more = [d.mw_more.itemAt(i).widget().text() for i in range(d.mw_more.count())]
-    # the basics only (the owner): the last sale and the count; the lists are in the details window
-    assert len(more) == 1 and "450" in more[0] and "2,243" in more[0] and "Rain-Forest" not in more[0]
-    d.mw_details.click()
-    assert asked == [d._price_key]
-    MARKET_REQUESTS.requested.disconnect(asked.append)
-    d._on_mesowatch((d._price_key, (None, None)))                       # can't reach it
-    assert "MesoWatch" in d.mw_label.text() and d.mw_more.count() == 0
 
 
 def test_guide_search_lights_no_category_and_counts(app):
@@ -246,16 +120,16 @@ def test_item_pages_are_read_once_per_kb(real_kb, monkeypatch):
     """PERF-05: the item list and the Farm tab read ~2,000 pages on every open."""
     from maplehelper import market, sitedata
     from maplehelper.kb import KnowledgeBase
-    from maplehelper.ui import tools
+    from maplehelper.ui.wishlist import item_rows
     key = real_kb._item_by_name["red potion"]
     first = market.npc_prices(real_kb, key)
     sitedata.untradeable(real_kb, key)
-    tools.item_rows(real_kb)
+    item_rows(real_kb)
     reads = []
     monkeypatch.setattr(KnowledgeBase, "page", lambda self, k: reads.append(k) or "")
     assert market.npc_prices(real_kb, key) is first
     sitedata.untradeable(real_kb, key)
-    tools.item_rows(real_kb)
+    item_rows(real_kb)
     assert reads == []
 
 

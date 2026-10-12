@@ -325,6 +325,13 @@ def plain(text: str, rtl_ui: bool = False) -> str:
     return text
 
 
+def button(text: str, rtl_ui: bool = False) -> str:
+    """A button's words. Qt lays a button's text out left to right whatever the widget's direction, so in a Hebrew UI
+    the words are one right-to-left isolate: "לסמן את כל ה-7" put its 7 first, "פרטי ה-NPC" read "NPC-ה"."""
+    words = plain(text, rtl_ui)
+    return f"{RLI}{words}{PDI}" if rtl_ui and not words.startswith(RLI) else words
+
+
 def ltr_block(name: str, rtl_ui: bool) -> str:
     """An English name (no Hebrew in it) as one left-to-right block for a Hebrew sentence. Run by run,
     "[Construction Site B1] Shumi's Lost Coin" came out with its brackets thrown to the other end."""

@@ -137,7 +137,7 @@ class MapleHelperApp:
         qt_texts(self.qapp, lang)
         css = theme.stylesheet(self.font_family, self.settings["font_size"])
         # restyling the app re-polishes every open widget (the chat with its answers too): only when it changed,
-        # not each time a window opens, which held "Play tools" back for a second. A look Settings only shows keeps
+        # not each time a window opens, which held a window back for a second. A look Settings only shows keeps
         # the app's own as it is (preview_look): a window built meanwhile carries the shown one itself
         if css != self.qapp.styleSheet() and self.__dict__.get("_preview_css") is None:
             self.qapp.setStyleSheet(css)
@@ -206,15 +206,6 @@ class MapleHelperApp:
         self.overlay.add_character_requested.connect(self.add_character)
         self.overlay.edit_character_requested.connect(self.edit_character)
         self.overlay.delete_character_requested.connect(self.delete_character)
-        # play tools: the grind tracker's reads and its minute timer live as long as the app (the tools window may
-        # be closed); the session itself is saved (grind.py)
-        from .ui.grindrunner import GrindRunner
-        self.grind = GrindRunner(self.kb, self.profiles, self.settings)
-        self.grind.auto_requested.connect(self.overlay.auto_grind_read)
-        self.overlay.grind_read.connect(self.grind.grind_read)
-        self.overlay.grind_skipped.connect(self.grind.skipped)
-        self.overlay.sync_finished.connect(self.grind.sync_done)     # before the tools window redraws (below)
-        self.grind.sync()          # a session running when the app last closed goes on (unless it was left idle)
         # where the player is, read from the game's minimap every few seconds (its MINI MAP window found at the game's
         # top left: LOCATION.box): the character card says it, and the map windows draw the way from there
         # (ui/minimapscan.py)
@@ -252,7 +243,6 @@ class MapleHelperApp:
         # with its timer as long as the app (ui/lootscan.py)
         from .ui.lootscan import LootScanner
         self.loot_scanner = LootScanner(self.kb, self.profiles, self.settings)
-        self.loot_scanner.changed.connect(lambda: self._tools_call("loot_changed"))
         # ... and its own card over the game while a log runs (not inside a Maple Helper window: ui/lootoverlay.py)
         from .ui.lootoverlay import LootOverlay
         self.loot_overlay = LootOverlay(self.loot_scanner, self.settings, self.kb,
@@ -300,16 +290,16 @@ class MapleHelperApp:
         NAV.add_character_requested.connect(lambda: (self.add_character(), self.on_profile_changed()))
         NAV.read_screen_requested.connect(lambda: self.overlay.sync_profile())
         NAV.guide_requested.connect(self.show_guides)
-        NAV.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
+        NAV.ask_requested.connect(self.ask_from_tools)
+        NAV.stats_changed.connect(self._game_search_character)      # Grind spots' stats: the monster page's figures
         from .ui.widgets import ITEM_REQUESTS, MAP_REQUESTS, MARKET_REQUESTS, ROUTE_REQUESTS
         ROUTE_REQUESTS.requested.connect(self.show_map_page)    # a map card's "How to get here"
         MAP_REQUESTS.requested.connect(self.show_map_location)  # a map's "Where it is on the map"
         ITEM_REQUESTS.requested.connect(self.show_item_details)  # an item's ⓘ
-        MARKET_REQUESTS.requested.connect(self.show_market_details)  # a price card's "full details"
+        MARKET_REQUESTS.requested.connect(self.show_market_details)  # an item page's Free Market prices
 
         self.overlay.news_requested.connect(self.show_news_page)
         self.overlay.profile_changed.connect(self.on_profile_changed)
-        self.overlay.sync_finished.connect(lambda ok: self._tools_call("sync_done", ok))
 
         # one keyboard shortcut only, the bar's show/hide (game_toolbar_hotkey). The chat has none: the official
         # client in front takes every key from other programs (live test, 2026-10-07), so the chat opens from the
@@ -388,11 +378,19 @@ class MapleHelperApp:
         search = getattr(self, "game_search", None)
         if search is None:
             from .ui.gamesearch import GameSearch
-            search = self.game_search = GameSearch(self.kb, self.settings, I18n(self.settings["language"] or "he"))
+            search = self.game_search = GameSearch(self.kb, self.settings, self.profiles,
+                                                   I18n(self.settings["language"] or "he"))
             search.mode_changed.connect(self.game_toolbar.set_search_mode)
         if not isinstance(self.settings["game_search_geom"], dict):
             search.place_under(self.game_toolbar.frameGeometry())
         search.open(kind)
+
+    def _game_search_character(self) -> None:
+        """The active character, or its level, EXP or stats, changed: the search's monster page (its Hit & damage
+        is the character's) is drawn again, when the search was ever made."""
+        search = getattr(self, "game_search", None)
+        if search is not None:
+            search.character_changed()
 
     def _tool_window(self, key: str):
         """A window of the bar's Tools card (TOOL_WINDOWS), made on the first ask."""
@@ -907,8 +905,8 @@ class MapleHelperApp:
                 w.update()                  # paint_glass reads the tint and the opacity as it paints
 
     def _reopen_windows_in_new_look(self):
-        """A language or look change: the other open windows (tools, guides, history...) were built in the old one
-        (the tools window stayed Hebrew after a switch to English, seen live). Reopen them."""
+        """A language or look change: the other open windows (guides, history, wishlist...) were built in the old
+        one (one stayed Hebrew after a switch to English, seen live). Reopen them."""
         look = _look_of(self.settings)
         if getattr(self, "_look", look) == look:
             self._look = look
@@ -923,15 +921,9 @@ class MapleHelperApp:
                 QTimer.singleShot(0, again)
 
     def _reopen_call(self, kind: str, dlg):
-        """How to open `dlg` again as it is now: the same page, guide, notes and character (reopened with no
-        arguments, Tools came back on its first page, an open guide on the list, a KB update's patch notes as
-        the generic changelog, and another character's History as the active one's)."""
-        if kind == "tools":
-            from .ui.tools import PAGES
-            stack = getattr(dlg, "stack", None)
-            i = stack.currentIndex() if stack is not None else 0
-            page = PAGES[i] if 0 <= i < len(PAGES) else "train"
-            return lambda: self.show_tools(page)
+        """How to open `dlg` again as it is now: the same guide, notes and character (reopened with no arguments, an
+        open guide came back on the list, a KB update's patch notes as the generic changelog, and another character's
+        History as the active one's)."""
         if kind == "guides":
             key = getattr(dlg, "_reading", None)
             return lambda: self.show_guides(key)
@@ -1394,22 +1386,6 @@ class MapleHelperApp:
         if not self.overlay.is_open():
             self.toast(t("kb_updated"), t("kb_updated_open"))
 
-    def show_tools(self, page: str = "train"):
-        from .ui.tools import ToolsDialog
-
-        def make():
-            dlg = ToolsDialog(self.kb, self.profiles, self.settings, self.settings["language"], self.style(),
-                              self.grind, page, loot=self.loot_scanner)
-            dlg.sync_requested.connect(self.overlay.sync_profile)
-            dlg.grind_sync_requested.connect(lambda: self.overlay.sync_profile(grind=True))
-            dlg.ask_requested.connect(self.ask_from_tools)
-            dlg.detail_ask_requested.connect(lambda q, shown: self.ask_from_tools(q, True, detail=True, shown=shown))
-            dlg.tag_requested.connect(self.ask_about_guide)
-            dlg.guide_requested.connect(self.show_guides)
-            dlg.add_character_requested.connect(lambda: (self.add_character(), self.on_profile_changed()))
-            return dlg
-        return self.open_window("tools", make)
-
     def show_news_page(self):
         """The News window: the megaphone in the chat's header, or the news strip tapped."""
         from .ui.newsview import news_dialog
@@ -1438,7 +1414,7 @@ class MapleHelperApp:
 
         def make():
             dlg = ItemDetailsDialog(self.kb, self.settings["language"], self.style(), self.settings, chat)
-            dlg.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
+            dlg.ask_requested.connect(self.ask_from_tools)
             return dlg
         self.open_window("item", make).show_item(key)
 
@@ -1446,7 +1422,7 @@ class MapleHelperApp:
         """The live sources, kept fresh with no one asking (the owner: every piece of data updates by itself):
         MesoWatch's Free Market sales checked as the app starts and every 15 minutes (it publishes about every 12),
         OSMS's Cash Shop list at start and every hour (ohmi's terms). Both in the background; the copy on disk shows
-        meanwhile, and the open price card, details window and Shop page redraw when a newer one comes in."""
+        meanwhile, and the open details window and Cash shop window redraw when a newer one comes in."""
         from . import mesowatch, osms
         mesowatch.warm()
         osms.warm()
@@ -1456,36 +1432,26 @@ class MapleHelperApp:
         self._osms_timer.start()
 
     def show_market_details(self, key: str):
-        """An item's Free Market sales on MesoWatch in full (chart, where to buy, recent sales), beside the Play
-        tools the first time, then where the player left it (the open window shows the next item)."""
+        """An item's Free Market sales on MesoWatch in full (chart, where to buy, recent sales), beside the chat the
+        first time, then where the player left it (the open window shows the next item)."""
         from .ui.marketview import MarketDetailsDialog
-        tools = self.__dict__.get("_windows", {}).get("tools")
-        anchor = (tools.frameGeometry() if tools is not None and tools.isVisible()
-                  else self.overlay.frameGeometry() if self.overlay.isVisible() else None)
+        chat = self.overlay.frameGeometry() if self.overlay.isVisible() else None
         self.open_window("market", lambda: MarketDetailsDialog(self.kb, self.settings["language"], self.style(),
-                                                                self.settings, anchor)).show_item(key)
+                                                                self.settings, chat)).show_item(key)
 
-    def ask_from_tools(self, question: str, with_screenshot: bool, detail: bool = False, shown: str | None = None):
+    def ask_from_tools(self, question: str):
+        """A question from a tool window, an item's window or the wishlist: asked in the chat, opened for it."""
         if not self.overlay.is_open():
             self.overlay.toggle(self.capture)
         if self.overlay._is_busy():      # an answer is on its way: say so, don't drop the question silently
             self.overlay._say_busy()
             return
-        if with_screenshot:
-            self.overlay.ask_with_screenshot(question, detail=detail, shown=shown)
-        else:
-            self.overlay.ask(question, shown=shown)
-
-    def _tools_call(self, method: str, *args):
-        tools = self.__dict__.get("_windows", {}).get("tools")
-        if tools is not None:
-            getattr(tools, method)(*args)
+        self.overlay.ask(question)
 
     def on_profile_changed(self):
-        self.grind.sync()          # another character: its own session's minute reads (or none)
-        self._tools_call("profile_changed")
         for w in self.__dict__.get("_tool_windows", {}).values():
             w.character_changed()      # each Tools card window reads the new character (level, job, gear, quests)
+        self._game_search_character()  # ... and the search's monster page its Hit & damage
 
     def show_guides(self, open_key: str | None = None):
         from .ui.guides import GuidesDialog
@@ -1557,7 +1523,7 @@ class MapleHelperApp:
         from .ui.toolwindow import NAV
         from .ui.wishlist import WishlistDialog
         dlg = WishlistDialog(keys, self.kb, self.settings["language"], self.style(), c.level if c else None)
-        dlg.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
+        dlg.ask_requested.connect(self.ask_from_tools)
         # who drops it (the Farm window on it) and the way to a dropper's map (its page in the Maps search), answered
         # locally, no AI
         dlg.farm_requested.connect(lambda name: NAV.tool_requested.emit("farm_tool", name))
@@ -1593,7 +1559,6 @@ class MapleHelperApp:
         self.overlay.kb = self.kb
         # a tagged card the new KB dropped would crash the next question (set_tags keeps only cards it has)
         self.overlay.set_tags(self.overlay.focus_keys)
-        self.grind.kb = self.kb
         scanner = getattr(self, "minimap_scanner", None)
         if scanner is not None:
             scanner.set_kb(self.kb)     # its locator is rebuilt from the new KB on the next read
@@ -1658,7 +1623,6 @@ class MapleHelperApp:
     def shutdown(self):
         telemetry.flush()
         presence.stop()
-        self.grind.stop()                        # no minute read while the app goes
         scanner = getattr(self, "minimap_scanner", None)
         if scanner is not None:
             scanner.stop()                  # no minimap read while the app goes

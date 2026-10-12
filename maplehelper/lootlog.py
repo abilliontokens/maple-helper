@@ -610,7 +610,7 @@ def record(s: Summary, start: float) -> dict:
 
 class Store:
     """The running log and the last finished ones, per character, in loot.json (the app's data folder): a log
-    outlives the tools window and an app restart."""
+    outlives its window and an app restart."""
     path = DATA_DIR / "loot.json"
 
     def __init__(self):

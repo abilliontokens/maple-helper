@@ -159,13 +159,13 @@ def test_menu_and_refresh_count_the_inventory_check_as_busy(overlay):
     assert not getattr(ov, "_syncing", False) and finished == [False]
 
 
-def test_a_refresh_refused_mid_answer_still_ends_for_the_exp_meter(overlay):
+def test_a_refresh_refused_mid_answer_still_ends(overlay):
     ov = overlay
     ov.busy = True
     finished = []
     ov.sync_finished.connect(finished.append)
     ov.sync_profile()
-    assert finished == [False]            # the tools window drops its pending reading instead of waiting forever
+    assert finished == [False]            # whoever asked for the read isn't left waiting on it
     ov.busy, ov._syncing = False, True    # a read already running answers for itself
     ov.sync_profile()
     assert finished == [False]
@@ -343,8 +343,8 @@ def test_icon_buttons_have_names_for_screen_readers(overlay):
 
 
 def test_the_controller_button_shows_or_hides_the_toolbar(overlay):
-    """The header's game controller is the bar over the game's show/hide (the play tools live in the bar's Tools
-    card now): its tooltip says so, a click asks for it, and it is lit while the bar is up. The character card has
+    """The header's game controller is the bar over the game's show/hide (the tools live in the bar's Tools card):
+    its tooltip says so, a click asks for it, and it is lit while the bar is up. The character card has
     no minimap button: the minimap is found on its own."""
     seen = []
     overlay.toolbar_requested.connect(lambda: seen.append(1))
@@ -616,21 +616,18 @@ def test_windows_reopen_where_the_player_was():
     chars = [SimpleNamespace(id="A"), SimpleNamespace(id="B")]
     fake = SimpleNamespace(
         profiles=SimpleNamespace(active=chars[1], characters=chars),
-        show_tools=lambda page: calls.append(("tools", page)), show_guides=lambda key: calls.append(("guides", key)),
+        show_guides=lambda key: calls.append(("guides", key)),
         show_patch_notes=lambda e, tab: calls.append(("notes", e, tab)), show_whats_new=lambda n: calls.append(("new", n)),
         show_history=lambda cid: calls.append(("history", cid)), show_wishlist=lambda cid: calls.append(("wish", cid)))
     fake._character = lambda cid: MapleHelperApp._character(fake, cid)
     reopen = lambda kind, dlg: MapleHelperApp._reopen_call(fake, kind, dlg)  # noqa: E731
-    from maplehelper.ui.tools import PAGES
-    reopen("tools", SimpleNamespace(stack=SimpleNamespace(currentIndex=lambda: PAGES.index("build"))))()
     reopen("guides", SimpleNamespace(_reading="guide/x"))()
     reopen("patch_notes", SimpleNamespace(entries=["e"], tab="news"))()     # on the tab it was on
     reopen("whats_new", SimpleNamespace(notes=["n"]))()
     reopen("history:A", None)()
     reopen("wishlist:A", None)()
     assert reopen("history:gone", None) is None
-    assert calls == [("tools", "build"), ("guides", "guide/x"), ("notes", ["e"], "news"), ("new", ["n"]),
-                     ("history", "A"), ("wish", "A")]
+    assert calls == [("guides", "guide/x"), ("notes", ["e"], "news"), ("new", ["n"]), ("history", "A"), ("wish", "A")]
 
 
 # ------------------------------------------------------------------ toasts and patch notes

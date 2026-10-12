@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollA
 
 from .. import availability, bidi, itemdetails, itemterms, quick, sources, translations
 from ..i18n import I18n
-from .controls import FlowLayout, rtl_buttons
+from .controls import FlowLayout, clear, rtl_buttons
 from .glass import SHADOW, GlassDialog
 from .patchnotes import gutter
 from .widgets import EntityCard, fit_picture, name_lv, source_tag, vote_tag, zoom_on_hover
@@ -98,7 +98,6 @@ class ItemDetailsDialog(GlassDialog):
 
     def show_item(self, key: str) -> None:
         """This item (one window: another item's ⓘ shows it here instead of opening a second one)."""
-        from .tools import clear
         t, rtl, kb = self.t, self.t.rtl, self.kb
         self.key = key
         clear(self.lay)

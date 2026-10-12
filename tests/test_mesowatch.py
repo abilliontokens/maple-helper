@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from maplehelper import mesowatch, sellkeep, sources
+from maplehelper import mesowatch
 
 NOW = "2026-10-10T07:47:36+00:00"
 
@@ -117,8 +117,7 @@ def test_parse_reads_the_market_by_game_id():
         ("Windia", 375, 299, 499, 2243, False, 500)
     assert (ore.trend_pct, ore.trend_days) == (-22, 3)              # 499 -> 389, the thin day skipped
     assert snap.items[2060000].price == 0.76                        # under one meso each: kept as it is
-    assert snap.items[1302008].low_data and mesowatch.solid_price(snap.items[1302008]) is None
-    assert mesowatch.solid_price(ore) == 375
+    assert snap.items[1302008].low_data
     assert mesowatch.parse({"version": 1, "market": "COT2", "generated_at": NOW, "items": []}) is None
 
 
@@ -204,15 +203,6 @@ def test_the_chat_reads_only_the_copy_on_hand(site, monkeypatch):
     assert "usually sells for 375 mesos each (middle half 299-499), 2,243 sales seen" in lines[1]
     assert "[item/414]" in lines[1] and "MesoWatch, Windia, community" in lines[1]
     assert "few sales: a rough guess" in lines[2]
-
-
-def test_sell_or_keep_uses_sold_prices_only_without_a_report():
-    v = [sellkeep.Verdict("sell", "item/1", "A", price=10), sellkeep.Verdict("sell", "item/2", "B", price=10),
-         sellkeep.Verdict("sell", "item/3", "C", price=10)]
-    out = {x.key: x for x in sellkeep.with_market(v, {"item/1": 900}, {"item/1": 5000, "item/2": 700})}
-    assert (out["item/1"].fm, out["item/1"].fm_src) == (900, "")             # NiaMeowDB's report stays first
-    assert (out["item/2"].kind, out["item/2"].fm, out["item/2"].fm_src) == ("fm", 700, sources.MESOWATCH)
-    assert out["item/3"].kind == "sell"
 
 
 def test_the_prompt_carries_the_sales_of_a_named_item(kb, site, monkeypatch):

@@ -527,11 +527,6 @@ def item_url(item=None) -> str:
     return SITE
 
 
-def solid_price(s: Sales | None) -> int | None:
-    """The usual sold price when enough sales stand behind it (not low_data, not from scrolled copies only)."""
-    return s.price if s and s.price and not s.low_data and not s.scrolled_only else None
-
-
 # ---------------------------------------------------------------- for the AI (English)
 
 def ai_line(snap: Snapshot, s: Sales, key: str) -> str:

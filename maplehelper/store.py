@@ -162,7 +162,7 @@ DEFAULT_SETTINGS = {
     "saver_mode": False,          # short answers on a lighter model, so the plan lasts longer
     "usage_warned": 0,            # [reset time, level] of the plan-usage warning already shown
     "wishlist": {},               # character id -> item keys the player is hunting for
-    "farm_target": {},            # character id -> the item key the Farm tab shows the droppers of (farm.py)
+    "farm_target": {},            # character id -> the item key the Farm window shows the droppers of (ui/farmtool.py)
     "seen_version": "",           # the app version whose "what's new" the player has seen
     "news_read": [],              # news ids the player dismissed or read (news.py), so they come up once
     "last_session": None,         # summary of the previous play session, shown when the chat next opens
@@ -171,7 +171,6 @@ DEFAULT_SETTINGS = {
     "install_id": "",             # random id for those stats, created on first use
     "presence": True,             # anonymous "the app is running" ping, for player counts (see presence.py)
     "presence_sent": {},          # what that ping last marked as sent: {"ever", "day", "month"}
-    "grind_auto": True,           # the grind tracker reads the game every minute while a session runs
     "minimap_scan_interval": 1.0,  # seconds between two reads of the minimap (where the player is)
     "minimap_hidden_portals": True,  # blue dots on the game's minimap where its invisible teleports are (ui/portaldots.py)
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)
@@ -340,7 +339,7 @@ class Character:
 
     def finish_quest(self, name: str) -> list[str]:
         """The started quests this name finishes, removed from active_quests and returned: compared by
-        quest_key, so a quest marked done in Play tools by its KB name leaves the one the AI started under it."""
+        quest_key, so a quest marked done in the Quests window by its KB name leaves the one the AI started under it."""
         gone = [a for a in self.active_quests if quest_key(a) and quest_key(a) == quest_key(name)]
         for a in gone:
             self.active_quests.remove(a)
@@ -526,11 +525,9 @@ class Profiles:
         if c.avatar:
             (AVATAR_DIR / c.avatar).unlink(missing_ok=True)
         History(cid).clear()
-        from .grind import Store as GrindStore
-        GrindStore().forget(cid)            # its grind sessions go with it
         from . import lootdb
         from .lootlog import Store as LootStore
-        LootStore().forget(cid)             # and its loot logs, in loot.json and the loot database
+        LootStore().forget(cid)             # its loot logs go with it, in loot.json and the loot database
         lootdb.forget(cid)
         self.characters.remove(c)
         if self.active_id == cid:

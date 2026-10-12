@@ -1,16 +1,14 @@
-"""Follow-up fixes after the audit merge (offscreen Qt): quest pre-requisites and gender rewards on the quest card,
-the COT2 label beside shop prices, a quest marked done leaving the active quests, keyboard and accessible names."""
+"""Follow-up fixes after the audit merge (offscreen Qt): the COT2 label beside shop prices in the chat's answer,
+keyboard and accessible names, the tip strip, wide guide tables, dialogs freed at once."""
 import os
-import re
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
-from maplehelper import market, quests, quick  # noqa: E402
+from maplehelper import market, quick  # noqa: E402
 from maplehelper.i18n import I18n  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
@@ -23,80 +21,20 @@ def pump(ms=50):
         time.sleep(0.005)
 
 
-@pytest.fixture
-def tools(isolated_store, kb):
-    from maplehelper.ui.tools import ToolsDialog
-    s, p = isolated_store.Settings(), isolated_store.Profiles()
-    p.add("Elipaz", "Thief", "Assassin", 32)
-    made = []
-
-    def make(lang="en", page="quests"):
-        d = ToolsDialog(kb, p, s, lang, "", {}, page)
-        made.append(d)
-        return d
-    yield make
-    for d in made:
-        d.close()
-
-
-def texts(w) -> str:
-    """What the labels read, without their markup (a term's "?" link splits "10 Fame" in the HTML)."""
-    from PySide6.QtGui import QTextDocument
-    out = []
-    for lb in w.findChildren(QLabel):
-        doc = QTextDocument()
-        doc.setHtml(lb.text())
-        out.append(doc.toPlainText())
-    return "\n".join(out)
-
-
-# ------------------------------------------------------------------ 1: the quest card
-
-def test_quest_card_shows_prerequisites_and_gender_rewards(tools):
-    d = tools()
-    q = quests.Quest("quest/1", "Sauna Day", 20, min_fame=10, accept_cost=1000, notes=["Must not already have: X"],
-                     gender_rewards={"Male": ["Blue Sauna Robe x 1"], "Female": ["Red Sauna Robe x 1"]})
-    shown = texts(d._quest_card(q))
-    assert "Needs at least 10 Fame" in shown and "Costs 1,000 mesos" in shown
-    assert "Must not already have: X" in shown
-    assert "Depends on your character's gender:" in shown
-    shown = re.sub("[\u200e\u200f\u202a-\u202e]", "", shown)
-    # each with its picture and count, the gender after it
-    assert "Blue Sauna Robe x1 (male character)" in shown and "Red Sauna Robe x1 (female character)" in shown
-
-
 # ------------------------------------------------------------------ 2: COT2 prices are labelled where they show
 
-def test_cot2_label_beside_the_shop_price(tools, kb, monkeypatch):
+def test_cot2_label_beside_the_shop_price(kb, monkeypatch):
     from maplehelper import combat
     shop = ("Mia", "Henesys · Potion Shop", 50)
     prices = market.NpcPrices(None, shops=[shop], labels={shop[:2]: "COT2"})
     monkeypatch.setattr(market, "npc_prices", lambda *a: prices)
     monkeypatch.setattr(combat, "released", lambda *a: True)
-    monkeypatch.setattr(market, "free_market", lambda n: None)
-    d = tools(page="prices")
-    d.price_input.setText("Red Potion")
-    d._fill_prices()
-    # the price's own label is its chip, at the line's start, the test's meaning in its tooltip
-    assert "(cheapest at Mia, Potion Shop)" in texts(d.pages["prices"])
-    assert [c.text() for c in d.price_chips] == ["COT2"] and "second closed test" in d.price_chips[0].toolTip()
     a = quick.answer("where to buy red potion", kb, I18n("en"))
     assert a and "Mia · Henesys · Potion Shop · 50 mesos (COT2 test price)" in a.text
     # a price the KB doesn't label stays plain
     prices.labels.clear()
     a = quick.answer("where to buy red potion", kb, I18n("en"))
     assert a and "COT2" not in a.text
-
-
-# ------------------------------------------------------------------ 10: done in Play tools, done for the chat
-
-def test_quest_marked_done_leaves_the_active_quests(tools, isolated_store):
-    d = tools()
-    c = d.c
-    c.active_quests = ["mai's first  training", "Another Quest"]
-    d._quest_done("quest/1000")              # "Mai's First Training" in the fixture KB
-    assert c.quests_done == ["quest/1000"] and c.active_quests == ["Another Quest"]
-    assert isolated_store.Profiles().active.active_quests == ["Another Quest"]      # saved
 
 
 # ------------------------------------------------------------------ 3: the glossary "?" from the keyboard
@@ -152,13 +90,9 @@ def test_term_links_open_from_the_keyboard(monkeypatch):
 
 # ------------------------------------------------------------------ 5: names for screen readers, the tip strip
 
-def test_search_boxes_and_close_have_names(tools):
+def test_close_button_has_a_name_in_both_languages():
     from maplehelper.ui.glass import GlassDialog
-    d = tools(page="quests")
-    assert d.q_search.accessibleName() == I18n("en")("q_search")
-    for name in ("calc_input", "price_input"):
-        assert getattr(d, name).accessibleName(), name
-    assert d.close_btn.accessibleName() == "Close"
+    assert GlassDialog("x", rtl=False).close_btn.accessibleName() == "Close"       # an ✕ glyph, read as nothing
     assert GlassDialog("x", rtl=True).close_btn.accessibleName() == I18n("he")("close")
 
 

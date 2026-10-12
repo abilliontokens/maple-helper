@@ -9,8 +9,8 @@ import time
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QParallelAnimationGroup, QPoint, QPointF, QPropertyAnimation, QRect, QRectF,
                             Qt, QThread, QTimer, Signal)
 from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
-from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
+from PySide6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+                               QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from .. import __version__, bidi, osapi, quick, routes, sources, telemetry
 from ..brain import Answer, Brain
@@ -49,24 +49,6 @@ class AskWorker(QObject):
         except Exception as e:  # noqa: BLE001
             ans = Answer(error=f"internal: {e}")
         self.done.emit(ans)
-
-
-class GrindReadWorker(AskWorker):
-    """A grind tracker read: the app first matches the inventory's icons to the KB (inventory.py: exact where the
-    AI guessed names), so the AI is told which slots hold which potions and only reads their counts."""
-
-    def __init__(self, *args, full=None, cursor=None, kb=None, **kw):
-        super().__init__(*args, **kw)
-        self.full, self.cursor, self.kb = full, cursor, kb
-
-    def run(self):
-        if self.full is not None and self.kb is not None:
-            try:
-                from .. import grind, inventory
-                self.question += grind.inventory_hint(inventory.read(self.full, self.kb, cursor=self.cursor), self.kb)
-            except Exception:      # noqa: BLE001 - the AI still has the screenshot
-                pass
-        super().run()
 
 
 class ControllerButton(QToolButton):
@@ -344,7 +326,7 @@ def visible_rect(rect: QRect, screens: list[QRect]) -> QRect | None:
 
 
 def to_logical(rect: tuple[int, int, int, int]) -> QRect:
-    """Screen pixels (osapi.window_rect, a grab) as Qt's logical coordinates; the inverse of windows_over's mapping."""
+    """Screen pixels (osapi.window_rect, a grab) as Qt's logical coordinates, each screen from its own native origin."""
     x, y, w, h = rect
     if not osapi.SCREEN_COORDS_ARE_PHYSICAL:
         return QRect(x, y, w, h)
@@ -418,31 +400,6 @@ def read_inventory(full, cursor, kb) -> tuple[list, list, str]:
     return tiles, slots, described
 
 
-# an inventory window shows a grid of 16-24 slots; a brick wall passed for 3 (live frames)
-INVENTORY_MIN_SLOTS = 8
-
-
-def local_grind_read(full, table: dict, map_name: str | None) -> tuple[dict, dict] | None:
-    """A grind read without the AI: the bottom bar (level, job, name, EXP) read here (hud.py), the map from the
-    minimap read. None when the AI must read it: the inventory is open (its mesos, potions and loot), or the bar
-    gave no EXP percentage or no sure level. No Qt: runs on a worker thread."""
-    import logging
-
-    import numpy as np
-
-    from .. import hud, inventory
-    if full is None:
-        return None
-    if len(inventory.find_slots(np.asarray(full.convert("RGB")))) >= INVENTORY_MIN_SLOTS:
-        logging.getLogger("maplehelper").debug("grind read: inventory open, the AI reads it")
-        return None
-    got = hud.read(full, table)
-    if got is None or got.exp_pct is None or got.level is None:
-        logging.getLogger("maplehelper").info("grind read: the bar didn't read (%s), the AI reads it", got)
-        return None
-    return got.profile_update(), ({"map": map_name} if map_name else {})
-
-
 def crop_portrait(shot_jpeg: bytes, box: list | None, full, name: str, have_portrait: bool,
                   letters_dir=None) -> bytes | None:
     """The player's own sprite as a 128 px PNG portrait, on their name tag (found in the pixels by the name's
@@ -509,46 +466,6 @@ def set_tip(w: QWidget, text: str) -> None:
     w.setAccessibleName(text.split("\n", 1)[0])    # a long tip's how-to lines are for the eye
 
 
-def windows_over(rect: tuple[int, int, int, int]) -> list[QWidget]:
-    """Our visible top-level windows that overlap the game's rectangle (screen pixels, as osapi.window_rect gives
-    it): the ones a screen grab of the game would catch."""
-    x, y, w, h = rect
-    out = []
-    for win in QApplication.topLevelWidgets():
-        try:
-            if not win.isVisible() or win.windowOpacity() == 0 or win.isMinimized():
-                continue
-            if isinstance(win, QDialog) and win.isModal():
-                continue       # hiding it would end its exec() as cancelled (audit OVL-1)
-            g = win.frameGeometry()
-            left, top, width, height = g.x(), g.y(), g.width(), g.height()
-            screen = win.screen() if osapi.SCREEN_COORDS_ARE_PHYSICAL else None
-            if screen is not None:
-                # Qt maps each screen from its own native origin: native = origin + (logical - origin) * ratio.
-                # logical * ratio was right only for a screen at (0, 0), not a scaled second monitor (audit SCR-4)
-                o, ratio = screen.geometry().topLeft(), screen.devicePixelRatio()
-                left, top = o.x() + (left - o.x()) * ratio, o.y() + (top - o.y()) * ratio
-                width, height = width * ratio, height * ratio
-            right, bottom = left + width, top + height
-        except RuntimeError:       # deleted meanwhile
-            continue
-        # a few pixels of slack: a mixed-DPI desktop rounds the two coordinate systems apart
-        if left < x + w + 4 and right > x - 4 and top < y + h + 4 and bottom > y - 4:
-            out.append(win)
-    return out
-
-
-def show_quietly(w: QWidget) -> None:
-    """Back after a grab without taking the keyboard from the game (the player is playing)."""
-    try:
-        quiet = w.testAttribute(Qt.WA_ShowWithoutActivating)
-        w.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        w.show()
-        w.setAttribute(Qt.WA_ShowWithoutActivating, quiet)
-    except RuntimeError:           # closed meanwhile
-        pass
-
-
 def _alive(w) -> bool:
     """False once Qt deleted the widget (e.g. the chat was cleared)."""
     try:
@@ -576,14 +493,11 @@ class Overlay(EdgeResize, QWidget):
     limits_read = Signal(object)
     profile_changed = Signal()        # level / EXP / stats changed (a screenshot read or the chat)
     sync_finished = Signal(bool)      # a screenshot read ended (True = it read the game)
-    grind_read = Signal(object)       # (character id, profile_update, grind) of a grind tracker read, before sync_finished
-    grind_skipped = Signal(str)       # an automatic grind read that didn't run: "busy" | "no_game" | "covered"
     toolbar_requested = Signal()       # the controller button: show or hide the bar over the game
     edit_character_requested = Signal(str)
     delete_character_requested = Signal(str)      # plan usage read in the background after an answer (ChatGPT)
     inventory_read = Signal(object)    # (question, shown, character id, tiles, slots, description), worker thread
     avatar_cropped = Signal(object)    # (character id, PNG bytes or None, on_done), worker thread
-    local_grind_done = Signal(object)  # (token, shot, full, cursor, (update, grind) or None), worker thread
     tour_ended = Signal()              # the first-run tour was skipped or finished
     news_requested = Signal()          # the megaphone or the news strip: the News window
 
@@ -1248,7 +1162,7 @@ class Overlay(EdgeResize, QWidget):
 
     def _say_busy(self):
         """A question that can't go yet says so (once, not a line per Enter press)."""
-        # no question running: a screen read holds the chat ("still answering" was false during a grind session)
+        # no question running: a screen read holds the chat (it said "still answering", OVL-9)
         key = "busy_wait" if self.busy else "busy_reading"
         line = getattr(self, "_busy_line", None)
         if line is not None and _alive(line) and self.feed_lay.indexOf(line) == self.feed_lay.count() - 1 \
@@ -1473,7 +1387,7 @@ class Overlay(EdgeResize, QWidget):
         self._hidden_context = self._detail_tiles = None      # one character's context never reaches another's
         self.profiles.set_active(cid)
         self.refresh_profile_chip()
-        self.profile_changed.emit()        # the play tools and the grind tracker's minute reads follow
+        self.profile_changed.emit()        # the tool windows follow
         c = self.profiles.active
         if c:
             self.add_system(lambda t, name=c.name: t("switched_character", name=name))
@@ -2553,39 +2467,19 @@ class Overlay(EdgeResize, QWidget):
                      "it even if the profile calls it otherwise, base_class if visible, "
                      "exp_percent, stats) and avatar_box. If the game or the character is not visible, say so briefly "
                      "and leave profile_update empty.")
-    # the play tools' grind tracker: the same read, plus what a session measures (grind.py)
-    GRIND_QUESTION = (" This read is also for the grind tracker: add \"grind\" to the META object: {\"map\": the map's "
-                      "name: the minimap's title has the street on its first line (\"Victoria Road\") and the map on "
-                      "the second (\"Henesys\"), give the second line only, \"monster\": the monster the player is hunting (the kind most often on "
-                      "screen, its English name, only if you recognise it), \"inventory_open\": true or false, "
-                      "\"mesos\": the meso amount at the bottom of the inventory window (an integer, only when the "
-                      "inventory is open), \"potions\": {\"<item name>\": count} for every HP/MP recovery item in the "
-                      "inventory's Use tab with its stack count, summed per item (only when the Use tab is the one "
-                      "shown; {} when it shows none), \"etc\": {\"<item name>\": count} for every item in the "
-                      "inventory's Etc tab with its stack count, summed per item (only when the Etc tab is the one "
-                      "shown; a slot with no number holds 1; {} when it is empty), \"equip\": {\"<item name>\": how "
-                      "many} for the items in the inventory's Equip tab (only when the Equip tab is the one shown; {} "
-                      "when it is empty)}. Leave out anything you can't read clearly.")
 
     SYNC_TIMEOUT_MS = 60_000       # a read still going after a minute is stopped (the button spun on, seen live)
 
-    def sync_profile(self, grind: bool = False):
-        """grind: a grind tracker read (the play tools), which also reads the map, the monster, mesos and potions."""
+    def sync_profile(self):
         if getattr(self, "_syncing", False):
-            if getattr(self, "_sync_auto", False) and not grind:
-                # the grind tracker's quiet read is running: ⟳ makes it the player's read (spinner, result line)
-                self._sync_auto = False
-                self.profile_card.set_busy(True, self.t("syncing"), self.t("sync_reading"))
             return                 # a read is on its way already; it ends with sync_finished for every caller
         if self._is_busy():
-            # an answer or an inventory check is running: say so, and end the request (the play tools' grind tracker
-            # waited forever on its read, then took a later, unrelated read as its sample)
+            # an answer or an inventory check is running: say so, and end the request (whoever asked for the read
+            # doesn't wait on one that never comes)
             self._say_busy()
             self.sync_finished.emit(False)
             return
         self._syncing = True
-        self._sync_grind = grind is True        # (a button's clicked(bool) never makes it one)
-        self._sync_auto = False
         self.profile_card.set_busy(True, self.t("syncing"), self.t("sync_reading"))
         if not hasattr(self, "_sync_timer"):
             self._sync_timer = QTimer(self, singleShot=True, interval=self.SYNC_TIMEOUT_MS, timeout=self._sync_timed_out)
@@ -2594,58 +2488,16 @@ class Overlay(EdgeResize, QWidget):
         self._step_aside(True)
         QTimer.singleShot(120, self._sync_capture)
 
-    def auto_grind_read(self):
-        """The grind tracker's read every minute while a session runs. Quiet: no chat line, no portrait crop, no
-        spinner on the card, and a tick that can't run (an answer or another read on its way, the game closed or
-        covered) is skipped with grind_skipped, never queued. On the player's own model, like the ⟳ read.
-        The capture is a screen grab, so only our windows that are over the game step aside, and only for the
-        grab: beside the game (the usual place while playing) nothing moves at all."""
-        if getattr(self, "_syncing", False) or self._is_busy():
-            self.grind_skipped.emit("busy")
-            return
-        if QApplication.activeModalWidget() or QApplication.activePopupWidget():
-            # hiding a dialog in exec() ends it as cancelled (Edit character lost its edits) and closes a menu
-            # under the cursor: this minute is skipped, the next one reads (audit OVL-1)
-            self.grind_skipped.emit("busy")
-            return
-        try:
-            hwnd = osapi.find_game_window() or self.game_hwnd
-            rect = osapi.window_rect(hwnd) if hwnd else None
-        except Exception:      # noqa: BLE001
-            rect = None
-        if not rect:
-            self.grind_skipped.emit("no_game")
-            return
-        self._syncing, self._sync_grind, self._sync_auto = True, True, True
-        if not hasattr(self, "_sync_timer"):
-            self._sync_timer = QTimer(self, singleShot=True, interval=self.SYNC_TIMEOUT_MS, timeout=self._sync_timed_out)
-        self._sync_timer.start()
-        over = windows_over(rect)
-        hidden = [w for w in over if w is not self]
-        if self in over:
-            self._step_aside(True)
-        for w in hidden:
-            w.hide()           # hidden, not see-through: a see-through tools window left traces in the grab
-        # Windows fades a hidden window out (~250 ms); the chat's opacity takes effect at once
-        wait = 300 if hidden else 120 if over else 0
-        QTimer.singleShot(wait, lambda: self._sync_capture(hidden))
-
-    def _sync_capture(self, stepped_aside: list | None = None):
+    def _sync_capture(self):
         try:
             hwnd = osapi.find_game_window() or self.game_hwnd
             shot = osapi.capture_game(hwnd) if hwnd else None
         except Exception:      # noqa: BLE001 - a failed capture must not leave the button spinning forever
             shot = None
         self._step_aside(False)
-        for w in stepped_aside or ():
-            show_quietly(w)
         if not shot:
             self._sync_ended()
-            from ..capture import LAST_PROBLEM, problem_key
-            if getattr(self, "_sync_auto", False):
-                self._sync_auto = False
-                self.grind_skipped.emit("covered" if LAST_PROBLEM == "covered" else "no_game")
-                return         # waiting for the game: the tracker says so, the chat stays as it is
+            from ..capture import problem_key
             missing = problem_key() or "sync_no_game"
             self.add_system(lambda t: t(missing))
             self.sync_finished.emit(False)
@@ -2655,11 +2507,6 @@ class Overlay(EdgeResize, QWidget):
             from .. import capture
             self._sync_full = capture.LAST_FULL       # the same grab at full resolution, for the portrait
             self._sync_cid = self.profiles.active_id
-            if getattr(self, "_sync_grind", False):
-                # a grind read: the bar is read here first (hud.py), the AI only when the inventory is open or the
-                # bar won't read (the owner's, 2026-10-08: a screenshot to the AI every minute just for the numbers)
-                self._start_local_grind_read(shot, self._sync_full, capture.LAST_CURSOR)
-                return
         except Exception:
             import logging
             logging.getLogger(__name__).exception("profile refresh could not start")
@@ -2667,56 +2514,14 @@ class Overlay(EdgeResize, QWidget):
             return
         self._start_sync_worker(shot)
 
-    def _start_local_grind_read(self, shot: bytes, full, cursor) -> None:
-        """Read the bar on a worker thread; its result comes back through local_grind_done (on the GUI thread)."""
-        import threading
-
-        from .. import plan
-        from .location import LOCATION
-        if not getattr(self, "_local_grind_wired", False):
-            self.local_grind_done.connect(self._on_local_grind)
-            self._local_grind_wired = True
-        table = plan.exp_table(self.kb)
-        here = LOCATION.here
-        map_name = routes.of(self.kb).name(here.map) if here is not None else None
-        token = object()
-        self._local_grind_token = token
-
-        def work():
-            try:
-                got = local_grind_read(full, table, map_name)
-            except Exception:      # noqa: BLE001 - the AI read still runs
-                got = None
-            self.local_grind_done.emit((token, shot, full, cursor, got))
-        threading.Thread(target=work, daemon=True).start()
-
-    def _on_local_grind(self, r: tuple) -> None:
-        token, shot, full, cursor, got = r
-        if token is not getattr(self, "_local_grind_token", None) or not getattr(self, "_syncing", False):
-            return             # timed out meanwhile (said so), or a newer read: this one goes nowhere
-        if got is None:
-            # the inventory is open (its mesos, potions and loot need the AI) or the bar didn't read
-            self._start_sync_worker(shot)
-            return
-        update, grind_obj = got
-        self._on_sync_done(Answer(profile_update=update, grind=grind_obj))
-
     def _start_sync_worker(self, shot: bytes) -> None:
         try:
-            from .. import capture
             self._sync_thread = QThread(self)
             # reading a name, a level and a bar off a screenshot: no knowledge base, no file tools (it went looking
             # through the pages). The player's own model: measured 2026-10-02, Sonnet answered this read in ~3 s and
             # Haiku in 13-50 s, so the "light" model is no faster here
-            if getattr(self, "_sync_grind", False):
-                # the automatic read (one a minute) too: on the light model it took 44 s live (2026-10-04) and
-                # misread "KalimeroZz" as "KalimerZz", which isn't the character, so the read was dropped
-                self._sync_worker = GrindReadWorker(self.brain, self.SYNC_QUESTION + self.GRIND_QUESTION,
-                                                    self.profiles.active, None, shot, light=True, full=self._sync_full,
-                                                    cursor=capture.LAST_CURSOR, kb=self.kb)
-            else:
-                self._sync_worker = AskWorker(self.brain, self.SYNC_QUESTION, self.profiles.active, None, shot,
-                                              light=True)
+            self._sync_worker = AskWorker(self.brain, self.SYNC_QUESTION, self.profiles.active, None, shot,
+                                          light=True)
             self._sync_worker.moveToThread(self._sync_thread)
             self._sync_thread.started.connect(self._sync_worker.run)
             self._sync_worker.done.connect(self._on_sync_done)      # bound method → runs on the GUI thread
@@ -2732,7 +2537,6 @@ class Overlay(EdgeResize, QWidget):
 
     def _sync_ended(self):
         self._syncing = False
-        self._sync_grind = False
         if hasattr(self, "_sync_timer"):
             self._sync_timer.stop()
         self.profile_card.set_busy(False)
@@ -2748,36 +2552,25 @@ class Overlay(EdgeResize, QWidget):
         except Exception:      # noqa: BLE001
             pass
         self._sync_ended()
-        if not getattr(self, "_sync_auto", False):
-            self.add_system(lambda t: t("sync_timeout"))
-        self._sync_auto = False
+        self.add_system(lambda t: t("sync_timeout"))
         self.sync_finished.emit(False)
 
     def _on_sync_done(self, ans: Answer):
         if self.sender() is not None and self.sender() is getattr(self, "_sync_dropped", None):
             return             # it timed out and the player was told; this late answer is not applied
-        grind, auto = getattr(self, "_sync_grind", False), getattr(self, "_sync_auto", False)
-        self._sync_auto = False
         self._sync_ended()
         if ans.error:
-            if not auto:
-                key = self._error_key(ans.error)     # signed out / out of quota said so, not "something went wrong"
-                self.add_system(lambda t: t.p(key, self.settings["provider"]))
+            key = self._error_key(ans.error)     # signed out / out of quota said so, not "something went wrong"
+            self.add_system(lambda t: t.p(key, self.settings["provider"]))
             self.sync_finished.emit(False)
             return
         if self.profiles.active_id != getattr(self, "_sync_cid", None):
             self.sync_finished.emit(False)
             return             # the player switched character meanwhile: this read belongs to the other one
-        if auto:
-            self._quiet_grind_read(ans)
-            return
         if self._offer_other_character(ans, self._sync_shot, getattr(self, "_sync_full", None)):
             self._sync_full = None
             self.sync_finished.emit(False)
             return             # another character is in game: the saved one stays as it is
-        if grind:
-            # the read as the AI gave it: the tracker compares this moment's numbers, never a stale saved EXP %
-            self.grind_read.emit((self._sync_cid, dict(ans.profile_update or {}), dict(ans.grind or {})))
         # a lower level, another class or a job back/sideways: asked like a chat answer's, never applied silently
         asked = risky_read(ans.profile_update, self.profiles.active)
         if asked:
@@ -2807,28 +2600,6 @@ class Overlay(EdgeResize, QWidget):
         self.profile_card.set_busy(True, self.t("syncing"), self.t("sync_reading"))
         self._update_avatar(self._sync_shot, ans.avatar_box, full, on_done=lambda ok: (
             self.profile_card.set_busy(False), finish(ok)))
-
-    def _quiet_grind_read(self, ans: Answer):
-        """An automatic grind read's reply: the numbers go to the tracker and the profile follows (a level-up still
-        says so in the chat), with no "nothing new" line a minute and no portrait crop. Another character on screen
-        is left alone (the ⟳ on the card offers to add it)."""
-        from ..store import hud_name, same_character
-        self._sync_full = None
-        c, name = self.profiles.active, hud_name(ans.profile_update)
-        if c and name and not same_character(c.name, name, c.name_seen, self.profiles.other_names(c)):
-            self.sync_finished.emit(False)
-            return
-        self.grind_read.emit((self._sync_cid, dict(ans.profile_update or {}), dict(ans.grind or {})))
-        if risky_read(ans.profile_update, c):
-            # nobody is asked a minute into a grind: the profile stays as it is, the log keeps the read (audit SCR-1)
-            import logging
-            logging.getLogger(__name__).info("grind read not applied to the profile: %s", ans.profile_update)
-            self.sync_finished.emit(False)
-            return
-        changes = self.profiles.apply_update(ans.profile_update or {})
-        if changes:
-            self._show_changes(changes)
-        self.sync_finished.emit(bool(ans.profile_update))
 
     @staticmethod
     def _error_key(error: str) -> str:
@@ -3078,7 +2849,7 @@ class Overlay(EdgeResize, QWidget):
 
     def _show_changes(self, changes):
         if changes:
-            self.profile_changed.emit()        # the play tools (stats, grind tracker) follow the profile
+            self.profile_changed.emit()        # the tool windows follow the profile
         changes = [ch for ch in changes if ch[0] != "exp"]     # the EXP bar shows it; no chat line per percent
         self.refresh_plan()
         for field, value in changes:

@@ -255,7 +255,7 @@ def test_ask_in_chat_while_busy_says_so_and_continue_closes_the_history():
     history = SimpleNamespace(close=lambda: calls.append("closed"))
     fake = SimpleNamespace(overlay=ov, profiles=SimpleNamespace(active=SimpleNamespace(id="c1")),
                            _windows={"history:c1": history})
-    MapleHelperApp.ask_from_tools(fake, "Who drops it?", False)
+    MapleHelperApp.ask_from_tools(fake, "Who drops it?")
     assert calls == ["busy"]                         # not silently dropped
     calls.clear()
     MapleHelperApp.continue_conversation(fake, "q", "a", [])

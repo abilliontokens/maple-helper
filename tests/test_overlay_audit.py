@@ -127,15 +127,6 @@ def test_ask_while_busy_says_so_once(overlay):
     assert overlay.feed_lay.count() - before == 1
 
 
-# ------------------------------------------------------------------ OVL-10: ⟳ during the quiet minute read
-
-def test_refresh_during_the_quiet_read_takes_it_over(overlay):
-    overlay._syncing, overlay._sync_auto = True, True
-    overlay.sync_profile()
-    assert overlay._sync_auto is False                   # its result is now reported like a ⟳ read
-    overlay._syncing, overlay._sync_auto = False, False
-
-
 # ------------------------------------------------------------------ OVL-11: the read's error says which
 
 def test_a_refresh_error_names_the_problem(overlay):

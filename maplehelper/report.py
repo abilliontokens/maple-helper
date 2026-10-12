@@ -25,7 +25,7 @@ LOG_FILE = LOG_DIR / "maplehelper.log"
 REPORT_SETTINGS = ("language", "app_tint", "app_accent", "app_opacity", "font_size", "answer_length",
                    "start_with_windows", "voice_send_immediately", "voice_language", "voice_last_used", "provider", "model", "codex_model", "grok_model",
                    "gemini_model", "last_model", "api_key_fallback", "onboarding_done", "tour_done", "shot_hints_seen", "usage",
-                   "saver_mode", "seen_version", "instant_answers", "telemetry", "presence", "grind_auto", "minimap_scan_interval",
+                   "saver_mode", "seen_version", "instant_answers", "telemetry", "presence", "minimap_scan_interval",
                    "minimap_hidden_portals", "npc_overlay", "npc_overlay_opacity", "game_toolbar", "game_rides",
                    "overlays_in_screenshots", "loot_overlay", "loot_overlay_folded", "grind_bar", "grind_window",
                    "grind_low_hp", "scroll_planner", "gear_advisor", "craft_advisor", "grind_spots", "farm_tool",

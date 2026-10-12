@@ -87,6 +87,8 @@ class _Nav(QObject):
     read_screen_requested = Signal()      # the chat reads the level, EXP and stats off a screenshot (overlay.sync_profile)
     guide_requested = Signal(str)         # a guide's KB key: the guides window open on it
     ask_requested = Signal(str)           # a question for the chat
+    stats_changed = Signal()              # the active character's ACC/damage edited in a tool window (Grind spots):
+                                          # the search's monster page draws its Hit & damage again
 
 
 NAV = _Nav()
@@ -151,15 +153,6 @@ def _label(text: str, name: str, wrap: bool = False) -> QLabel:
     w = QLabel(text, objectName=name)
     w.setWordWrap(wrap)
     return w
-
-
-def clear(lay) -> None:
-    """Every widget out of a layout (one a window fills again: widgets and stretches only)."""
-    while lay.count():
-        w = lay.takeAt(0).widget()
-        if w is not None:
-            w.hide()            # gone now: deleteLater alone left the old rows drawn under the new ones
-            w.deleteLater()
 
 
 class KeyBox(QLineEdit):
@@ -410,6 +403,9 @@ class ToolWindow(EdgeResize, QWidget):
         bar = self._scroll.verticalScrollBar()
         at = bar.value()
         self._rebuild()
+        # the body's height asked again a turn later: a window made after another one had shown kept a stale
+        # minimum height, every card squashed to its title (the new rows' word-wrap hints not in yet)
+        QTimer.singleShot(0, self, self._scroll.widget().fit)
         QTimer.singleShot(0, self, lambda: bar.setValue(at))
 
     def _refill(self) -> None:
@@ -497,7 +493,7 @@ class ToolWindow(EdgeResize, QWidget):
     def button(self, text: str, then, name: str = "Primary", tip: str = "") -> QPushButton:
         """A button in one of the style's names (Primary, Small, Link): a click runs then(); it never takes the
         keyboard."""
-        b = QPushButton(bidi.plain(text, self.t.rtl).replace("&", "&&"), objectName=name)     # a lone "&": a shortcut
+        b = QPushButton(bidi.button(text, self.t.rtl).replace("&", "&&"), objectName=name)    # a lone "&": a shortcut
         b.setCursor(Qt.PointingHandCursor)
         b.setFocusPolicy(Qt.NoFocus)
         if tip:

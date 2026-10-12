@@ -3,11 +3,12 @@ item card (meso.watch): the usual sale price, the last sale, the last three's av
 where to buy it (the shops seen listing it, cheapest
 first, with their owner's name: that is how a player finds the shop) and the newest sales.
 
-The price card in the Play tools keeps the short version and opens this beside the tools window, then wherever the
-player last left it (one window: another item's button shows that item here)."""
+An item's page in the toolbar's Items search opens it (widgets.MARKET_REQUESTS) beside the chat the first time, then
+wherever the player last left it (one window: another item's button shows that item here)."""
 from __future__ import annotations
 
 import threading
+import time
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath, QPen,
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBu
 from .. import bidi, mesowatch, sources
 from ..i18n import I18n
 from . import theme
-from .controls import Segmented, rtl_buttons
+from .controls import Segmented, clear, rtl_buttons
 from .glass import GlassDialog
 from .itemview import beside, saved_spot
 from .patchnotes import gutter
@@ -36,8 +37,15 @@ def mesos(n) -> str:
 
 
 def ago(t, ts: float | None) -> str:
-    from .tools import market_ago
-    return market_ago(t, ts) if ts else ""
+    """How long ago a listing went up or a sale was made: "5 min ago", "3 h ago", "2 days ago" ("" with no time)."""
+    if not ts:
+        return ""
+    mins = int(max(0, time.time() - ts) // 60)
+    if mins < 60:
+        return t("price_fm_ago_min", n=max(1, mins))
+    if mins < 24 * 60:
+        return t("price_fm_ago_h", n=mins // 60)
+    return t("price_fm_ago_d", n=mins // (24 * 60))
 
 
 # ---------------------------------------------------------------- pictures
@@ -228,7 +236,6 @@ class MarketDetailsDialog(GlassDialog):
 
     def show_item(self, key: str) -> None:
         """This item's sales (the copy on hand: the app keeps it within 15 minutes of the site)."""
-        from .tools import clear
         t = self.t
         self.key = key
         clear(self.lay)

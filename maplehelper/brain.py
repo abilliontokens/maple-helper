@@ -141,7 +141,6 @@ class Answer:
     profile_update: dict = field(default_factory=dict)
     avatar_box: list | None = None
     drop_groups: list = field(default_factory=list)
-    grind: dict = field(default_factory=dict)       # a grind tracker read: map, monster, mesos, potions (grind.py)
     # where an instant answer's data comes from (sources.py: "COT2", "MSEA", "community", "MeowDB", ...): chips
     # beside its badge
     sources: list = field(default_factory=list)
@@ -682,7 +681,7 @@ def split_meta(raw: str, hebrew: bool | None = None) -> tuple[str, dict]:
     if not isinstance(data, dict):
         data = {}
     # every field to the type the app expects: a malformed reply must never replace a good answer with an error
-    for key, typ in (("profile_update", dict), ("entities", list), ("drop_groups", list), ("grind", dict)):
+    for key, typ in (("profile_update", dict), ("entities", list), ("drop_groups", list)):
         if key in data and not isinstance(data[key], typ):
             del data[key]
     _numbers(data.get("profile_update"))
@@ -970,7 +969,7 @@ class Brain:
         if result.model:
             self.last_model = result.model
         return Answer(text=text, entities=entities if every_drop else entities[:12], drop_groups=groups[:8], profile_update=meta.get("profile_update") or {},
-                      grind=meta.get("grind") or {}, avatar_box=box if screenshot_jpeg else None, cost_usd=result.cost_usd,
+                      avatar_box=box if screenshot_jpeg else None, cost_usd=result.cost_usd,
                       limits=result.limits, model=result.model, tool_calls=result.tool_calls, turns=result.turns)
 
     def summarize(self, transcript: str) -> str | None:

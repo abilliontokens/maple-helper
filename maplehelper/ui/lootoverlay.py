@@ -9,7 +9,7 @@ It is built like the other windows over the game (the NPCs here window, the sear
 and at the opacity the player picked for them (npc_overlay_opacity), its text in that glass's palette (dark text on
 the white one), the accent lighting what is on, the title row that drags it, muted secondary text and the same
 rounded buttons. It shows while settings["loot_overlay"] is on:
-the bar's Loot log button and the Loot log page's switch flip it, its ✕ turns it off, and a log starting (from
+the bar's Loot log button flips it, its ✕ turns it off, and a log starting (from
 anywhere) turns it on. A stopped log stays in it, to read what it made. Every 5 s (the clock, the per-hour figures
 and the "how long ago" move between pickups too) and on every pickup its rows are filled again in place, never made
 anew, so nothing flickers. It never takes the keyboard from the game and keeps its place ("loot_overlay_pos") and its
@@ -123,7 +123,7 @@ def _short(n: int | None) -> str:
 
 
 def _elapsed(t: I18n, secs: float) -> str:
-    """How long the log has run: seconds in its first minute, then the grind tracker's own "5 min" / "1:05 h"."""
+    """How long the log has run: seconds in its first minute, then "5 min" / "1:05 h" as the grind bar writes them."""
     s = int(secs)
     if s < 60:
         return t("loot_secs", n=s)
@@ -731,7 +731,7 @@ class LootOverlay(QWidget):
         self.refresh()
 
     def _close_clicked(self, _=False) -> None:
-        """The ✕: the setting off (the bar's button and the Loot log page's switch follow), hidden until switched
+        """The ✕: the setting off (the bar's button follows), hidden until switched
         back on. A running log goes on counting."""
         self.settings["loot_overlay"] = False
         self.hide()

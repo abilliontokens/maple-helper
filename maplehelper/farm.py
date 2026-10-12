@@ -2,11 +2,12 @@
 
 Everything here is the KB's: who drops an item (kb.droppers, on the community's Classic list or the MSEA reference
 list), what an NPC pays for it (the item page's sell price, with the build it is labelled with), where the monster
-lives and the mesos players reported. The KB has no drop rates, so nothing here guesses one: the only rate shown is
-what the player's own farm sessions counted (the loot a session's inventory reads gained, over its kills, grind.py).
+lives and the mesos players reported. The KB has no drop rates, so nothing here guesses one: the only rates shown are
+the player's own pickups per active hour (grindlive.drop_rates, from the loot logs).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from . import availability, combat, market, sources
@@ -14,7 +15,6 @@ from . import availability, combat, market, sources
 # a monster this many levels below the player is still a farming spot: one hit, no risk (farming isn't about EXP,
 # so the band reaches lower than the training spots' combat.SPOT_BELOW)
 FARM_BELOW = 20
-MAX_LOOT_KEPT = 12          # the items a finished session's record keeps
 
 
 @dataclass
@@ -31,16 +31,30 @@ def value(kb, key: str | None) -> Value | None:
     return Value(sell, sources.source_of(kb, key)) if sell else None
 
 
-def item_key(kb, name: str) -> str | None:
-    """The KB item a read's name means: exact, else the shortest item name containing it."""
-    q = (name or "").strip().lower()
-    if not q:
-        return None
-    key = kb._item_by_name.get(q)
-    if not key:
-        part = sorted((n for n in kb._item_by_name if q in n), key=lambda n: (len(n), n))
-        key = kb._item_by_name[part[0]] if part else None
+def fold(name: str) -> str:
+    """A typed or KB item name as names are compared: letter case aside, hyphens and repeated spaces as one space (the
+    KB's own shop tables write "Subi Throwing-Stars" for its "Subi Throwing Stars", TL2-22)."""
+    return re.sub(r"[\s-]+", " ", str(name or "").lower()).strip()
+
+
+def item_named(kb, name: str) -> str | None:
+    """An item's key by its exact name, letter case, hyphens and spaces aside; None when no item is called so."""
+    key = kb._item_by_name.get(str(name or "").strip().lower())
+    if key is None and (q := fold(name)):
+        key = next((k for n, k in kb._item_by_name.items() if fold(n) == q), None)
     return key
+
+
+def pick(kb, name: str) -> str | None:
+    """The item a typed or asked name means to the Farm window: the item by that name (item_named) when a monster
+    drops it, else the shortest name of an item monsters drop that holds it (folded), else the named item itself (its
+    card says no known monster drops it); None when there is none."""
+    key = item_named(kb, name)
+    if key in kb.droppers:
+        return key
+    q = fold(name)
+    part = [(kb.get(k)["name"], k) for k in farmable(kb) if q in fold(kb.get(k)["name"])] if q else []
+    return min(part, key=lambda p: (len(p[0]), p[0]))[1] if part else key
 
 
 def farmable(kb) -> list[str]:
@@ -196,17 +210,6 @@ def _target(kb, m, level: int, wanted: dict, per_monster: int) -> Target | None:
                   kb.community_mesos(m.key))
 
 
-def target_for(kb, name: str, level: int, wanted: dict | None = None, per_monster: int = 6) -> Target | None:
-    """A monster picked by name ("farm it" from another page): its card, whatever its level."""
-    n = name.strip().lower()
-    for m in combat.monsters(kb):
-        if m.name.lower() == n:
-            t = _target(kb, m, level, wanted or {}, per_monster)
-            if t is not None:
-                return t
-    return None
-
-
 def targets(kb, level: int, n: int = 8, below: int = FARM_BELOW, above: int = combat.SPOT_ABOVE,
             per_monster: int = 3, wanted: dict[str, tuple[str, str]] | None = None) -> list[Target]:
     """The monsters around the player's level worth farming, best first: the ones that drop what the player needs
@@ -229,47 +232,3 @@ def targets(kb, level: int, n: int = 8, below: int = FARM_BELOW, above: int = co
             out[m.name] = t
     seen = lambda t: any(d.source == sources.COMMUNITY for d in t.drops)  # noqa: E731
     return sorted(out.values(), key=lambda t: (-t.needed, -t.best, not seen(t), t.level))[:n]
-
-
-# ---------------------------------------------------------------- the player's own drop counts
-
-@dataclass
-class Record:
-    monster: str
-    item: str
-    got: int                    # how many the sessions on this monster gained
-    kills: int                  # ~ the kills of those sessions (EXP / the monster's EXP)
-    sessions: int
-
-    @property
-    def every(self) -> int | None:
-        """~ one drop every this many kills, or None without kills or at a drop or more a kill (per_kill then):
-        3 drops in 1 kill said nothing, 3 in 2 said "once every 2 kills" (audit GAM-10)."""
-        return max(1, round(self.kills / self.got)) if self.got and self.kills and self.got < self.kills else None
-
-    @property
-    def per_kill(self) -> float | None:
-        """~ drops a kill when there's one or more a kill (a stack of them per monster), else None."""
-        return self.got / self.kills if self.kills and self.got >= self.kills else None
-
-
-def records(rows: list[dict]) -> list[Record]:
-    """What the finished sessions' inventory reads counted, per monster and item, across sessions: the player's own
-    drop rate (estimated kills), most dropped first. Every session on a monster whose inventory was read counts
-    toward its kills, the ones where an item didn't drop too. A session without a monster or kills isn't counted."""
-    got: dict[tuple[str, str], int] = {}
-    kills: dict[str, list[int]] = {}           # monster -> [kills, sessions]
-    for r in rows:
-        mob, k, loot = r.get("monster"), r.get("kills"), r.get("loot")
-        if not mob or not isinstance(k, int) or isinstance(k, bool) or k <= 0 or not isinstance(loot, list):
-            continue
-        tot = kills.setdefault(mob, [0, 0])
-        tot[0] += k
-        tot[1] += 1
-        for row in loot:
-            if isinstance(row, list) and len(row) >= 2 and isinstance(row[0], str) and isinstance(row[1], int) \
-                    and not isinstance(row[1], bool) and row[1] > 0:
-                got[(mob, row[0])] = got.get((mob, row[0]), 0) + row[1]
-    out = [Record(mob, item, n, kills[mob][0], kills[mob][1]) for (mob, item), n in got.items()]
-    out.sort(key=lambda r: (r.monster, -r.got, r.item))
-    return out

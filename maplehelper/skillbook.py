@@ -1,6 +1,6 @@
-"""The Skills tab of Play tools' "Build & Skills": every class line's skill books, a tab per job (the 1st job and each
-2nd job; Beginner its own), each skill with its picture, what it does, its max level, what it needs first and what
-it does at level 1 and at its max level.
+"""The Skills tab of the Build & skills window (ui/buildtool.py): every class line's skill books, a tab per job (the
+1st job and each 2nd job; Beginner its own), each skill with its picture, what it does, its max level, what it needs
+first and what it does at level 1 and at its max level.
 
 The skills are the KB's own pages, read by the skills table's parser (tables._skill), so a skill the table leaves
 out (not in the game, a job tier that isn't out) is out here too. Only the jobs up to the 2nd: 3rd job isn't in

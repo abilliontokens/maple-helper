@@ -5,7 +5,7 @@ game draws on an ultrawide screen), and lootlog.auto_box in it. That follows the
 resolution or window size, since the game's interface scales with it. A QTimer ticks on the GUI thread; finding the
 window, the grab and the OCR run on a worker thread (the chat never freezes on them), and the read lines come back
 through a signal to lootlog.Tracker, which turns them into the log's events. The running log is kept here, live, and
-saved to loot.json every few seconds and when it ends (a log outlives the tools window and an app restart); each
+saved to loot.json every few seconds and when it ends (a log outlives its window and an app restart); each
 pickup, once no later read can correct it, also goes into the loot database for good (lootdb.py).
 
 The running log is the grind's run too (the grind bar and window, grindlive.py). Each pickup gets the map the player
@@ -69,8 +69,8 @@ class LootScanner(QObject):
         self._hud_reading = False
         self._logged: set[str] = set()
         self._box_size: tuple[int, int] | None = None     # the size of the last box read: another one starts over
-        self.state = "ok"                     # the last read: "ok", "no_game", "covered" or "no_reader" (the page
-                                              # and the card say why nothing counts)
+        self.state = "ok"                     # the last read: "ok", "no_game", "covered" or "no_reader" (the card
+                                              # says why nothing counts)
         self.last_read: float | None = None   # when a read last found a message line
         self._read_done.connect(self._deliver)
         self._hud_done.connect(self._hud_deliver)
@@ -282,7 +282,7 @@ class LootScanner(QObject):
         box, state = read
         if state != self.state:
             self.state = state
-            self.changed.emit()             # the page and the card say why nothing counts
+            self.changed.emit()             # the card says why nothing counts
         if state == "covered":
             # what is on screen when the game comes back in front is a new baseline (the messages moved meanwhile)
             self._tracker.reset()

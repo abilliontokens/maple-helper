@@ -48,16 +48,6 @@ def test_flow_layout_starts_on_the_right_in_hebrew(app):
     assert labels[0].geometry().right() == 209 and labels[1].geometry().right() == 104
 
 
-def test_stepper_maximum_updates_plus_and_typing(app):
-    from maplehelper.ui.controls import Stepper
-    st = Stepper(1, 10, 10)
-    assert not st.plus.isEnabled()
-    st.setMaximum(20)
-    assert st.plus.isEnabled() and st.edit.validator().top() == 20
-    st.setMaximum(5)
-    assert st.value() == 5 and not st.plus.isEnabled()
-
-
 def test_adaptive_row_puts_the_button_under_a_narrow_field(app):
     from PySide6.QtWidgets import QLineEdit, QPushButton
     from maplehelper.ui.controls import AdaptiveRow
