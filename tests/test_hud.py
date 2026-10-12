@@ -49,6 +49,19 @@ def test_the_live_bar_reads():
     assert got.exp == 219 and got.exp_pct == 12.76 and got.hp == (431, 444)
 
 
+def test_exp_points_with_a_thousands_separator_read_whole():
+    """Past 999 points the bar writes 10,371, which OCR reads as "10.371": the points stopped at "10" and the
+    whole EXP read failed, so no level either (live strip, Lv. 22 Magician, 2026-10-12)."""
+    rows = [("LV.", 613, 59), ("22", 680, 59), ("Magician", 782, 44), ("HP[486/536]", 1071, 43),
+            ("EXP 10.371[35.79%]", 1553, 42), ("formatme", 786, 71)]
+    got = hud.parse(rows, {22: 28980})
+    assert (got.level, got.exp, got.exp_pct) == (22, 10371, 35.79)
+    assert hud.parse([("EXP 1,204[4.20%]", 1553, 42)], {}).exp == 1204
+    pytest.importorskip("rapidocr")
+    live = hud.read_strip(Image.open(FIXTURES / "hud_strip_lv22_live.png"), {22: 28980})
+    assert (live.level, live.exp, live.exp_pct, live.hp) == (22, 10371, 35.79, (486, 536))
+
+
 def test_local_grind_read_skips_the_ai_unless_the_inventory_is_open():
     pytest.importorskip("rapidocr")
     from maplehelper.ui.overlay import local_grind_read

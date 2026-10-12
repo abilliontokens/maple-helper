@@ -3,6 +3,7 @@ import datetime as dt
 import os
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,68 @@ def test_deleting_a_character_deletes_its_logs_and_pickups(isolated_store, kb):
     p.remove(c.id)
     assert _rows("SELECT character_id FROM logs") == [(keep.id,)]
     assert _rows("SELECT amount FROM events") == [(7,)]
+
+
+# the database as the first version made it (before each pickup's map, kill and level), as players have it
+V1_SCHEMA = """
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY,
+    character_id TEXT NOT NULL,
+    character_name TEXT NOT NULL DEFAULT '',
+    started REAL NOT NULL,
+    ended REAL
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY,
+    log_id INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+    t REAL NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('exp', 'mesos', 'item')),
+    amount INTEGER NOT NULL,
+    item TEXT NOT NULL DEFAULT '',
+    item_key TEXT NOT NULL DEFAULT '',
+    npc_price INTEGER
+);
+CREATE INDEX IF NOT EXISTS events_t ON events(t);
+CREATE INDEX IF NOT EXISTS events_log ON events(log_id);
+CREATE INDEX IF NOT EXISTS logs_character ON logs(character_id, started);
+PRAGMA user_version = 1;
+"""
+
+
+def test_a_version_1_database_gets_the_new_columns_in_place_and_keeps_its_rows(isolated_store, kb):
+    with closing(sqlite3.connect(lootdb.PATH)) as con:
+        con.executescript(V1_SCHEMA + "INSERT INTO logs VALUES (1, 'c1', 'Kiwi', 1000.0, 1100.0);"
+                          "INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price) VALUES "
+                          f"(1, 1010.0, 'exp', 21, '', '', NULL), (1, 1020.0, 'item', 2, 'Leaf', '{LEAF}', 5);")
+    assert lootdb.events("c1") == [lootdb.Row(1, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "", "", None),
+                                   lootdb.Row(1, 1000.0, 1100.0, 1020.0, "item", 2, "Leaf", LEAF, 5, "", "", None)]
+    assert _rows("PRAGMA user_version") == [(lootdb.VERSION,)] == [(2,)]
+    b = lootdb.open_log("c1", "Kiwi", 2000.0)
+    lootdb.add_events(b, [lootlog.Event(2010.0, "exp", 32, map="102000000", monster="monster/axe-stump", level=12)], kb)
+    assert lootdb.events("c1")[-1] == lootdb.Row(b, 2000.0, None, 2010.0, "exp", 32, "", "", None, "102000000",
+                                                 "monster/axe-stump", 12)
+    assert _rows("SELECT COUNT(*) FROM events") == [(3,)]
+
+
+def test_events_come_back_oldest_first_and_logs_newest_first(isolated_store, kb):
+    from maplehelper import farm
+    assert lootdb.events("c1") == [] and lootdb.logs("c1") == [] and not lootdb.PATH.exists()     # (none made)
+    a = lootdb.open_log("c1", "Kiwi", 1000.0)
+    lootdb.add_events(a, [lootlog.Event(1020.0, "mesos", 27, map="102000000", level=12),
+                          lootlog.Event(1010.0, "exp", 21, map="102000000", monster="monster/dark-stump", level=12)], kb)
+    lootdb.end_log(a, 1100.0)
+    other = lootdb.open_log("c2", "Other", 1500.0)
+    lootdb.add_events(other, [lootlog.Event(1510.0, "exp", 99)], kb)
+    lootdb.end_log(other, 1600.0)
+    b = lootdb.open_log("c1", "Kiwi", 2000.0)
+    lootdb.add_events(b, [lootlog.Event(2010.0, "item", 1, "Leaf", LEAF, map="100000000", level=13)], kb)
+    assert lootdb.events("c1") == [
+        lootdb.Row(a, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "102000000", "monster/dark-stump", 12),
+        lootdb.Row(a, 1000.0, 1100.0, 1020.0, "mesos", 27, "", "", None, "102000000", "", 12),
+        lootdb.Row(b, 2000.0, None, 2010.0, "item", 1, "Leaf", LEAF, farm.value(kb, LEAF).price, "100000000", "", 13)]
+    assert [r.t for r in lootdb.events("c1", since=1020.0)] == [1020.0, 2010.0] and lootdb.events("c3") == []
+    assert lootdb.logs("c1") == [(b, 2000.0, None), (a, 1000.0, 1100.0)]
+    assert lootdb.logs("c1", limit=1) == [(b, 2000.0, None)] and lootdb.logs("c2") == [(other, 1500.0, 1600.0)]
 
 
 # ------------------------------------------------------------ written by the running log

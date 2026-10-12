@@ -30,6 +30,7 @@ log = logging.getLogger("maplehelper")
 
 MAX_RECENT = 20             # finished logs kept per character
 MAX_EVENTS = 5000           # events kept in a running log (a long session's newest; the totals keep counting)
+MAX_SAMPLES = 4000          # bottom-bar reads kept in a running log (its newest: 2 h 13 min at one per 2 s)
 MAX_ROWS = 10               # rows a stack is followed up to
 UNSEEN_S = 1.6              # a line not read for this long has faded: it stops holding its row
 LIFETIME_S = 12.0           # ... and none outlives this (the game fades them in ~6 s, measured live)
@@ -176,13 +177,17 @@ def agree(a: Line, b: Line) -> bool:
 
 @dataclass
 class Event:
-    """A gain, counted once: kind, value and when."""
+    """A gain, counted once: kind, value and when; where, the player's level then, and for EXP the kill it was (the
+    scanner tags them as it counts them: ui/lootscan.py)."""
     t: float
     kind: str
     amount: int = 0             # EXP / mesos; an item's count
     name: str = ""              # the item as the KB names it (or as read when the KB has no such item)
     key: str = ""               # the KB item, "" when unknown
     saved: bool = False         # written to the loot database (lootdb.py)
+    map: str = ""               # the map id it came on ("102000000"), "" when unknown
+    monster: str = ""           # an EXP gain's kill: the KB monster grindlive.Matcher matched, "" when none
+    level: int | None = None    # the player's level then, None when unknown
 
     def to_json(self) -> dict:
         out = {k: v for k, v in asdict(self).items() if v not in ("", None)}
@@ -198,7 +203,35 @@ class Event:
         if not isinstance(t, (int, float)) or not isinstance(amount, int) or isinstance(amount, bool):
             return None
         return cls(float(t), raw["kind"], amount, str(raw.get("name") or ""), str(raw.get("key") or ""),
-                   raw.get("saved") is True)
+                   raw.get("saved") is True, str(raw.get("map") or ""), str(raw.get("monster") or ""),
+                   _opt_int(raw.get("level")))
+
+
+@dataclass(frozen=True)
+class HudSample:
+    """One read of the game's bottom bar while a log counts (hud.read_strip, every few seconds: ui/lootscan.py), with
+    the map the player was on then; what the read didn't show is None."""
+    t: float
+    map: str = ""
+    level: int | None = None
+    exp: int | None = None          # EXP points into the level
+    exp_pct: float | None = None
+    hp: int | None = None
+    hp_max: int | None = None
+    mp: int | None = None
+    mp_max: int | None = None
+
+    def to_json(self) -> dict:
+        return {k: v for k, v in vars(self).items() if v not in ("", None)}
+
+    @classmethod
+    def from_json(cls, raw) -> HudSample | None:
+        t = _num(raw.get("t")) if isinstance(raw, dict) else None
+        if t is None:
+            return None
+        return cls(t, str(raw.get("map") or ""), level=_opt_int(raw.get("level")), exp=_opt_int(raw.get("exp")),
+                   exp_pct=_num(raw.get("exp_pct")), hp=_opt_int(raw.get("hp")), hp_max=_opt_int(raw.get("hp_max")),
+                   mp=_opt_int(raw.get("mp")), mp_max=_opt_int(raw.get("mp_max")))
 
 
 @dataclass
@@ -381,12 +414,15 @@ def item_names(kb) -> dict[str, str]:
 
 @dataclass
 class Log:
-    """One loot log: its events (the newest MAX_EVENTS), and the totals of the older ones it let go."""
+    """One loot log, the grind's run too: its events (the newest MAX_EVENTS) and the totals of the older ones it let
+    go, the bottom bar's reads while it counted (the newest MAX_SAMPLES), and the player's pauses."""
     start: float = field(default_factory=time.time)
     ended: float | None = None
     events: list[Event] = field(default_factory=list)
     base: dict = field(default_factory=lambda: {"exp": 0, "mesos": 0, "items": {}})
     db_id: int | None = None    # its row in the loot database (lootdb.py); None until it has one
+    samples: list[HudSample] = field(default_factory=list)
+    pauses: list[list[float | None]] = field(default_factory=list)  # [start, end] of each pause; end None while on
 
     def add(self, evs: list[Event]) -> None:
         self.events.extend(evs)
@@ -394,6 +430,24 @@ class Log:
             gone = self.events[:len(self.events) - MAX_EVENTS]
             del self.events[:len(gone)]
             _total(gone, self.base)
+
+    def add_sample(self, s: HudSample) -> None:
+        self.samples.append(s)
+        if len(self.samples) > MAX_SAMPLES:
+            del self.samples[:len(self.samples) - MAX_SAMPLES]
+
+    @property
+    def paused(self) -> bool:
+        """The player paused it and it hasn't resumed: its last pause is still open."""
+        return bool(self.pauses) and self.pauses[-1][1] is None
+
+    def pause(self, now: float) -> None:
+        if not self.paused:
+            self.pauses.append([now, None])
+
+    def resume(self, now: float) -> None:
+        if self.paused:
+            self.pauses[-1][1] = now
 
     def totals(self) -> tuple[int, int, dict[str, list]]:
         """(EXP, mesos, {item name: [count, key]}), from the events as they read now (a later read of a line can
@@ -408,7 +462,8 @@ class Log:
 
     def to_json(self) -> dict:
         return {"start": self.start, "ended": self.ended, "events": [e.to_json() for e in self.events],
-                "base": self.base, "db_id": self.db_id}
+                "base": self.base, "db_id": self.db_id, "samples": [s.to_json() for s in self.samples],
+                "pauses": [list(p) for p in self.pauses]}
 
     @classmethod
     def from_json(cls, raw) -> Log | None:
@@ -424,11 +479,32 @@ class Log:
                                  if isinstance(v, list) and len(v) == 2}}
         db_id = raw.get("db_id")
         lg.db_id = db_id if isinstance(db_id, int) and not isinstance(db_id, bool) else None
+        samples, pauses = raw.get("samples"), raw.get("pauses")
+        if isinstance(samples, list):
+            lg.samples = [s for r in samples[-MAX_SAMPLES:] if (s := HudSample.from_json(r))]
+        if isinstance(pauses, list):
+            lg.pauses = [p for r in pauses if (p := _pause(r))]
         return lg
 
 
 def _int(v) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+
+def _opt_int(v) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _num(v) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _pause(raw) -> list[float | None] | None:
+    """A saved [start, end] pause (end None: still paused); None when it isn't one."""
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    start, end = _num(raw[0]), _num(raw[1])
+    return [start, end] if start is not None and (end is not None or raw[1] is None) else None
 
 
 def _total(evs: list[Event], out: dict) -> None:
@@ -519,6 +595,7 @@ class Store:
         if not lg or lg.ended:
             return None
         lg.ended = now or time.time()
+        lg.resume(lg.ended)                 # a pause still on ends with it
         s = summarize(kb, lg, lg.ended)
         rec = record(s, lg.start) if (s.exp or s.mesos or s.picked) else None
         if rec:

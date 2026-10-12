@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 import webbrowser
 
 from PySide6.QtCore import QLibraryInfo, QLockFile, QObject, Qt, QTimer, QTranslator, Signal
@@ -31,6 +32,8 @@ KB_CHECK_MS = 60 * 60 * 1000     # an open app looks for a new KB this often: th
                                  # small manifest is read when there is nothing new)
 APP_CHECK_MS = 15 * 60 * 1000    # and for a new app release this often: one small GitHub API call (60 an hour allowed)
 HOTKEY_TOOLBAR = 1              # the one system-wide key: shows or hides the bar over the game (game_toolbar_hotkey)
+GRIND_ALERT_MARGIN_S = 5.0      # the grind's alerts look this far back past the newest pickup / bar read already seen
+                                # (a read lands after its own time; _grind_changed says each alert once)
 # the .ico carries every Windows size; macOS draws the menu bar and Dock from a PNG
 APP_ICON = "app.ico" if sys.platform == "win32" else "icon-256.png"
 
@@ -253,6 +256,25 @@ class MapleHelperApp:
         self.game_toolbar.loot_toggled.connect(self.loot_overlay.sync)
         self.loot_overlay.closed.connect(self.game_toolbar.refresh)
         self.loot_scanner.changed.connect(self.game_toolbar.refresh)     # a log starting opens it: the button follows
+        # the grind bar over the game (ui/grindbar.py): the same run's grind at a glance. The toolbar's Grind button is
+        # its setting, and while it is on the loot reads watch for the first EXP to start a run (ui/lootscan.py). A click
+        # on it opens the grind window (ui/grindwindow.py), made on the first ask, or now when the app last closed with
+        # it open
+        from .ui.grindbar import GrindBar
+        self.grind_bar = GrindBar(self.loot_scanner, self.settings, self.kb, self.profiles,
+                                  I18n(self.settings["language"] or "he"))
+        self.grind_window = None
+        self._grind_log = None              # the run the last scanner change found live: its end opens its summary
+        self._grind_since = time.time()     # alerts are looked for in what came after this (_grind_changed)
+        self._grind_toasted: set = set()    # ... and those of this run already said, by (when, kind, text, item)
+        self.loot_scanner.changed.connect(self.grind_bar.refresh)
+        self.loot_scanner.changed.connect(self._grind_changed)
+        self.game_toolbar.grind_toggled.connect(self._grind_toggled)
+        self.grind_bar.closed.connect(self._grind_toggled)       # its right-click Hide: the toolbar's button goes off
+        self.grind_bar.open_window.connect(self._open_grind_window)
+        self.grind_bar.refresh()
+        if self.settings["grind_window"]:
+            self._grind_window().refresh()
         # the bar's Tools card (Scrolls, Gear, Crafting): the tool windows (ui/scrollplanner.py, ui/gearadvisor.py,
         # ui/craftadvisor.py), made on the first ask, or now when the app last closed with one open
         self._tool_windows: dict = {}
@@ -402,6 +424,77 @@ class MapleHelperApp:
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
             where.show_map(where.key)
+
+    def _grind_toggled(self) -> None:
+        """The toolbar's Grind button (or the bar's own Hide) flipped settings["grind_bar"]: the bar shows or hides,
+        the toolbar's button follows, and the loot reads watch for a run's first EXP only while the bar is on."""
+        self.grind_bar.refresh()
+        self.game_toolbar.refresh()
+        self.loot_scanner.restart()
+
+    def _grind_window(self):
+        """The grind window (ui/grindwindow.py), made on the first ask."""
+        if self.grind_window is None:
+            from .ui.grindwindow import GrindWindow
+            self.grind_window = GrindWindow(self.kb, self.settings, self.profiles, self.loot_scanner,
+                                            I18n(self.settings["language"] or "he"))
+            self.grind_window.route_requested.connect(self._show_grind_route)
+        return self.grind_window
+
+    def _open_grind_window(self) -> None:
+        """The grind bar clicked: its window opens (under the toolbar until the player has placed it), or comes up."""
+        w = self._grind_window()
+        if not w.isVisible() and not isinstance(self.settings["grind_window_geom"], dict):
+            w.place_under(self.game_toolbar.frameGeometry())
+        self.settings["grind_window"] = True
+        w.refresh()
+        w.raise_()
+
+    def _show_grind_route(self, map_id: str) -> None:
+        """The grind window's way to a spot: the search window in its Maps mode with that map's page beside it, the way
+        there from the player's map on it (ui/gamesearch.py)."""
+        search = getattr(self, "game_search", None)
+        if search is None or not search.isVisible() or search._kind != "map":
+            self._open_game_search("map")
+        self.game_search._detail.open_view("map", f"map/{map_id}")
+
+    def _grind_changed(self) -> None:
+        """A loot scanner change, for the grind while its bar or window is on: a run that just ended with EXP opens its
+        summary in the grind window, and each thing that just happened in the running one is said in a toast
+        (grindlive.alerts: a tracked item picked up, a goal reached, HP low, the run pausing by itself, a level-up, a
+        death), the bar flashing for a tracked item and a level-up.
+
+        What is new is what came after self._grind_since, with GRIND_ALERT_MARGIN_S to spare: a bar read lands about
+        half a second after its own time, and an item whose name is read a moment late keeps the time its line showed.
+        The overlap is said once: the alerts already toasted in this run are kept by (when, kind, text, item)."""
+        from . import grindlive
+        scanner = self.loot_scanner
+        cid = scanner.cid()
+        lg = scanner.log_for(cid) if scanner.running(cid) else None
+        ended, self._grind_log = self._grind_log, lg
+        on = bool(self.settings["grind_bar"] or self.settings["grind_window"])
+        if lg is not ended:
+            self._grind_toasted.clear()
+            if on and lg is None and ended is not None and ended.ended is not None and ended.totals()[0] > 0:
+                self._grind_window().show_summary(grindlive.summary(self.kb, ended, self.profiles.active))
+        if lg is None or not on:
+            self._grind_since = time.time()     # switched on (or a run seen) later: only what comes after counts
+            return
+        goals = [g for g in (grindlive.Goal.from_json(d) for d in self.settings["grind_goals"] or []) if g is not None]
+        found = grindlive.alerts(self.kb, lg, self.profiles.active, goals, wishlist.items(self.settings, cid),
+                                 float(self.settings["grind_low_hp"] or 0), since=self._grind_since - GRIND_ALERT_MARGIN_S)
+        t = I18n(self.settings["language"])
+        for a in found:
+            seen = (a.t, a.kind, a.key, a.item_key)
+            if seen in self._grind_toasted:
+                continue
+            self._grind_toasted.add(seen)
+            self.toast(t(a.key, **a.params))
+            if a.kind in ("wishlist", "level"):
+                self.grind_bar.flash()
+        newest = min(lg.events[-1].t if lg.events else float("inf"), lg.samples[-1].t if lg.samples else float("inf"))
+        if newest != float("inf"):
+            self._grind_since = max(self._grind_since, newest)
 
     def register_toolbar_hotkey(self) -> None:
         """The bar's key (game_toolbar_hotkey) bound now in place of the old one; none: let go. A key that can't be
@@ -1001,6 +1094,11 @@ class MapleHelperApp:
                 loot = getattr(self, "loot_overlay", None)
                 if loot is not None:
                     loot.apply_language(I18n(self.settings["language"] or "he"))
+                grind = getattr(self, "grind_bar", None)
+                if grind is not None:
+                    grind.apply_language(I18n(self.settings["language"] or "he"))
+                    if self.grind_window is not None:
+                        self.grind_window.apply_language(I18n(self.settings["language"] or "he"))
                 for w in self.__dict__.get("_tool_windows", {}).values():
                     w.apply_language(I18n(self.settings["language"] or "he"))
                 self._reopen_windows_in_new_look()
@@ -1059,6 +1157,11 @@ class MapleHelperApp:
         loot = getattr(self, "loot_overlay", None)
         if loot is not None:
             loot.sync()            # the loot log's window at the windows' opacity
+        grind = getattr(self, "grind_bar", None)
+        if grind is not None:
+            grind.refresh()        # the grind bar at the windows' look and opacity (or hidden: its setting off)
+            if self.grind_window is not None:
+                self.grind_window.refresh()
         for w in self.__dict__.get("_tool_windows", {}).values():
             w.refresh()            # the scroll planner / gear advisor at the windows' opacity
         self._apply_overlay_capture()
@@ -1071,7 +1174,8 @@ class MapleHelperApp:
         npc = getattr(self, "npc_overlay", None)
         for w in (getattr(self, "portal_dots", None), npc, getattr(npc, "_guide", None),
                   getattr(self, "game_toolbar", None), search, getattr(search, "_detail", None),
-                  getattr(self, "loot_overlay", None), *self.__dict__.get("_tool_windows", {}).values(),
+                  getattr(self, "loot_overlay", None), getattr(self, "grind_bar", None),
+                  getattr(self, "grind_window", None), *self.__dict__.get("_tool_windows", {}).values(),
                   # the crafting advisor's Forge plan window beside it
                   *(getattr(w, "plan_window", None) for w in self.__dict__.get("_tool_windows", {}).values())):
             if w is not None:
@@ -1509,6 +1613,9 @@ class MapleHelperApp:
         if loot is not None:
             loot.set_kb(self.kb)        # the item names it matches reads against
             self.loot_overlay.kb = self.kb
+            self.grind_bar.set_kb(self.kb)      # the new KB's maps, monsters and items in its figures
+            if self.grind_window is not None:
+                self.grind_window.set_kb(self.kb)
         for w in self.__dict__.get("_tool_windows", {}).values():
             w.set_kb(self.kb)                # the new KB's equips and scrolls
         self.overlay.show_scope()           # the new KB's "verified on" date
@@ -1562,6 +1669,9 @@ class MapleHelperApp:
         if loot is not None:
             loot.stop()                     # no loot read while the app goes; the running log is saved
             self.loot_overlay.hide()
+            self.grind_bar.hide()           # (its setting stays: open again next time)
+            if self.grind_window is not None:
+                self.grind_window.hide()
         for w in self.__dict__.get("_tool_windows", {}).values():
             w.hide()                        # (their setting stays: open again next time)
         try:

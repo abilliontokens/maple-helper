@@ -23,6 +23,8 @@ def _windows(kb, s, profiles):
     from maplehelper.ui.gamesearch import DetailWindow, GameSearch
     from maplehelper.ui.gametoolbar import GameToolbar, _SettingsPanel
     from maplehelper.ui.gearadvisor import GearAdvisor
+    from maplehelper.ui.grindbar import GrindBar
+    from maplehelper.ui.grindwindow import GrindWindow
     from maplehelper.ui.lootoverlay import LootOverlay
     from maplehelper.ui.lootscan import LootScanner
     from maplehelper.ui.npcoverlay import GuideWindow, NpcOverlay
@@ -37,7 +39,9 @@ def _windows(kb, s, profiles):
     made = {"bar": bar, "bar settings": _SettingsPanel(bar), "NPCs here": npc, "guide": GuideWindow(npc),
             "search": search, "search page": DetailWindow(search), "loot log": LootOverlay(scanner, s, kb, t),
             "scroll planner": ScrollPlanner(kb, s, profiles, t), "gear": GearAdvisor(kb, s, profiles, t),
-            "crafting": craft, "forge plan": ForgePlanWindow(craft), "portal dots": PortalDots(kb, s)}
+            "crafting": craft, "forge plan": ForgePlanWindow(craft), "portal dots": PortalDots(kb, s),
+            "grind bar": GrindBar(scanner, s, kb, profiles, t),
+            "grind window": GrindWindow(kb, s, profiles, scanner, t)}
     return made, scanner
 
 

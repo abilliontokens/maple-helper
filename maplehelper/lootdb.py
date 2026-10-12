@@ -1,7 +1,8 @@
 """Every loot log, kept for good in a SQLite database (loot.sqlite in the app's data folder): each log, and each EXP,
-mesos and item pickup it counted, with the time it came and what an NPC paid for the item then. loot.json keeps only
-the running log and a short list of finished ones; this keeps everything, to look back at any day ("how much did I
-make on Saturday?": `day`, `days`) or anything else later.
+mesos and item pickup it counted, with the time it came, what an NPC paid for the item then, the map it came on, the
+player's level then and, for EXP, the monster it was a kill of. loot.json keeps only the running log and a short list
+of finished ones; this keeps everything, to look back at any day ("how much did I make on Saturday?": `day`, `days`),
+and for the grind's history, drop rates and best spots (`events`, `logs`: grindlive.py).
 
 Writes come from the loot scanner on the GUI thread, a few rows every few seconds; each call opens its own
 connection (sqlite3 connections don't cross threads), so a reader on another thread is fine too. No Qt."""
@@ -14,13 +15,14 @@ import time
 from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from .store import DATA_DIR
 
 log = logging.getLogger("maplehelper")
 
 PATH = DATA_DIR / "loot.sqlite"
-VERSION = 1
+VERSION = 2
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY,
@@ -43,6 +45,14 @@ CREATE INDEX IF NOT EXISTS events_t ON events(t);
 CREATE INDEX IF NOT EXISTS events_log ON events(log_id);
 CREATE INDEX IF NOT EXISTS logs_character ON logs(character_id, started);
 """
+# what each version added to the tables above (version 1's), in place: an older database's rows keep the defaults.
+# 2: each pickup's map (a bare id, "102000000"; '' when unknown), an EXP gain's kill (the KB monster's key; '' when
+# none matched) and the player's level then (NULL when unknown)
+_UPGRADES = {
+    2: ("ALTER TABLE events ADD COLUMN map_key TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN monster_key TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN level INTEGER"),
+}
 
 
 def _connect() -> sqlite3.Connection:
@@ -50,10 +60,22 @@ def _connect() -> sqlite3.Connection:
     con = sqlite3.connect(PATH, timeout=5)
     con.execute("PRAGMA foreign_keys = ON")
     if con.execute("PRAGMA user_version").fetchone()[0] < VERSION:
-        con.executescript(_SCHEMA)
-        con.execute(f"PRAGMA user_version = {VERSION}")
-        con.execute("PRAGMA journal_mode = WAL")     # a reader never waits on the scanner's writes
+        _upgrade(con)
     return con
+
+
+def _upgrade(con: sqlite3.Connection) -> None:
+    """A new database's tables, or an older one's brought up to VERSION: in one write transaction, so a connection
+    upgrading at the same time waits, then finds it done."""
+    con.executescript(_SCHEMA)                  # (IF NOT EXISTS: an older database keeps its own tables)
+    with con:
+        con.execute("BEGIN IMMEDIATE")
+        have = con.execute("PRAGMA user_version").fetchone()[0]
+        for version in range(have + 1, VERSION + 1):
+            for sql in _UPGRADES.get(version, ()):
+                con.execute(sql)
+        con.execute(f"PRAGMA user_version = {VERSION}")
+    con.execute("PRAGMA journal_mode = WAL")    # a reader never waits on the scanner's writes
 
 
 def open_log(character_id: str, character_name: str, started: float) -> int:
@@ -73,7 +95,8 @@ def end_log(log_id: int, ended: float) -> None:
 
 
 def add_events(log_id: int, events: Iterable, kb) -> None:
-    """The log's pickups (lootlog.Event), each with what an NPC pays for its item now."""
+    """The log's pickups (lootlog.Event), each with what an NPC pays for its item now, its map, the player's level
+    and an EXP gain's kill."""
     from . import farm
     rows = []
     for e in events:
@@ -82,11 +105,11 @@ def add_events(log_id: int, events: Iterable, kb) -> None:
             v = farm.value(kb, e.key)
             price = v.price if v else None
         rows.append((log_id, e.t, e.kind, e.amount, e.name if e.kind == "item" else "",
-                     e.key if e.kind == "item" else "", price))
+                     e.key if e.kind == "item" else "", price, e.map, e.monster, e.level))
     if rows:
         with closing(_connect()) as con, con:
-            con.executemany("INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+            con.executemany("INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price, map_key, "
+                            "monster_key, level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
 def forget(character_id: str) -> None:
@@ -158,3 +181,43 @@ def days(character_id: str, limit: int = 30) -> list[Day]:
             "SELECT DISTINCT date(e.t, 'unixepoch', 'localtime') AS d FROM events e JOIN logs l ON l.id = e.log_id "
             "WHERE l.character_id = ? ORDER BY d DESC LIMIT ?", (character_id, limit))]
     return [day(character_id, d) for d in dates]
+
+
+class Row(NamedTuple):
+    """A pickup as `events` reads it back, with its log's start and end."""
+    log_id: int
+    started: float
+    ended: float | None             # None while the log runs
+    t: float
+    kind: str                       # "exp" | "mesos" | "item"
+    amount: int
+    item: str
+    item_key: str
+    npc_price: int | None
+    map_key: str
+    monster_key: str
+    level: int | None
+
+
+def events(character_id: str, since: float | None = None) -> list[Row]:
+    """Every pickup of the character's logs (those from `since` on, unix seconds), oldest first; [] with no
+    database."""
+    if not PATH.exists():
+        return []
+    sql = ("SELECT e.log_id, l.started, l.ended, e.t, e.kind, e.amount, e.item, e.item_key, e.npc_price, e.map_key, "
+           "e.monster_key, e.level FROM events e JOIN logs l ON l.id = e.log_id WHERE l.character_id = ?")
+    args: list = [character_id]
+    if since is not None:
+        sql += " AND e.t >= ?"
+        args.append(since)
+    with closing(_connect()) as con:
+        return [Row(*r) for r in con.execute(sql + " ORDER BY e.t, e.id", args)]
+
+
+def logs(character_id: str, limit: int = 50) -> list[tuple[int, float, float | None]]:
+    """The character's logs, newest first: (id, started, ended: None while it runs); [] with no database."""
+    if not PATH.exists():
+        return []
+    with closing(_connect()) as con:
+        return con.execute("SELECT id, started, ended FROM logs WHERE character_id = ? "
+                           "ORDER BY started DESC, id DESC LIMIT ?", (character_id, limit)).fetchall()
