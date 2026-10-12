@@ -93,10 +93,9 @@ def test_nothing_to_place_hides_the_dots(dots, change):
 
 def test_a_new_box_moves_the_dots_over_it(dots):
     """The minimap window found elsewhere, or another size (a map with a bigger minimap): the dots' window covers the
-    new box at once, the dots at the same place in it; the drawn box in the settings plays no part."""
+    new box at once, the dots at the same place in it."""
     from PySide6.QtCore import QPointF, QRect
-    w, s, loc = dots
-    s["minimap_region"] = {"x": 900, "y": 900, "w": 50, "h": 50}
+    w, _, loc = dots
     _place(loc, _here())
     assert w.geometry() == QRect(100, 100, 200, 200)
     loc.set_box({"x": 40, "y": 60, "w": 260, "h": 230})

@@ -1,16 +1,17 @@
 """The little bar over the game: the NPCs-here window's own switch, the searches — where a monster lives, any NPC,
 any map, any item, and whether an item is safe to sell (each asks the app to open ui/gamesearch.py in that mode) —
-the loot log, the grind bar (ui/grindbar.py), and Tools: a little card with the tool windows (Scrolls, Gear,
-Crafting). Like the NPCs window it floats over the game: frameless, always on top, never taking the keyboard from it
-(clicks still work), glass the minimap reads never see. Its ends are draggable (its sides; its top and bottom when
-the ◯ before the grip stands it upright): the buttons wrap into as many lines as the length leaves room for, the
-other side following, and show their icons alone once the words would take more than WORD_LINES_MAX lines; the
-length is kept in game_toolbar_width (game_toolbar_height upright). Each button has a line icon (assets/icons/toolbar,
-Lucide's) drawn in its text's colour: small beside the words, or alone (a short bar, or the ⚙'s icons mode) with the
-name in the tooltip. The ⚙ beside the ✕ opens the panel with the look of every window over the game, the icons mode,
+the loot log, the grind bar (ui/grindbar.py), and Tools: a little card with the tool windows (Grind spots, Farm,
+Quests, Citizenship, Build & skills, Gear, Scrolls, Crafting, Cash shop). Like the NPCs window it floats over the
+game: frameless, always on top, never taking the keyboard from it (clicks still work), glass the minimap reads never
+see. Its ends are draggable (its sides; its top and bottom when the ◯ before the grip stands it upright): the buttons
+wrap into as many lines as the length leaves room for, the other side following, and show their icons alone once the
+words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width (game_toolbar_height
+upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's colour: small beside the
+words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙ beside the ✕ opens the
+panel with the look of every window over the game, the icons mode,
 the bar's show/hide key and Cabs & Teleports (_SettingsPanel below); the ✕ hides the bar (the app then says how to
 bring it back). Where the player left it is kept in game_toolbar_pos; with none saved it opens just above the game's
-minimap window (found at the game's top left, else the box the player drew) and follows it until moved. Every colour
+minimap window (found at the game's top left) and follows it until moved. Every colour
 is read from npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark
 text on the white one."""
 from __future__ import annotations
@@ -26,6 +27,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -70,12 +72,17 @@ FLOW_GAP = 6                                              # between the buttons,
 WORD_LINES_MAX = 2
 QT_MAX = 16777215                                         # Qt's "no limit" for a widget's size
 KINDS = {"monster_npc": "tb_monster_npc", "map": "tb_maps", "item": "tb_items", "sell": "tb_sell"}  # search buttons, i18n keys
-# the tool windows the Tools card shows and hides: each button is its window's setting -> its i18n key
-TOOLS = {"scroll_planner": "tb_scrolls", "gear_advisor": "tb_gear", "craft_advisor": "tb_craft"}
+# the tool windows the Tools card shows and hides, in the card's order: each button is its window's setting -> its i18n
+# key (app.py makes each window: ui/toolwindow.py's tool windows, the scroll planner, gear and crafting advisors)
+TOOLS = {"grind_spots": "tb_spots", "farm_tool": "tb_farm", "quest_tool": "tb_quests", "citizenship": "tb_town",
+         "build_tool": "tb_build", "gear_advisor": "tb_gear", "scroll_planner": "tb_scrolls", "craft_advisor": "tb_craft",
+         "cash_shop": "tb_shop"}
 # each button's line icon, by its i18n key: assets/icons/toolbar/<name>.svg (Lucide's, its LICENSE beside them)
 ICONS = {"tb_npcs_here": "users", "tb_monster_npc": "ghost", "tb_maps": "map", "tb_items": "backpack",
          "tb_sell": "coins", "tb_loot": "scroll-text", "tb_grind": "swords", "tb_tools": "toolbox",
-         "tb_scrolls": "sparkles", "tb_gear": "shield", "tb_craft": "hammer"}
+         "tb_spots": "crosshair", "tb_farm": "sprout", "tb_quests": "list-checks", "tb_town": "landmark",
+         "tb_build": "dumbbell", "tb_gear": "shield", "tb_scrolls": "sparkles", "tb_craft": "hammer", "tb_shop": "gem"}
+MENU_COLS = 2           # the Tools card's buttons a row, in TOOLS' order (mirrored in Hebrew)
 AWAY_MS = 1000          # the mouse this long off the Tools card and its button: the card goes
 AWAY_POLL_MS = 150      # ... checked this often while it is up (it takes no focus to lose)
 ICON_PX = 18            # an icon alone on its button (icons mode)
@@ -598,10 +605,11 @@ class _SettingsPanel(QWidget):
 
 
 class _ToolsMenu(QWidget):
-    """The bar's Tools button's little glass card: Scrolls, Gear and Crafting, each its window's switch (lit while
-    the window is open; a click flips its setting through the bar's tool_toggled). Like the bar it never takes the
-    keyboard from the game. It goes on a pick, on the Tools button again, with the bar hidden or moved, or once the
-    mouse has been off it and the Tools button for AWAY_MS (no focus to lose: _check_away asks where the mouse is)."""
+    """The bar's Tools button's little glass card: the tool windows (TOOLS) in MENU_COLS columns, read in rows from
+    the leading edge (the right, in Hebrew), all one width; each is its window's switch (lit while the window is open;
+    a click flips its setting through the bar's tool_toggled). Like the bar it never takes the keyboard from the game.
+    It goes on a pick, on the Tools button again, with the bar hidden or moved, or once the mouse has been off it and
+    the Tools button for AWAY_MS (no focus to lose: _check_away asks where the mouse is)."""
 
     def __init__(self, bar: GameToolbar):
         super().__init__(bar, _flags())
@@ -613,17 +621,19 @@ class _ToolsMenu(QWidget):
         self.setStyleSheet(bar.styleSheet())       # the bar's (qss); _restyle keeps them the same
         col = QVBoxLayout(self)
         col.setContentsMargins(SHADOW + 6, SHADOW + 6, SHADOW + 6, SHADOW + 6)
-        col.setSpacing(4)
         col.setSizeConstraint(QLayout.SetFixedSize)     # as big as its buttons
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        col.addLayout(grid)
         self.buttons: dict[str, QPushButton] = {}
-        for key in TOOLS:
+        for i, key in enumerate(TOOLS):
             b = QPushButton(checkable=True, objectName="MenuItem")
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.setIconSize(QSize(WORD_ICON_PX, WORD_ICON_PX))
             b.clicked.connect(lambda _=False, k=key: bar._tool_clicked(k))
             self.buttons[key] = b
-            col.addWidget(b)
+            grid.addWidget(b, i // MENU_COLS, i % MENU_COLS)
         self._away = QTimer(self, interval=AWAY_POLL_MS, timeout=self._check_away)
         self._away_since: float | None = None
 
@@ -637,6 +647,12 @@ class _ToolsMenu(QWidget):
             b.setToolTip(t(name + "_tip"))
             b.setAccessibleName(t(name))
             b.setIcon(line_icon(ICONS[name], palette().text, on=on_fill))
+        # every button as wide as the widest: the columns line up whatever the words (each language's own)
+        for b in self.buttons.values():
+            b.ensurePolished()
+        widest = max(b.sizeHint().width() for b in self.buttons.values())
+        for b in self.buttons.values():
+            b.setMinimumWidth(widest)
 
     def paintEvent(self, e) -> None:
         _paint_glass(self, self._bar._opacity)
@@ -784,7 +800,7 @@ class GameToolbar(EdgeResize, QWidget):
         self._grind.setFocusPolicy(Qt.NoFocus)
         self._grind.clicked.connect(self._grind_clicked)
         self._flow.addWidget(self._grind)
-        # Tools: the card with the scroll planner's, gear advisor's and crafting advisor's switches, lit while it is up
+        # Tools: the card with the tool windows' switches (TOOLS), lit while it is up
         self._tools_btn = QPushButton()
         self._tools_btn.setCursor(Qt.PointingHandCursor)
         self._tools_btn.setFocusPolicy(Qt.NoFocus)
@@ -1100,7 +1116,7 @@ class GameToolbar(EdgeResize, QWidget):
         """Just above the game's minimap window (npcoverlay.minimap_box: the bar is about the map in it), left edges
         lined up; else the primary screen's top centre."""
         screens = [(s.geometry(), s.devicePixelRatio()) for s in QGuiApplication.screens()]
-        box = minimap_box(self._settings, screens)
+        box = minimap_box(screens)
         primary = QGuiApplication.primaryScreen().availableGeometry()
         if box is not None:
             screen = next((g for g, _ in screens if g.intersects(box)), primary)

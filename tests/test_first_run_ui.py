@@ -97,7 +97,7 @@ def test_tour_walks_every_visible_button_and_marks_itself_done(qapp, isolated_st
         assert tr.title.text() and tr.body.text() and "{" not in tr.body.text()
         seen.append(tr.steps[tr.i][1])
         tr.next_btn.click()
-    assert seen[-1] == "tour_done" and "tour_tools" in seen
+    assert seen[-1] == "tour_done" and "tour_toolbar" in seen
     assert s["tour_done"] is True and ov._tour is None
     assert set(k for _, k in tour_mod.STEPS) >= set(seen)
 

@@ -1,7 +1,6 @@
 """The game's picture on screen: its window (osapi: winapi on Windows, macapi on macOS) without the black bars a 16:9
 game draws on an ultrawide screen. The loot log finds the game's pickup messages in it (ui/lootscan.py), and the
-minimap reads find the game's MINI MAP window at its top left (ui/minimapscan.py); both fall back to a box the player
-drew (valid_region: one the picker could have drawn)."""
+minimap reads find the game's MINI MAP window at its top left (ui/minimapscan.py)."""
 from __future__ import annotations
 
 import sys
@@ -13,7 +12,7 @@ BARS_EVERY_S = 30.0     # how often the game's black bars are measured again (on
 
 
 def valid_region(region) -> bool:
-    """A box the picker could have drawn: ints (or floats) with a size, not a stray dict."""
+    """A saved box ({"x","y","w","h"}: a window's place and size): ints (or floats) with a size, not a stray dict."""
     return (isinstance(region, dict)
             and all(isinstance(region.get(k), (int, float)) and not isinstance(region.get(k), bool)
                     for k in ("x", "y", "w", "h"))

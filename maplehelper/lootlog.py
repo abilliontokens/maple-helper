@@ -4,8 +4,8 @@ The game writes each gain as a line at the bottom right of the play area, right 
 "You received EXP (+21)", "You have gained mesos (+27)", "Leaf x1 earned. (Etc)". A new line appears at the
 bottom and pushes the older ones up a line; each fades out after a few seconds (its right end first). The game's
 interface scales with its window, so the messages sit at the same place in the picture at any size: `auto_box`
-(measured live at 1368x800, 1922x1112 and 2734x1568). The player may draw the box instead (the Loot log page's
-"Mark it yourself"). While a log runs, RapidOCR reads the box twice a second (ui/lootscan.py).
+(measured live at 1368x800, 1922x1112 and 2734x1568). While a log runs, RapidOCR reads the box twice a second
+(ui/lootscan.py).
 
 A line stays on screen for several reads, so a read can't simply be added up. `Tracker` keeps the lines it has seen
 with their row (0 = the bottom one) and, for every read, finds how many rows the stack moved up since the last one:

@@ -70,17 +70,25 @@ class GrindReadWorker(AskWorker):
 
 
 class ControllerButton(QToolButton):
-    """The play tools' header button: a game controller drawn as a vector, in the header icons' colors (the icon
-    font's own controller, U+E7FC, read as a smudge at 14 px: the owner's report)."""
+    """The header's show/hide-the-toolbar button: a game controller drawn as a vector, in the header icons' colors,
+    lit in the accent while the bar over the game is up (set_lit), as the News megaphone is while there is unread news
+    (the icon font's own controller, U+E7FC, read as a smudge at 14 px: the owner's report)."""
 
     def __init__(self):
         super().__init__(objectName="Icon")
         self.setCursor(Qt.PointingHandCursor)
+        self._lit = False
+
+    def set_lit(self, on: bool) -> None:
+        if on != self._lit:
+            self._lit = on
+            self.update()
 
     def paintEvent(self, e):
         super().paintEvent(e)            # the hover / pressed background from the stylesheet; no text
         from . import theme
-        color = theme.qcolor(theme.P()["text" if self.underMouse() else "muted"])     # as the stylesheet's icons
+        # as the stylesheet's icons: muted, the text color under the mouse, the accent while lit
+        color = theme.qcolor(theme.ACCENT if self._lit else theme.P()["text" if self.underMouse() else "muted"])
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         side = 19.0
@@ -570,7 +578,7 @@ class Overlay(EdgeResize, QWidget):
     sync_finished = Signal(bool)      # a screenshot read ended (True = it read the game)
     grind_read = Signal(object)       # (character id, profile_update, grind) of a grind tracker read, before sync_finished
     grind_skipped = Signal(str)       # an automatic grind read that didn't run: "busy" | "no_game" | "covered"
-    tools_requested = Signal()
+    toolbar_requested = Signal()       # the controller button: show or hide the bar over the game
     edit_character_requested = Signal(str)
     delete_character_requested = Signal(str)      # plan usage read in the background after an answer (ChatGPT)
     inventory_read = Signal(object)    # (question, shown, character id, tiles, slots, description), worker thread
@@ -578,7 +586,6 @@ class Overlay(EdgeResize, QWidget):
     local_grind_done = Signal(object)  # (token, shot, full, cursor, (update, grind) or None), worker thread
     tour_ended = Signal()              # the first-run tour was skipped or finished
     news_requested = Signal()          # the megaphone or the news strip: the News window
-    minimap_requested = Signal()       # the minimap icon: choose the game's minimap box to read where the player is
 
     def __init__(self, settings: Settings, profiles: Profiles, kb: KnowledgeBase, brain: Brain):
         # a normal window on Windows, not a tool window: Discord, OBS and Alt+Tab list only those, so streamers can
@@ -613,6 +620,7 @@ class Overlay(EdgeResize, QWidget):
         LOCATION.changed.connect(self._refresh_location)
         LOCATION.status.connect(self._refresh_location)
         self.apply_language()
+        self.show_toolbar_state()
         self.restore_geometry()
 
     # ------------------------------------------------------------------ material
@@ -684,8 +692,8 @@ class Overlay(EdgeResize, QWidget):
         for w in (self.saver_badge, self.beta_badge):
             w.setMinimumWidth(1)
         tb.addStretch(1)
-        # in reading order (the owner's, 2026-10-04): search, news, guides, wishlist, play tools, settings | minimize, close
-        # (the minimap button sits on the character card, beside ⟳)
+        # in reading order (the owner's, 2026-10-04): search, news, guides, wishlist, the toolbar's show/hide, settings |
+        # minimize, close
         self.history_btn = self._icon_button(theme.ICON["search"])
         self.history_btn.clicked.connect(self.history_requested.emit)
         tb.addWidget(self.history_btn)
@@ -700,9 +708,9 @@ class Overlay(EdgeResize, QWidget):
         self.wish_btn = self._icon_button(theme.ICON["star"])
         self.wish_btn.clicked.connect(self.wishlist_requested.emit)
         tb.addWidget(self.wish_btn)
-        self.tools_btn = ControllerButton()                           # a game controller: the play tools
-        self.tools_btn.clicked.connect(self.tools_requested.emit)
-        tb.addWidget(self.tools_btn)
+        self.toolbar_btn = ControllerButton()             # a game controller: shows or hides the bar over the game
+        self.toolbar_btn.clicked.connect(self.toolbar_requested.emit)
+        tb.addWidget(self.toolbar_btn)
         self.settings_btn = self._icon_button(theme.ICON["settings"])
         self.settings_btn.clicked.connect(self.settings_requested.emit)
         tb.addWidget(self.settings_btn)
@@ -767,8 +775,6 @@ class Overlay(EdgeResize, QWidget):
         # the character, pinned at the top of the conversation
         self.profile_card = ProfileCard()
         self.profile_card.refresh_requested.connect(self.sync_profile)
-        self.minimap_btn = self.profile_card.minimap
-        self.profile_card.minimap_requested.connect(self.minimap_requested.emit)
         self.profile_card.clicked.connect(self.character_menu)
         self.profile_card.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.profile_card)
@@ -929,7 +935,7 @@ class Overlay(EdgeResize, QWidget):
         self.saver_badge.setVisible(self._saver_on)
         self.beta_badge.setText("BETA")
         self.beta_badge.show()
-        buttons = (self.history_btn, self.news_btn, self.guides_btn, self.wish_btn, self.tools_btn,
+        buttons = (self.history_btn, self.news_btn, self.guides_btn, self.wish_btn, self.toolbar_btn,
                    self.settings_btn, self.min_btn, self.close_btn)
         for b in buttons:
             # a low minimum, so the header never holds the chat wider than 470 px; full size when there's room
@@ -993,7 +999,7 @@ class Overlay(EdgeResize, QWidget):
         # the gutter between the cards and the scrollbar is on the scrollbar's side, which Qt moves to the left in
         # Hebrew; layout margins don't mirror, so in Hebrew the cards touched the bar and the gap sat on the right
         self.feed_lay.setContentsMargins(*((6, 4, 0, 4) if self.t.rtl else (0, 4, 6, 4)))
-        set_tip(self.tools_btn, self.t("tools"))
+        set_tip(self.toolbar_btn, self.t("toolbar_toggle"))
         set_tip(self.clear_tags_btn, self.t("untag_all"))
         if self.focus_keys:
             self._render_tags()
@@ -1003,7 +1009,6 @@ class Overlay(EdgeResize, QWidget):
         self.input.setAccessibleName(self.t("input_a11y"))
         set_tip(self.recapture_btn, self.t("recapture"))
         set_tip(self.settings_btn, self.t("settings"))
-        set_tip(self.minimap_btn, self.t("minimap_tip"))
         self.saver_badge.setToolTip(self.t.p("saver_hint", self.settings["provider"]))
         self._fit_header()
         self.show_scope()
@@ -1154,6 +1159,11 @@ class Overlay(EdgeResize, QWidget):
         self.profile_card.exp.show_progress(plan.progress(self.kb, c.level, c.exp_pct), self.t, self.t.rtl)
         dismissed = (self.settings["tips_dismissed"] or {}).get(c.id, {})
         self.tip_strip.show_tip(plan.tip(self.kb, c, self.t, dismissed), self.t, self.t.rtl)
+
+    def show_toolbar_state(self) -> None:
+        """The controller button lit while the bar over the game is up (settings["game_toolbar"]); the app calls this
+        whenever the bar turns on or off (the button itself, the bar's ✕, its key, the tray item, Settings)."""
+        self.toolbar_btn.set_lit(bool(self.settings["game_toolbar"]))
 
     # ------------------------------------------------------------------ news and server status
 

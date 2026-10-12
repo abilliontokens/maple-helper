@@ -1179,29 +1179,6 @@ STRINGS = {
     "quest_where_start": {"he": "מקבלים את הקווסט", "en": "Start the quest"},
     "quest_where_end": {"he": "מסיימים את הקווסט", "en": "Turn it in"},
     # where the player is, read from the game's minimap (ui/minimapscan.py, minimap.py)
-    "minimap_select": {"he": "בחירת המיני-מפה", "en": "Select minimap"},
-    "minimap_tip": {"he": "בחירת המיני-מפה: איפה אתם במשחק\n"
-                          "אני מוצא לבד את המיני-מפה בפינה השמאלית העליונה של המשחק: השאירו אותה פתוחה שם.\n"
-                          "לא נמצאה? לחצו כאן וגררו מסגרת סביבה (הפינה עם שם המפה).\n"
-                          "מרגע שהיא נמצאה, אני קורא אותה שוב ושוב (בהגדרות קובעים כל כמה זמן):\n"
-                          "• המפה שלכם מופיעה בכרטיס הזה, מתחת לרמה\n"
-                          "• כפתור ◎ מראה את הדרך מהמפה שלכם, עם נקודה כחולה במקום שלכם\n"
-                          "• \"איך מגיעים\" בכלי המשחק מתחיל מהמפה שלכם\n"
-                          "מסגרת שגררתם משמשת רק כשהמיני-מפה לא נמצאת. הזזתם את המשחק או שיניתם את גודלו? "
-                          "גררו אותה מחדש.",
-                    "en": "Select minimap: where you are in the game\n"
-                          "Maple Helper finds the game's minimap at the game's top left on its own: keep it open there.\n"
-                          "Not found? Click here and drag a box around it (the corner with the map's name).\n"
-                          "Once it's found, Maple Helper keeps reading it (Settings set how often):\n"
-                          "• Your map shows on this card, under your level\n"
-                          "• The ◎ button shows the way from your map, with a blue dot where you are\n"
-                          "• \"How to get there\" in the Play tools starts from your map\n"
-                          "A box you drew is used only when the minimap isn't found. Moved or resized the game? "
-                          "Draw it again."},
-    "minimap_pick_hint": {"he": "גררו מסגרת סביב המיני-מפה במשחק. צריך את זה רק כש-Maple Helper לא מוצא אותה לבד "
-                                "בפינה השמאלית העליונה של המשחק.",
-                          "en": "Drag a box around the game's minimap. Only needed when Maple Helper doesn't find it "
-                                "at the game's top left on its own."},
     "minimap_scan_interval": {"he": "כל כמה זמן לקרוא את המיני-מפה", "en": "How often to read the minimap"},
     "scan_every_0_5": {"he": "חצי שנייה", "en": "Half a second"},
     "scan_every_1": {"he": "שנייה אחת", "en": "1 second"},
@@ -1228,18 +1205,17 @@ STRINGS = {
     "npc_overlay_clear": {"he": "ביטול הסימון", "en": "Stop guiding"},
     "npc_overlay_inside": {"he": "בתוך {place}", "en": "Inside {place}"},
     # the empty list's card says why, and how the map gets known: the game's minimap window is found at the game's
-    # top left on its own (else the box drawn with the button beside ⟳ on the chat's character card, minimap_select),
-    # and read while it shows there. _nobox: no minimap window found (LOCATION.box None); _box: found, not read yet
-    "npc_overlay_unknown_nobox": {"he": "Maple Helper מחפש את המיני-מפה בפינה השמאלית העליונה של המשחק ולא מצא אותה "
-                                        "שם: פתחו אותה שם. עדיין לא נמצאה? סמנו אותה בעצמכם בכפתור שליד ⟳ בכרטיס "
-                                        "הדמות בצ'אט.",
-                                  "en": "Maple Helper looks for the game's minimap at the game's top left and didn't "
-                                        "find it there: open it there. Still not found? Select it yourself with the "
-                                        "button beside ⟳ on the chat's character card."},
+    # top left on its own, and read while it shows there. _nobox: no minimap window found (LOCATION.box None); _box:
+    # found, not read yet
+    "npc_overlay_unknown_nobox": {"he": "Maple Helper מחפש את המיני-מפה בפינה השמאלית העליונה של המשחק ועוד לא מצא "
+                                        "אותה: פתחו את המיני-מפה של המשחק (החלון MINI MAP) והשאירו אותה שם.",
+                                  "en": "Maple Helper looks for the game's minimap at the game's top left and hasn't "
+                                        "found it yet: open the game's minimap (its MINI MAP window) and leave it "
+                                        "there."},
     "npc_overlay_unknown_box": {"he": "Maple Helper מזהה אותה מהמיני-מפה של המשחק: השאירו את המיני-מפה פתוחה בפינה "
-                                      "השמאלית העליונה של המשחק (או בתוך המסגרת שסימנתם).",
+                                      "השמאלית העליונה של המשחק.",
                                 "en": "Maple Helper finds it on the game's minimap: keep the minimap open at the "
-                                      "game's top left (or inside the box you drew)."},
+                                      "game's top left."},
     "npc_overlay_none_hint": {"he": "במאגר אין דמות במפה הזו או בבניין שנכנסים אליו ממנה.",
                               "en": "The database has no NPC on this map or in a building off it."},
     "npc_overlay_filter": {"he": "סינון: שם, תפקיד, בניין…", "en": "Filter: name, role, building…"},
@@ -1326,6 +1302,22 @@ STRINGS = {
     "gb_open_tip": {"he": "לחיצה פותחת את חלון הגריינד המפורט", "en": "Click for the detailed grind window"},
     "gb_hide": {"he": "הסתרת סרגל הגריינד (הכפתור גריינד בסרגל הכלים מחזיר אותו)",
                 "en": "Hide the grind bar (the toolbar's Grind button brings it back)"},
+    # the tool windows over the game (ui/toolwindow.py), each a button of the toolbar's Tools card
+    "tb_spots": {"he": "מקומות גריינד", "en": "Grind spots"},
+    "tb_spots_tip": {"he": "חלון מקומות הגריינד מעל המשחק: המפלצות שהכי משתלמות ב-EXP ברמה שלכם, המפות שבהן הן נמצאות והדרך לשם",
+                     "en": "The Grind Spots window over the game: the monsters worth the most EXP at your level, the maps they live on and the way there"},
+    "tb_farm": {"he": "פארם", "en": "Farm"},
+    "tb_farm_tip": {"he": "חלון הפארם מעל המשחק: בוחרים פריט ורואים מי מפיל אותו, איפה ובאיזו רמה, ואילו מפלצות משתלם לפארם ברמה שלכם",
+                    "en": "The Farm window over the game: pick an item and see who drops it, where and at what level, and which monsters are worth farming at your level"},
+    "tb_quests": {"he": "קווסטים", "en": "Quests"},
+    "tb_quests_tip": {"he": "חלון הקווסטים מעל המשחק: הקווסטים שאפשר לעשות ברמה שלכם, מה כל אחד מבקש ומה הוא נותן, ומי נותן אותו",
+                      "en": "The Quests window over the game: the quests you can do at your level, what each asks for and gives, and who hands it out"},
+    "tb_town": {"he": "אזרחות", "en": "Citizenship"},
+    "tb_town_tip": {"he": "חלון האזרחות מעל המשחק: באיזו עיר כדאי להיות אזרחים לפי הג'וב, איפה נרשמים, וקווסטי האזרחות שאפשר לעשות עכשיו",
+                    "en": "The Citizenship window over the game: which town to join for your job, where to sign up, and the citizenship quests you can do now"},
+    "tb_build": {"he": "בילד וסקילים", "en": "Build & skills"},
+    "tb_build_tip": {"he": "חלון הבילד והסקילים מעל המשחק: התוכנית מהמדריך לג'וב שלכם, לאן הולכים ה-AP וה-SP, עם השורה של הרמה שלכם",
+                     "en": "The Build & Skills window over the game: the guide's plan for your job, where your AP and SP go, with the row for your level"},
     "tb_scrolls": {"he": "מגילות", "en": "Scrolls"},
     "tb_scrolls_tip": {"he": "חלון תכנון המגילות מעל המשחק: בוחרים פריט ורואים לכל דרגת מגילה את הסיכויים, התוספת הצפויה והעלות",
                        "en": "The Scroll Planner window over the game: pick an item and see each scroll grade's odds, expected gain and cost"},
@@ -1335,9 +1327,13 @@ STRINGS = {
     "tb_craft": {"he": "קראפטינג", "en": "Crafting"},
     "tb_craft_tip": {"he": "חלון יועץ הקראפטינג מעל המשחק: בוחרים מה להכין, ורואים מה לפארם, באיזה סדר להכין ומה יעלה",
                      "en": "The Crafting Advisor window over the game: pick what to make and see what to farm, what to craft in which order, and what it costs"},
+    "tb_shop": {"he": "Cash Shop", "en": "Cash shop"},
+    "tb_shop_tip": {"he": "חלון ה-Cash Shop מעל המשחק: מה נמכר עכשיו ב-Cash Shop של המשחק ובכמה NX, בלשוניות כמו במשחק",
+                    "en": "The Cash Shop window over the game: what the game's Cash Shop sells right now and for how many NX, in the game's own tabs"},
+    "tb_tool_close": {"he": "הסתרת החלון (כפתור כלים בסרגל מחזיר אותו)", "en": "Hide the window (the bar's Tools button brings it back)"},
     "tb_tools": {"he": "כלים", "en": "Tools"},
-    "tb_tools_tip": {"he": "חלונות הכלים מעל המשחק: מגילות, ציוד וקראפטינג",
-                     "en": "The tool windows over the game: Scrolls, Gear and Crafting"},
+    "tb_tools_tip": {"he": "חלונות הכלים מעל המשחק: מקומות גריינד, פארם, קווסטים, אזרחות, בילד וסקילים, ציוד, מגילות, קראפטינג ו-Cash Shop",
+                     "en": "The tool windows over the game: Grind spots, Farm, Quests, Citizenship, Build & skills, Gear, Scrolls, Crafting and the Cash shop"},
     "tb_move": {"he": "גררו כדי להזיז", "en": "Drag to move"},
     "tb_vertical": {"he": "להעמיד את הסרגל (טור)", "en": "Stand the toolbar upright"},
     "tb_horizontal": {"he": "להשכיב את הסרגל (שורה)", "en": "Lay the toolbar flat"},
@@ -1360,26 +1356,37 @@ STRINGS = {
                               "השיניים של הסרגל.",
                         "en": "{key} is taken by the system or another program. Pick another in Settings > Minimap or "
                               "with the toolbar's gear button."},
-    # its tray item, and the toast after its ✕ (app.py): the tray's item always works, the key may not
+    # the chat header's game-controller button (ui/overlay.py ControllerButton): shows or hides the bar, lit while up
+    "toolbar_toggle": {"he": "הצגה או הסתרה של הסרגל", "en": "Show or hide the toolbar"},
+    # its tray item, and the toast after its ✕ (app.py): the chat's controller button and the tray's item always
+    # work, the key may not
     "tray_toolbar_show": {"he": "הצגת הסרגל", "en": "Show the toolbar"},
     "tray_toolbar_hide": {"he": "הסתרת הסרגל", "en": "Hide the toolbar"},
     "tray_toolbar_hidden": {"he": "הסרגל הוסתר", "en": "The toolbar is hidden"},
-    "tray_toolbar_back": {"he": "כדי להחזיר אותו, לחצו לחיצה ימנית על הסמל של Maple Helper ליד השעון ובחרו \"הצגת "
-                                "הסרגל\", או הקישו {key}. המתג שלו נמצא גם בהגדרות > מיני-מפה.",
-                          "en": "To bring it back, right-click Maple Helper's icon by the clock and choose Show the "
-                                "toolbar, or press {key}. Its switch is in Settings > Minimap too."},
-    "tray_toolbar_back_mac": {"he": "כדי להחזיר אותו, לחצו על הסמל של Maple Helper בשורת התפריטים ובחרו \"הצגת "
-                                    "הסרגל\", או הקישו {key}. המתג שלו נמצא גם בהגדרות > מיני-מפה.",
-                              "en": "To bring it back, click Maple Helper's icon in the menu bar and choose Show the "
-                                    "toolbar, or press {key}. Its switch is in Settings > Minimap too."},
-    "tray_toolbar_back_nokey": {"he": "כדי להחזיר אותו, לחצו לחיצה ימנית על הסמל של Maple Helper ליד השעון ובחרו "
-                                      "\"הצגת הסרגל\", או הפעילו אותו בהגדרות > מיני-מפה.",
-                                "en": "To bring it back, right-click Maple Helper's icon by the clock and choose Show "
-                                      "the toolbar, or turn it on in Settings > Minimap."},
-    "tray_toolbar_back_nokey_mac": {"he": "כדי להחזיר אותו, לחצו על הסמל של Maple Helper בשורת התפריטים ובחרו "
-                                          "\"הצגת הסרגל\", או הפעילו אותו בהגדרות > מיני-מפה.",
-                                    "en": "To bring it back, click Maple Helper's icon in the menu bar and choose Show "
-                                          "the toolbar, or turn it on in Settings > Minimap."},
+    "tray_toolbar_back": {"he": "כדי להחזיר אותו, לחצו על כפתור שלט המשחק בראש הצ'אט, או הקישו {key}. אפשר גם ללחוץ "
+                                "לחיצה ימנית על הסמל של Maple Helper ליד השעון ולבחור \"הצגת הסרגל\", או להפעיל אותו "
+                                "בהגדרות > מיני-מפה.",
+                          "en": "To bring it back, click the game controller at the top of the chat, or press {key}. "
+                                "You can also right-click Maple Helper's icon by the clock and choose Show the toolbar, "
+                                "or turn it on in Settings > Minimap."},
+    "tray_toolbar_back_mac": {"he": "כדי להחזיר אותו, לחצו על כפתור שלט המשחק בראש הצ'אט, או הקישו {key}. אפשר גם "
+                                    "ללחוץ על הסמל של Maple Helper בשורת התפריטים ולבחור \"הצגת הסרגל\", או להפעיל "
+                                    "אותו בהגדרות > מיני-מפה.",
+                              "en": "To bring it back, click the game controller at the top of the chat, or press "
+                                    "{key}. You can also click Maple Helper's icon in the menu bar and choose Show the "
+                                    "toolbar, or turn it on in Settings > Minimap."},
+    "tray_toolbar_back_nokey": {"he": "כדי להחזיר אותו, לחצו על כפתור שלט המשחק בראש הצ'אט. אפשר גם ללחוץ לחיצה ימנית "
+                                      "על הסמל של Maple Helper ליד השעון ולבחור \"הצגת הסרגל\", או להפעיל אותו "
+                                      "בהגדרות > מיני-מפה.",
+                                "en": "To bring it back, click the game controller at the top of the chat. You can "
+                                      "also right-click Maple Helper's icon by the clock and choose Show the toolbar, "
+                                      "or turn it on in Settings > Minimap."},
+    "tray_toolbar_back_nokey_mac": {"he": "כדי להחזיר אותו, לחצו על כפתור שלט המשחק בראש הצ'אט. אפשר גם ללחוץ על "
+                                          "הסמל של Maple Helper בשורת התפריטים ולבחור \"הצגת הסרגל\", או להפעיל אותו "
+                                          "בהגדרות > מיני-מפה.",
+                                    "en": "To bring it back, click the game controller at the top of the chat. You can "
+                                          "also click Maple Helper's icon in the menu bar and choose Show the "
+                                          "toolbar, or turn it on in Settings > Minimap."},
     # its search window (ui/gamesearch.py)
     "search_monster_npc_title": {"he": "חיפוש מפלצת או דמות", "en": "Find a monster or NPC"},
     "search_item_title": {"he": "חיפוש חפץ", "en": "Find an item"},
@@ -1695,10 +1702,15 @@ STRINGS = {
                       "en": "Ask out loud"},
     "tour_mic_body": {"he": "לוחצים כדי להתחיל להקליט, מדברים, ולוחצים שוב כשסיימתם. השאלה נשלחת לבד.",
                      "en": "Click to start recording, speak, then click again when you're done. It sends by itself."},
-    "tour_tools_title": {"he": "כלי משחק",
-                        "en": "Play tools"},
-    "tour_tools_body": {"he": "גריינד, מעקב גריינד, פארם, קווסטים לפי הרמה שלכם, קראפטינג, אזרחות, בילד וסקילים, פגיעה ונזק, מחיר פריט, למכור או לשמור, איך מגיעים וחיות מחמד.",
-                       "en": "Grind spots, grind tracker, farming, quests for your level, crafting, citizenship, build & skills, hit & damage, item price, sell or keep, how to get there, and pets."},
+    "tour_toolbar_title": {"he": "הסרגל מעל המשחק",
+                          "en": "The toolbar over the game"},
+    "tour_toolbar_body": {"he": "מציג או מסתיר את הסרגל מעל המשחק, ונצבע בצבע ההדגשה שלכם כשהסרגל מוצג. כלי המשחק "
+                                "נמצאים עכשיו בכרטיס הכלים של הסרגל, ולא בחלון כלי משחק נפרד: גריינד, פארם, קווסטים, "
+                                "אזרחות, בילד וסקילים, ציוד, מגילות, קראפטינג ו-Cash Shop, כל אחד בחלון משלו מעל המשחק.",
+                         "en": "Shows or hides the toolbar over the game, and lights up in your accent colour while "
+                               "it's showing. The play tools live in the toolbar's Tools card now, not in a Play tools "
+                               "window: grind spots, farming, quests, citizenship, build & skills, gear, scrolls, "
+                               "crafting and the cash shop, each in its own window over the game."},
     "tour_news_title": {"he": "חדשות",
                        "en": "News"},
     "tour_news_body": {"he": "החדשות של MapleStory Classic, בעברית כשיש תרגום. הכפתור נצבע בצבע ההדגשה שלכם כשיש חדשות שעוד לא קראתם.",
@@ -2010,16 +2022,6 @@ STRINGS = {
                          "skill bar: \"You received EXP\", \"You have gained mesos\", \"Leaf x1 earned\". Maple Helper reads those messages "
                          "on your computer (no AI, nothing touches the game) and counts:\n• **EXP** and **mesos**, and how much per hour\n"
                          "• every **item** you pick up, and what an NPC pays for it"},
-    "loot_area_title": {"he": "אזור ההודעות", "en": "Messages area"},
-    "loot_area_auto": {"he": "נמצא לבד: Maple Helper מוצא את חלון המשחק ואת ההודעות בפינה הימנית התחתונה שלו, בכל רזולוציה ובכל גודל חלון, גם כשהחלון זז. לא צריך לסמן כלום.",
-                       "en": "Found on its own: Maple Helper finds the game's window and the messages at its bottom right, at any resolution or window size, and follows the window when it moves. Nothing to mark."},
-    "loot_area_set": {"he": "אתם סימנתם את האזור ({w} על {h} פיקסלים). המסגרת לא זזה עם המשחק: המשחק זז או שינה גודל? סמנו שוב, או חזרו לזיהוי האוטומטי.",
-                      "en": "You marked the area ({w}×{h} pixels). The box doesn't follow the game: moved or resized it? Mark it again, or go back to finding it on its own."},
-    "loot_pick": {"he": "לסמן בעצמי", "en": "Mark it yourself"},
-    "loot_pick_again": {"he": "סימון מחדש", "en": "Mark it again"},
-    "loot_area_auto_again": {"he": "חזרה לזיהוי אוטומטי", "en": "Find it on its own"},
-    "loot_pick_hint": {"he": "גררו מסגרת סביב הודעות האיסוף בפינה הימנית התחתונה של המשחק (\"You have gained mesos\", \"x1 earned\"), עם כמה שורות מעליהן.",
-                       "en": "Drag a box around the pickup messages at the game's bottom right (\"You have gained mesos\", \"x1 earned\"), with a few lines above them."},
     "loot_log_title": {"he": "היומן", "en": "The log"},
     "loot_idle_state": {"he": "היומן לא רץ", "en": "The log isn't running"},
     "loot_cell_time": {"he": "זמן", "en": "Time"},

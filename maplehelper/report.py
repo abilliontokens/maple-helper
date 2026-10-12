@@ -28,7 +28,8 @@ REPORT_SETTINGS = ("language", "app_tint", "app_accent", "app_opacity", "font_si
                    "saver_mode", "seen_version", "instant_answers", "telemetry", "presence", "grind_auto", "minimap_scan_interval",
                    "minimap_hidden_portals", "npc_overlay", "npc_overlay_opacity", "game_toolbar", "game_rides",
                    "overlays_in_screenshots", "loot_overlay", "loot_overlay_folded", "grind_bar", "grind_window",
-                   "grind_low_hp", "scroll_planner", "gear_advisor", "craft_advisor", "game_toolbar_icons",
+                   "grind_low_hp", "scroll_planner", "gear_advisor", "craft_advisor", "grind_spots", "farm_tool",
+                   "quest_tool", "citizenship", "build_tool", "cash_shop", "game_toolbar_icons",
                    "game_toolbar_hotkey", "game_toolbar_vertical", "overlay_tint", "overlay_accent")
 log = logging.getLogger("maplehelper")
 # libraries that log every request at INFO: httpx/huggingface_hub wrote each model download's URL, a signed CDN link

@@ -336,25 +336,32 @@ def test_tab_stays_inside_the_tour(overlay):
 
 def test_icon_buttons_have_names_for_screen_readers(overlay):
     ov = overlay
-    for b in (ov.history_btn, ov.tools_btn, ov.guides_btn, ov.wish_btn, ov.minimap_btn, ov.settings_btn, ov.min_btn,
+    for b in (ov.history_btn, ov.toolbar_btn, ov.guides_btn, ov.wish_btn, ov.settings_btn, ov.min_btn,
               ov.close_btn, ov.mic_btn, ov.recapture_btn, ov.send_btn, ov.profile_card.refresh):
         name = b.accessibleName()
         assert name and not any(0xE000 <= ord(ch) <= 0xF8FF for ch in name), b.objectName()
 
 
-def test_minimap_button_asks_for_the_minimap_box(overlay):
+def test_the_controller_button_shows_or_hides_the_toolbar(overlay):
+    """The header's game controller is the bar over the game's show/hide (the play tools live in the bar's Tools
+    card now): its tooltip says so, a click asks for it, and it is lit while the bar is up. The character card has
+    no minimap button: the minimap is found on its own."""
     seen = []
-    overlay.minimap_requested.connect(lambda: seen.append(1))
-    # on the character card beside ⟳, not in the header (the owner's, 2026-10-08)
-    assert overlay.minimap_btn is overlay.profile_card.minimap
-    assert overlay.minimap_btn.parent() is overlay.profile_card
-    assert not overlay.title_bar.isAncestorOf(overlay.minimap_btn)
-    # the tooltip says what to do and what it gives, not just its name
-    tip = overlay.minimap_btn.toolTip()
-    assert tip == overlay.t("minimap_tip") and tip.count("\n") >= 4 and "◎" in tip
-    assert overlay.minimap_btn.accessibleName() == tip.split("\n", 1)[0]
-    overlay.minimap_btn.click()
+    overlay.toolbar_requested.connect(lambda: seen.append(1))
+    assert overlay.title_bar.isAncestorOf(overlay.toolbar_btn)
+    tip = overlay.t("toolbar_toggle")
+    assert overlay.toolbar_btn.toolTip() == tip and overlay.toolbar_btn.accessibleName() == tip
+    overlay.toolbar_btn.click()
     assert seen == [1]
+    lit = overlay.settings["game_toolbar"]
+    try:
+        for on in (False, True):
+            overlay.settings["game_toolbar"] = on
+            overlay.show_toolbar_state()
+            assert overlay.toolbar_btn._lit is on
+    finally:
+        overlay.settings["game_toolbar"] = lit
+    assert not hasattr(overlay.profile_card, "minimap")
 
 
 def test_the_card_shows_where_the_minimap_read_says(overlay, monkeypatch):
@@ -391,7 +398,7 @@ def test_the_location_line_follows_a_language_switch(overlay, monkeypatch):
         overlay.settings["language"] = "en"
         overlay.apply_language()
         assert overlay.profile_card.where.text() == "In Henesys"
-        assert overlay.minimap_btn.toolTip().startswith("Select minimap:")
+        assert overlay.toolbar_btn.toolTip() == "Show or hide the toolbar"
     finally:
         LOCATION.set(None)
         LOCATION.set_state("")

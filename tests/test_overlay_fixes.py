@@ -151,7 +151,7 @@ def test_language_switch_updates_tooltips_and_term_language(overlay):
     from maplehelper.ui import terms
     overlay.settings["language"] = "en"
     overlay.apply_language()
-    assert overlay.tools_btn.toolTip() == "Play tools" and overlay.clear_tags_btn.toolTip() == "Clear all tags"
+    assert overlay.toolbar_btn.toolTip() == "Show or hide the toolbar" and overlay.clear_tags_btn.toolTip() == "Clear all tags"
     assert terms.LANG == "en"
 
 

@@ -1,4 +1,4 @@
-"""Which map the player is on, from a picture of the game's minimap (the box the player drew around it), and where
+"""Which map the player is on, from a picture of the game's minimap (its window, found at the game's top left), and where
 on it they stand (the yellow dot). The map is read from the minimap's title: RapidOCR reads the header's street
 and map-name lines, the name resolves against the KB's map names (exact, then OCR-tolerant fuzzy, the street
 breaking ties), and only then is the KB's minimap picture (img/map/<id>.png: the game's own minimap art) of that

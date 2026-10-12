@@ -401,7 +401,6 @@ class ToolsDialog(GlassDialog):
     tag_requested = Signal(str)                # tag an entity (monster, quest) in the chat
     guide_requested = Signal(str)              # open a guide in the guides window
     add_character_requested = Signal()         # no character yet: the chat's "Add character"
-    loot_area_requested = Signal()             # the loot log's "Mark it yourself" (the app draws the box)
 
     def __init__(self, kb, profiles, settings, lang: str, stylesheet: str, runner=None, page: str = "train",
                  loot=None):
@@ -3948,28 +3947,6 @@ class ToolsDialog(GlassDialog):
         sc, lay = scroll_page(t.rtl)
         self._loot_seen: set = set()
         lay.addWidget(self._label(t("loot_intro"), "ToolHeader", seen=self._loot_seen))
-        area = Section(t("loot_area_title"), t.rtl)
-        box = QWidget()
-        bl = QVBoxLayout(box)
-        bl.setContentsMargins(0, 8, 0, 8)
-        bl.setSpacing(8)
-        self.loot_area_state = self._ll("", "RowLabel")
-        bl.addWidget(self.loot_area_state)
-        row = QHBoxLayout()
-        self.loot_pick = QPushButton(self._p(t("loot_pick")), objectName="Secondary")
-        self.loot_pick.setCursor(Qt.PointingHandCursor)
-        self.loot_pick.clicked.connect(self.loot_area_requested.emit)
-        row.addWidget(self.loot_pick)
-        # back to finding them on their own (a drawn box stays put when the game moves or changes size)
-        self.loot_auto = QPushButton(self._p(t("loot_area_auto_again")), objectName="Secondary")
-        self.loot_auto.setCursor(Qt.PointingHandCursor)
-        self.loot_auto.clicked.connect(self._loot_back_to_auto)
-        row.addWidget(self.loot_auto)
-        row.addStretch(1)
-        bl.addLayout(row)
-        area.add_widget(box)
-        lay.addWidget(area)
-
         sec = Section(t("loot_log_title"), t.rtl)
         top = QWidget()
         tl = QVBoxLayout(top)
@@ -4047,12 +4024,6 @@ class ToolsDialog(GlassDialog):
         self.settings["loot_overlay"] = bool(on)
         self.loot.changed.emit()            # the app shows or hides the card
 
-    def _loot_back_to_auto(self) -> None:
-        """Forget the drawn box: the messages are found in the game's window again."""
-        self.settings["loot_region"] = None
-        self.loot.restart()
-        self.loot.changed.emit()
-
     def _ll(self, text: str, obj: str) -> QLabel:
         """A loot log label: the terms the intro explained get no second "?"."""
         return self._label(text, obj, seen=set(self._loot_seen))
@@ -4061,7 +4032,7 @@ class ToolsDialog(GlassDialog):
         self._set(label, text, set(self._loot_seen))
 
     def loot_changed(self):
-        """The loot log counted something, started or ended, or its box was drawn: the page follows, once built."""
+        """The loot log counted something, started or ended: the page follows, once built."""
         try:
             if "loot" in self.pages:
                 self._fill_loot()
@@ -4084,11 +4055,6 @@ class ToolsDialog(GlassDialog):
     def _fill_loot(self):
         from .. import lootlog
         t, scan = self.t, self.loot
-        region = scan.region()
-        self._ls(self.loot_area_state, t("loot_area_set", w=region["w"], h=region["h"]) if region
-                 else t("loot_area_auto"))
-        self.loot_pick.setText(self._p(t("loot_pick_again" if region else "loot_pick")))
-        self.loot_auto.setVisible(region is not None)
         cid = self._loot_cid()
         lg = scan.log_for(cid)
         running = scan.running(cid)

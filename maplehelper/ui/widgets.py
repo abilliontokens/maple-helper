@@ -927,7 +927,8 @@ WISHLIST = _Wishlist()
 
 
 class _RouteRequests(QObject):
-    """A map card's "How to get here from my map": the app opens Play tools on the way there."""
+    """A map card's "How to get here from my map": the app opens the bar's Maps search on that map's page, which shows
+    the way there."""
 
     requested = Signal(str)       # the map's KB key
 
@@ -1312,7 +1313,6 @@ class ProfileCard(QFrame):
 
     clicked = Signal()
     refresh_requested = Signal()
-    minimap_requested = Signal()      # the minimap button: choose the game's minimap box (where the player is)
 
     def __init__(self):
         super().__init__(objectName="ProfileCard")
@@ -1348,12 +1348,6 @@ class ProfileCard(QFrame):
         row.addLayout(col, 1)
         from PySide6.QtWidgets import QToolButton
         from . import theme
-        # beside ⟳: the box around the game's minimap, read for the "In Henesys" line above (the owner's, 2026-10-08:
-        # it belongs with the character, not among the header's windows)
-        self.minimap = QToolButton(objectName="Refresh", text=theme.ICON["minimap"])
-        self.minimap.setCursor(Qt.PointingHandCursor)       # (its name and tooltip come from the chat's language)
-        self.minimap.clicked.connect(self.minimap_requested.emit)
-        row.addWidget(self.minimap, 0, Qt.AlignVCenter)
         self.refresh = QToolButton(objectName="Refresh", text=theme.ICON["refresh"])
         self.refresh.setCursor(Qt.PointingHandCursor)       # (its name and tooltip come from the chat's language)
         self.refresh.clicked.connect(self.refresh_requested.emit)

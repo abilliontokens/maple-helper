@@ -172,7 +172,6 @@ DEFAULT_SETTINGS = {
     "presence": True,             # anonymous "the app is running" ping, for player counts (see presence.py)
     "presence_sent": {},          # what that ping last marked as sent: {"ever", "day", "month"}
     "grind_auto": True,           # the grind tracker reads the game every minute while a session runs
-    "minimap_region": None,       # the game's minimap on screen, drawn by the player: {"x","y","w","h"} in capture pixels
     "minimap_scan_interval": 1.0,  # seconds between two reads of the minimap (where the player is)
     "minimap_hidden_portals": True,  # blue dots on the game's minimap where its invisible teleports are (ui/portaldots.py)
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)
@@ -184,7 +183,6 @@ DEFAULT_SETTINGS = {
     "game_detail_size": None,     # the size the player dragged the search's page window to: {"w","h"}; None: fits its page
     "game_rides": False,          # the bar's ⚙ panel's Cabs & Teleports switch: the way to a found NPC/map takes them, or walks
     "overlays_in_screenshots": False,   # the windows over the game show in screen captures (they hide from them)
-    "loot_region": None,          # the game's pickup messages on screen, drawn by the player (the loot log reads them)
     "loot_overlay": False,        # the loot log's window over the game (ui/lootoverlay.py); a log starting turns it on
     "loot_overlay_pos": None,     # ... where the player left it: {"x","y"} in screen pixels
     "loot_overlay_folded": False,  # ... folded to its title row (its – button)
@@ -202,6 +200,20 @@ DEFAULT_SETTINGS = {
     "craft_advisor_geom": None,   # ... where the player left it: {"x","y","w","h"}; None: under the bar
     "craft_plan_size": None,      # ... the size the player dragged its Forge plan window to: {"w","h"}; None: fits its plan
     "craft_exp_table": None,      # crafting EXP per level the player measured in game: {"7": 1234}; None: the KB's table
+    # the other tool windows over the game (ui/toolwindow.py's ToolWindow each), the bar's Tools card; each window's
+    # place: {"x","y","w","h"}; None: under the bar
+    "grind_spots": False,         # Tools > Grind spots (ui/grindspots.py): where to train at the character's level
+    "grind_spots_geom": None,
+    "farm_tool": False,           # Tools > Farm (ui/farmtool.py): who drops an item and what is worth farming
+    "farm_tool_geom": None,
+    "quest_tool": False,          # Tools > Quests (ui/questtool.py): the quests for the character's level
+    "quest_tool_geom": None,
+    "citizenship": False,         # Tools > Citizenship (ui/citizenship.py): the town to join and its quests
+    "citizenship_geom": None,
+    "build_tool": False,          # Tools > Build & skills (ui/buildtool.py): the guide's AP and skill plan
+    "build_tool_geom": None,
+    "cash_shop": False,           # Tools > Cash shop (ui/cashshop.py): what the game's Cash Shop sells now
+    "cash_shop_geom": None,
     "game_toolbar_width": None,   # the width the player dragged the bar to (its buttons wrap into rows); None: one row
     "game_toolbar_height": None,  # ... the height, when it stands upright (its buttons wrap into columns); None: one
     "game_toolbar_vertical": False,   # the bar upright, a column (its ◯ before the grip turns it)

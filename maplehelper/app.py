@@ -34,6 +34,14 @@ APP_CHECK_MS = 15 * 60 * 1000    # and for a new app release this often: one sma
 HOTKEY_TOOLBAR = 1              # the one system-wide key: shows or hides the bar over the game (game_toolbar_hotkey)
 GRIND_ALERT_MARGIN_S = 5.0      # the grind's alerts look this far back past the newest pickup / bar read already seen
                                 # (a read lands after its own time; _grind_changed says each alert once)
+# the windows of the bar's Tools card by their key (ui/gametoolbar.py TOOLS, each its window's setting): the module
+# under maplehelper.ui and the class, imported on the first ask (packaging/maplehelper.spec ships every ui module:
+# PyInstaller can't see an import by name)
+TOOL_WINDOWS = {"grind_spots": ("grindspots", "GrindSpots"), "farm_tool": ("farmtool", "FarmTool"),
+                "quest_tool": ("questtool", "QuestTool"), "citizenship": ("citizenship", "Citizenship"),
+                "build_tool": ("buildtool", "BuildTool"), "gear_advisor": ("gearadvisor", "GearAdvisor"),
+                "scroll_planner": ("scrollplanner", "ScrollPlanner"), "craft_advisor": ("craftadvisor", "CraftAdvisor"),
+                "cash_shop": ("cashshop", "CashShop")}
 # the .ico carries every Windows size; macOS draws the menu bar and Dock from a PNG
 APP_ICON = "app.ico" if sys.platform == "win32" else "icon-256.png"
 
@@ -207,10 +215,9 @@ class MapleHelperApp:
         self.overlay.grind_skipped.connect(self.grind.skipped)
         self.overlay.sync_finished.connect(self.grind.sync_done)     # before the tools window redraws (below)
         self.grind.sync()          # a session running when the app last closed goes on (unless it was left idle)
-        self.overlay.tools_requested.connect(lambda: self.show_tools())
-        # where the player is, read from the game's minimap every few seconds (its window found at the game's top
-        # left, else the box the player drew around it: LOCATION.box): the character card says it, and the map
-        # windows draw the way from there (ui/minimapscan.py)
+        # where the player is, read from the game's minimap every few seconds (its MINI MAP window found at the game's
+        # top left: LOCATION.box): the character card says it, and the map windows draw the way from there
+        # (ui/minimapscan.py)
         from .ui.minimapscan import MinimapScanner
         self.minimap_scanner = MinimapScanner(self.kb, self.settings)
         self.minimap_scanner.restart()
@@ -239,9 +246,10 @@ class MapleHelperApp:
         self.game_toolbar.closed.connect(self._game_toolbar_closed)            # its ✕: how to bring it back
         self.game_toolbar.hotkey_changed.connect(self._toolbar_hotkey_changed)  # its ⚙ panel's key box
         self.game_toolbar.refresh()
-        self.overlay.minimap_requested.connect(self.pick_minimap)     # the character card's minimap button
-        # the loot log: the game's pickup messages read while a log runs (the box the player drew around them), with
-        # its timer as long as the app (ui/lootscan.py)
+        # the chat header's controller button shows or hides the bar (lit while it is up: _game_toolbar_followed)
+        self.overlay.toolbar_requested.connect(self.toggle_game_toolbar)
+        # the loot log: the game's pickup messages read while a log runs (found in the game's window on their own),
+        # with its timer as long as the app (ui/lootscan.py)
         from .ui.lootscan import LootScanner
         self.loot_scanner = LootScanner(self.kb, self.profiles, self.settings)
         self.loot_scanner.changed.connect(lambda: self._tools_call("loot_changed"))
@@ -274,15 +282,27 @@ class MapleHelperApp:
         self.grind_bar.refresh()
         if self.settings["grind_window"]:
             self._grind_window().refresh()
-        # the bar's Tools card (Scrolls, Gear, Crafting): the tool windows (ui/scrollplanner.py, ui/gearadvisor.py,
-        # ui/craftadvisor.py), made on the first ask, or now when the app last closed with one open
+        # the bar's Tools card: its tool windows (TOOL_WINDOWS), made on the first ask, or now when the app last
+        # closed with one open
         self._tool_windows: dict = {}
         self.game_toolbar.tool_toggled.connect(self._tool_toggled)
         for key in TOOLS:
             if self.settings[key]:
                 self._tool_toggled(key)
+        # what a tool window asks of the rest of the app (ui/toolwindow.py NAV): a map's, a monster's, an NPC's or an
+        # item's page beside the bar's search, another tool window on something, a new character, the chat, a guide
+        from .ui.toolwindow import NAV
+        NAV.map_requested.connect(self.show_map_page)
+        NAV.monster_requested.connect(lambda key: self._show_search_page("monster_npc", "monster", key))
+        NAV.npc_requested.connect(lambda key: self._show_search_page("monster_npc", "npc", key))
+        NAV.item_requested.connect(lambda key: self._show_search_page("item", "item", key))
+        NAV.tool_requested.connect(self._open_tool)
+        NAV.add_character_requested.connect(lambda: (self.add_character(), self.on_profile_changed()))
+        NAV.read_screen_requested.connect(lambda: self.overlay.sync_profile())
+        NAV.guide_requested.connect(self.show_guides)
+        NAV.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
         from .ui.widgets import ITEM_REQUESTS, MAP_REQUESTS, MARKET_REQUESTS, ROUTE_REQUESTS
-        ROUTE_REQUESTS.requested.connect(self.show_route)       # a map card's "How to get here"
+        ROUTE_REQUESTS.requested.connect(self.show_map_page)    # a map card's "How to get here"
         MAP_REQUESTS.requested.connect(self.show_map_location)  # a map's "Where it is on the map"
         ITEM_REQUESTS.requested.connect(self.show_item_details)  # an item's ⓘ
         MARKET_REQUESTS.requested.connect(self.show_market_details)  # a price card's "full details"
@@ -375,20 +395,15 @@ class MapleHelperApp:
         search.open(kind)
 
     def _tool_window(self, key: str):
-        """The scroll planner's or gear advisor's window, made on the first ask."""
+        """A window of the bar's Tools card (TOOL_WINDOWS), made on the first ask."""
         w = self._tool_windows.get(key)
         if w is None:
-            t = I18n(self.settings["language"] or "he")
-            if key == "scroll_planner":
-                from .ui.scrollplanner import ScrollPlanner
-                w = ScrollPlanner(self.kb, self.settings, self.profiles, t)
-            elif key == "gear_advisor":
-                from .ui.gearadvisor import GearAdvisor
-                w = GearAdvisor(self.kb, self.settings, self.profiles, t)
-                w.scroll_requested.connect(self._plan_scrolls)
-            else:
-                from .ui.craftadvisor import CraftAdvisor
-                w = CraftAdvisor(self.kb, self.settings, self.profiles, t)
+            from importlib import import_module
+            module, name = TOOL_WINDOWS[key]
+            cls = getattr(import_module(f".ui.{module}", __package__), name)
+            w = cls(self.kb, self.settings, self.profiles, I18n(self.settings["language"] or "he"))
+            if key == "gear_advisor":
+                w.scroll_requested.connect(self._plan_scrolls)     # its Plan scrolls: the scroll planner on the item
             w.closed.connect(self.game_toolbar.refresh)          # its ✕: the bar's button goes off
             self._tool_windows[key] = w
         return w
@@ -399,7 +414,7 @@ class MapleHelperApp:
             w.place_under(self.game_toolbar.frameGeometry())
 
     def _tool_toggled(self, key: str) -> None:
-        """The bar's Scrolls or Gear button flipped its window's setting: the window follows."""
+        """A Tools card button flipped its window's setting: the window follows."""
         w = self._tool_window(key) if self.settings[key] else self._tool_windows.get(key)
         if w is None:
             return
@@ -413,6 +428,17 @@ class MapleHelperApp:
         self._place_tool("scroll_planner", planner)
         planner.open_item(key)
         self.game_toolbar.refresh()
+
+    def _open_tool(self, key: str, arg: str) -> None:
+        """A tool window asked for by another (NAV.tool_requested): it opens (its bar button lit) on that thing
+        (open_with: an item's name, a quest's key), over the others."""
+        self.settings[key] = True
+        w = self._tool_window(key)
+        self._place_tool(key, w)
+        w.refresh()
+        w.open_with(arg)
+        self.game_toolbar.refresh()
+        w.raise_()
 
     def _game_rides_toggled(self) -> None:
         """The toolbar's ⚙ panel's Cabs & Teleports switch: a way already shown follows it, in the search's detail
@@ -437,7 +463,7 @@ class MapleHelperApp:
             from .ui.grindwindow import GrindWindow
             self.grind_window = GrindWindow(self.kb, self.settings, self.profiles, self.loot_scanner,
                                             I18n(self.settings["language"] or "he"))
-            self.grind_window.route_requested.connect(self._show_grind_route)
+            self.grind_window.route_requested.connect(lambda map_id: self.show_map_page(f"map/{map_id}"))
         return self.grind_window
 
     def _open_grind_window(self) -> None:
@@ -449,13 +475,29 @@ class MapleHelperApp:
         w.refresh()
         w.raise_()
 
-    def _show_grind_route(self, map_id: str) -> None:
-        """The grind window's way to a spot: the search window in its Maps mode with that map's page beside it, the way
-        there from the player's map on it (ui/gamesearch.py)."""
+    def show_map_page(self, key: str) -> None:
+        """A map's page ("map/<id>") beside the bar's search in its Maps mode, the way there from the player's map on
+        it (ui/gamesearch.py): a map card's How to get here, the grind window's and the wishlist's way there, a tool
+        window's map (NAV.map_requested)."""
+        self._show_search_page("map", "map", key)
+
+    def _show_search_page(self, mode: str, kind: str, key: str) -> None:
+        """A thing's own page in the detail window beside the bar's search (kind: "map", "monster", "npc" or "item";
+        key: its KB key), the search opened in that mode first — not shut when it shows that mode already."""
         search = getattr(self, "game_search", None)
-        if search is None or not search.isVisible() or search._kind != "map":
-            self._open_game_search("map")
-        self.game_search._detail.open_view("map", f"map/{map_id}")
+        if search is None or not search.isVisible() or search._kind != mode:
+            self._open_game_search(mode)
+        self.game_search._detail.open_view(kind, key)
+
+    def _route_to_place(self, name: str) -> None:
+        """The wishlist's way to a dropper (a monster's, a map's or an NPC's name): the map it names, the busiest map
+        the monster lives on, or the map the NPC stands on, on its page; nothing when no map is found by it."""
+        from . import combat, farm, routes
+        low = name.strip().lower()
+        mob = next((m for m in combat.monsters(self.kb) if m.name.lower() == low), None)
+        mid = routes.of(self.kb).find((farm._home(self.kb, mob.key) if mob else "") or name)
+        if mid:
+            self.show_map_page(f"map/{mid}")
 
     def _grind_changed(self) -> None:
         """A loot scanner change, for the grind while its bar or window is on: a run that just ended with EXP opens its
@@ -534,7 +576,8 @@ class MapleHelperApp:
             self.toggle_game_toolbar()
 
     def toggle_game_toolbar(self) -> None:
-        """The bar's key and the tray's Show/Hide the toolbar: the bar shown (game_toolbar on) or hidden (off)."""
+        """The bar's key, the tray's Show/Hide the toolbar and the chat header's controller button: the bar shown
+        (game_toolbar on) or hidden (off)."""
         self.settings["game_toolbar"] = not self.settings["game_toolbar"]
         self.game_toolbar.refresh()
         self._game_toolbar_followed()
@@ -551,11 +594,15 @@ class MapleHelperApp:
         self.toast(t("tray_toolbar_hidden"), body, timeout_ms=12000)
 
     def _game_toolbar_followed(self) -> None:
-        """The bar turned on or off outside Settings (its ✕, its key, the tray item): an open Settings window's switch
-        follows, with the value its Save compares against — after the ✕ it kept reading On, so closing it changed
-        nothing and the bar was 'on' yet gone (the owner, 2026-10-11) — and the tray item says the other way now."""
+        """The bar turned on or off outside Settings (its ✕, its key, the tray item, the chat's controller button): an
+        open Settings window's switch follows, with the value its Save compares against — after the ✕ it kept reading
+        On, so closing it changed nothing and the bar was 'on' yet gone (the owner, 2026-10-11) — the tray item says
+        the other way now, and the controller button is lit while the bar is up."""
         self._settings_follow("game_toolbar")
         self._retext_tray_toolbar()
+        overlay = getattr(self, "overlay", None)
+        if overlay is not None:
+            overlay.show_toolbar_state()
 
     def _toolbar_hotkey_changed(self) -> None:
         """The ⚙ panel picked or cleared the bar's key: bound now; Settings' key box and the tray item follow."""
@@ -830,55 +877,6 @@ class MapleHelperApp:
             return dlg
         self.open_window("settings", make, on_close=self.overlay.refresh_profile_chip)
 
-    def pick_minimap(self):
-        """The character card's minimap button: draw the box around the game's minimap, the reads' fallback when
-        its window isn't found at the game's top left on its own."""
-        self._pick_region("minimap_region", "minimap_pick_hint", getattr(self, "minimap_scanner", None))
-
-    def pick_loot_area(self):
-        """The loot log's "Select the messages area": draw the box around the game's pickup messages."""
-        self._pick_region("loot_region", "loot_pick_hint", getattr(self, "loot_scanner", None))
-
-    def _pick_region(self, setting: str, hint: str, scanner):
-        """Draw a box on the game (the chat steps aside meanwhile); it is saved in `setting` and `scanner` restarts
-        on it. One picker at a time."""
-        from .ui.regionpick import RegionPicker
-        if getattr(self, "_region_picker", None) is not None:
-            return                  # already picking
-        t = I18n(self.settings["language"] or "he")
-        self._picker_overlay_open = self.overlay.is_open()
-        if self._picker_overlay_open:
-            self.overlay.hide()     # the chat would cover the game the box is drawn on
-        picker = RegionPicker(hint=t(hint), rtl=t.rtl)
-        self._region_picker = picker
-        picker.picked.connect(lambda rect: self._on_region_picked(rect, setting, scanner))
-        picker.start()
-
-    def _on_region_picked(self, rect: dict, setting: str, scanner):
-        self._end_region_pick()
-        ok = (isinstance(rect, dict)
-              and all(isinstance(rect.get(k), (int, float)) and not isinstance(rect.get(k), bool)
-                      for k in ("x", "y", "w", "h"))
-              and rect["w"] > 0 and rect["h"] > 0)
-        if not ok:
-            return                  # not a box: keep whatever was there
-        self.settings[setting] = {k: int(rect[k]) for k in ("x", "y", "w", "h")}  # saves, like every setting
-        if scanner is not None:
-            # (the minimap's: the drawn box is its fallback; LOCATION.box, and the windows placed by it, follow
-            # once the scanner reads from it)
-            scanner.restart()
-        if setting == "loot_region":
-            self._tools_call("loot_changed")
-
-    def _end_region_pick(self):
-        picker, self._region_picker = getattr(self, "_region_picker", None), None
-        if picker is not None:
-            picker.close()
-        if getattr(self, "_picker_overlay_open", False):
-            self._picker_overlay_open = False
-            if not self.overlay.isVisible():
-                self.overlay.show()
-
     def preview_look(self, tint: str, accent: str, opacity: float) -> None:
         """A look Settings shows before it is saved (look_previewed), on the open windows as the player tries it;
         closing Settings without saving sends the saved look back here. The settings file and self._look stay as
@@ -1147,6 +1145,9 @@ class MapleHelperApp:
         game = getattr(self, "game_toolbar", None)
         if game is not None:
             game.refresh()         # the bar over the game switched on or off (its button follows the window)
+        overlay = getattr(self, "overlay", None)
+        if overlay is not None:
+            overlay.show_toolbar_state()    # ... and so does the chat's controller button
         search = getattr(self, "game_search", None)
         if search is not None:
             search._read_opacity()          # no refresh of its own: its rows are the search's, not the look's
@@ -1162,7 +1163,7 @@ class MapleHelperApp:
             if self.grind_window is not None:
                 self.grind_window.refresh()
         for w in self.__dict__.get("_tool_windows", {}).values():
-            w.refresh()            # the scroll planner / gear advisor at the windows' opacity
+            w.refresh()            # each Tools card window at the windows' look and opacity
         self._apply_overlay_capture()
 
     def _apply_overlay_capture(self) -> None:
@@ -1399,7 +1400,6 @@ class MapleHelperApp:
         def make():
             dlg = ToolsDialog(self.kb, self.profiles, self.settings, self.settings["language"], self.style(),
                               self.grind, page, loot=self.loot_scanner)
-            dlg.loot_area_requested.connect(self.pick_loot_area)
             dlg.sync_requested.connect(self.overlay.sync_profile)
             dlg.grind_sync_requested.connect(lambda: self.overlay.sync_profile(grind=True))
             dlg.ask_requested.connect(self.ask_from_tools)
@@ -1420,10 +1420,6 @@ class MapleHelperApp:
             dlg.news_seen.connect(self._news_seen)
             return dlg
         return self.open_window("news", make)
-
-    def show_route(self, key: str):
-        """Play tools on the way to a map, from the character's map."""
-        self.show_tools("route").route_to_map(key)
 
     def show_map_location(self, key: str):
         """The map window on this map's way in (the open one shows it, rather than a second window): beside the chat
@@ -1489,7 +1485,7 @@ class MapleHelperApp:
         self.grind.sync()          # another character: its own session's minute reads (or none)
         self._tools_call("profile_changed")
         for w in self.__dict__.get("_tool_windows", {}).values():
-            w.character_changed()      # the gear advisor's level, job and worn gear are the new character's
+            w.character_changed()      # each Tools card window reads the new character (level, job, gear, quests)
 
     def show_guides(self, open_key: str | None = None):
         from .ui.guides import GuidesDialog
@@ -1558,12 +1554,14 @@ class MapleHelperApp:
         self.open_window(f"wishlist:{cid}", lambda: self._wishlist_dialog(keys, c or self.profiles.active))
 
     def _wishlist_dialog(self, keys, c=None):
+        from .ui.toolwindow import NAV
         from .ui.wishlist import WishlistDialog
         dlg = WishlistDialog(keys, self.kb, self.settings["language"], self.style(), c.level if c else None)
         dlg.ask_requested.connect(lambda q: self.ask_from_tools(q, False))
-        # who drops it and the way there, from Play tools (answered locally, no AI)
-        dlg.farm_requested.connect(lambda name: self.show_tools("farm").farm_item(name))
-        dlg.route_requested.connect(lambda name: self.show_tools("route").route_to_place(name))
+        # who drops it (the Farm window on it) and the way to a dropper's map (its page in the Maps search), answered
+        # locally, no AI
+        dlg.farm_requested.connect(lambda name: NAV.tool_requested.emit("farm_tool", name))
+        dlg.route_requested.connect(self._route_to_place)
         return dlg
 
     def show_patch_notes(self, entries: list[dict] | None = None, tab: str = "changes"):
@@ -1616,7 +1614,7 @@ class MapleHelperApp:
             if self.grind_window is not None:
                 self.grind_window.set_kb(self.kb)
         for w in self.__dict__.get("_tool_windows", {}).values():
-            w.set_kb(self.kb)                # the new KB's equips and scrolls
+            w.set_kb(self.kb)                # each Tools card window reads the new KB
         self.overlay.show_scope()           # the new KB's "verified on" date
         self.overlay.show_news()            # and its news
         # the open KB windows were built on the old KB (their lists named pages the swap removed): reopen them as

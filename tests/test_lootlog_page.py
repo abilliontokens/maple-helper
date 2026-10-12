@@ -53,24 +53,11 @@ def _cell(d, key):
     return d.loot_cells[key][1].text()
 
 
-def test_the_area_button_asks_the_app_to_draw_the_box(page):
+def test_the_messages_are_found_on_their_own(page):
+    """Start needs no box: the messages are found in the game's window, with nothing to mark."""
     d, _ = page
-    asked = []
-    d.loot_area_requested.connect(lambda: asked.append(True))
-    d.loot_pick.click()
-    assert asked == [True]
-
-
-def test_the_messages_are_found_on_their_own_unless_a_box_was_drawn(page):
-    """Start needs no box; a drawn one shows "Find it on its own", which forgets it."""
-    d, s = page
     d.loot_changed()
-    assert d.loot_start.isEnabled() and not d.loot_auto.isVisibleTo(d)
-    s["loot_region"] = {"x": 0, "y": 0, "w": 400, "h": 260}
-    d.loot_changed()
-    assert d.loot_auto.isVisibleTo(d) and d.loot.region() is not None
-    d.loot_auto.click()
-    assert s["loot_region"] is None and d.loot.region() is None and not d.loot_auto.isVisibleTo(d)
+    assert d.loot_start.isEnabled() and not hasattr(d.loot, "region")
 
 
 def test_a_running_log_shows_its_totals_and_ends_into_recent(page):
@@ -330,8 +317,8 @@ def test_on_the_white_glass_the_window_turns_dark_on_light(page, card):
 
 
 def test_reads_follow_the_game_window_and_skip_a_covered_one(page, monkeypatch):
-    """No box drawn: each read takes the messages box from the game's window as it is now (moved, resized), and
-    reads nothing while another app's window covers it (its text was read live), saying so on the page."""
+    """Each read takes the messages box from the game's window as it is now (moved, resized), and reads nothing
+    while another app's window covers it (its text was read live), saying so on the page."""
     from maplehelper import capture, gamearea
     d, _ = page
     scan = d.loot
@@ -346,12 +333,12 @@ def test_reads_follow_the_game_window_and_skip_a_covered_one(page, monkeypatch):
     scan._read_done.disconnect()
     scan._read_done.connect(lambda rows, at, read: (got.append(read), scan._deliver(rows, at, read)))
     scan.start()
-    scan._read(None)
-    scan._read(None)
+    scan._read()
+    scan._read()
     assert grabbed == [tuple(lootlog.auto_box((0, 0, 1922, 1112)).values()),
                        tuple(lootlog.auto_box((500, 300, 1368, 800)).values())]
     cover[0] = True
-    scan._read(None)
+    scan._read()
     assert len(grabbed) == 2 and got[-1][1] == "covered" and scan.state == "covered"
     d.loot_changed()
     assert "covers the game" in d.loot_status.text()

@@ -18,8 +18,8 @@ from .widgets import (EntityCard, chip_row, fit_picture, info_tag, name_lv, sour
 
 class WishlistDialog(GlassDialog):
     ask_requested = Signal(str)          # a question for the chat (where to hunt a dropper)
-    farm_requested = Signal(str)         # an item's droppers on Play tools' Farm tab (by its name)
-    route_requested = Signal(str)        # the way to a monster's map on Play tools' How to get there (its name)
+    farm_requested = Signal(str)         # an item's droppers in the Farm tool window (by its name)
+    route_requested = Signal(str)        # the way to a monster's map: its page in the bar's Maps search (its name)
 
     def __init__(self, keys: list[str], kb: KnowledgeBase, lang: str, stylesheet: str, level: int | None = None):
         """level: the character's, for how each dropper sits against it (the Farm tab's chips) and their order."""

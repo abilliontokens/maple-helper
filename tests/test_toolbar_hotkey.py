@@ -230,11 +230,42 @@ def test_the_x_says_how_to_bring_the_bar_back(app, monkeypatch, mac):
     assert title == "The toolbar is hidden"
     assert ("click Maple Helper's icon in the menu bar" if mac else "right-click Maple Helper's icon by the clock") in body
     assert "Show the toolbar" in body and f"press {_label(app)}" in body and "Settings > Minimap" in body
+    assert "click the game controller at the top of the chat" in body     # the chat's own way back
     app.settings["game_toolbar_hotkey"] = ""
     app.settings["game_toolbar"] = True
     app.game_toolbar.refresh()
     app.game_toolbar._close.click()
     assert "press" not in app.toasts[-1][1] and "Show the toolbar" in app.toasts[-1][1]
+    assert "game controller" in app.toasts[-1][1]
+
+
+def test_the_chats_controller_button_shows_and_hides_the_bar(app, isolated_store, kb, monkeypatch):
+    """The chat header's game controller is the bar's show/hide (connected as the app connects it): a click flips
+    the setting and the bar, and the button is lit while the bar is up, whichever way it went (its ✕, the key)."""
+    from maplehelper import osapi
+    from maplehelper.app import HOTKEY_TOOLBAR
+    from maplehelper.ui.overlay import Overlay
+    for name in ("float_over_fullscreen", "activate_self", "focus_window"):
+        monkeypatch.setattr(osapi, name, lambda *a: None)
+    monkeypatch.setattr(osapi, "find_game_window", lambda: None)
+    app.settings["tour_done"] = True
+    app.overlay = Overlay(app.settings, isolated_store.Profiles(), kb, None)
+    app.overlay.toolbar_requested.connect(app.toggle_game_toolbar)
+    try:
+        btn = app.overlay.toolbar_btn
+        assert btn.toolTip() == "Show or hide the toolbar"
+        assert app.game_toolbar.isVisible() and btn._lit
+        btn.click()
+        assert not app.game_toolbar.isVisible() and app.settings["game_toolbar"] is False and not btn._lit
+        btn.click()
+        assert app.game_toolbar.isVisible() and app.settings["game_toolbar"] is True and btn._lit
+        app.game_toolbar._close.click()                 # the bar's ✕: the button goes dark
+        assert not btn._lit
+        app.hotkeys.pressed.emit(HOTKEY_TOOLBAR)         # the key brings it back: lit again
+        assert app.game_toolbar.isVisible() and btn._lit
+    finally:
+        app.overlay.hide()
+        app.overlay.deleteLater()
 
 
 def test_a_key_box_listening_has_the_app_let_go_of_the_key(app):
