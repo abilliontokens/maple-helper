@@ -702,7 +702,7 @@ class Onboarding(_ApiKeyEntry, GlassDialog):
         toggle, box = self._build_key_entry(card=True)
         lay.addWidget(toggle, 0, Qt.AlignLeading)
         lay.addWidget(box)
-        # not connected: why Next waits, and a way on without any AI (the Play tools need none, UX-10)
+        # not connected: why Next waits, and a way on without any AI (the toolbar's tools need none, UX-10)
         self.no_ai_note = QLabel(bidi.plain(self.t("ob_no_ai_note"), rtl), objectName="RowHint")
         self.no_ai_note.setWordWrap(True)
         lay.addWidget(self.no_ai_note)
@@ -1061,7 +1061,7 @@ class Onboarding(_ApiKeyEntry, GlassDialog):
         self._label_privacy()
 
     def _skip_ai(self):
-        """On to the character without an AI: the Play tools work without one, and Settings connects one later."""
+        """On to the character without an AI: the toolbar's tools work without one, and Settings connects one later."""
         if not self.only_character and self.stack.currentIndex() == 1:
             self._skipped_ai = True
             self.stack.setCurrentIndex(2)

@@ -1092,8 +1092,9 @@ class KnowledgeBase:
         self.map_label("warm")
         self.droppers                               # noqa: B018 - the drop index and the route graph (KB-19)
         routes.of(self)
-        # the Tools window's item list (which Cash items are pets) and the Farm tab's NPC prices: ~1,500 item pages
-        # read here, not on the GUI thread when the window opens (it stopped answering for 1.3 s, PERF-05)
+        # the item lists (the search's and the wishlist's: which Cash items are pets) and the NPC prices (the search,
+        # the Farm window): ~1,500 item pages read here, not on the GUI thread when a window opens (it stopped
+        # answering for 1.3 s, PERF-05)
         from . import market, sitedata
         for k, e in self.entities.items():
             if e.get("category") == "item" and str(e.get("type") or "").startswith("Cash"):

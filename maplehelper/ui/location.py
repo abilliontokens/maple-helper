@@ -13,11 +13,11 @@ class _Location(QObject):
     (map, View | None), None when it no longer matches (another map, the loading screen). `guided` is the NPC the
     player asked to be guided to (ui/npcoverlay.py), as (map, spot on its minimap picture, NPC key) or None; the
     game-minimap overlay (ui/portaldots.py) rings it. `boxed` is where the game's minimap window is on screen now,
-    the box the reads and the follow grab ({"x","y","w","h"} in capture pixels, like settings["minimap_region"]):
-    found on its own at the game's top left, else the box the player drew; None while neither is there."""
+    the box the reads and the follow grab ({"x","y","w","h"} in capture pixels), found on its own at the game's top
+    left; None while it isn't there."""
 
     changed = Signal(object)          # Here | None
-    status = Signal(str)              # "" (no minimap chosen, or found), "unknown" (chosen, not recognized)
+    status = Signal(str)              # "" (no read yet, or recognized), "unknown" (read, not recognized)
     followed = Signal(object)         # (map, View | None)
     guided = Signal(object)           # (map, (fx, fy), "npc/<id>") | None
     boxed = Signal(object)            # {"x","y","w","h"} | None

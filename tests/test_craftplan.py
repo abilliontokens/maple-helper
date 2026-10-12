@@ -425,12 +425,18 @@ def profiles(isolated_store, character):
     return p
 
 
-def _pump(qapp, ms=30):
+def _pump(qapp, ms=30, passes=10):
+    """Qt's events handled for `ms`, and for at least `passes` rounds however long one takes: each round handles what
+    the one before posted (the cards a fill adds show in one round, the layouts over them settle in the next). By the
+    clock alone, a busy full run spent its 30 ms in the first round and stopped there: the new rows were still 0 px
+    tall, and a click on one missed it."""
     import time
 
     end = time.monotonic() + ms / 1000
-    while time.monotonic() < end:
+    done = 0
+    while done < passes or time.monotonic() < end:
         qapp.processEvents()
+        done += 1
 
 
 def _delete_window(qapp, w):
@@ -439,7 +445,7 @@ def _delete_window(qapp, w):
     plan = w.plan_window
     w.hide()
     w.close()
-    for timer in (w._typing, w._bag_typing, w._edit, w._geom):
+    for timer in (w._typing, w._bag_typing, w._rec_typing, w._edit, w._geom):
         timer.stop()
     if plan is not None:
         plan._sized.stop()
@@ -476,7 +482,8 @@ def _texts(w) -> str:
 
 
 def test_window_tabs_switch_pages(qapp, settings, win):
-    """Three tabs over one stack: what to craft, the bag (the plan's raw mats listed), the professions."""
+    """Three tabs over one stack: what to craft, the bag (the plan's raw mats listed), the professions (the character
+    level, a switch of the six professions opening on the one the character is highest in)."""
     settings["craft_advisor"] = True
     win.refresh()
     tabs = win._tabs.group.buttons()
@@ -489,7 +496,10 @@ def test_window_tabs_switch_pages(qapp, settings, win):
     tabs[2].click()
     _pump(qapp)
     assert win._stack.currentIndex() == 2
-    assert "Character level" in _texts(win) and "Arcforge" in _texts(win)
+    text = _texts(win)
+    assert "Character level" in text
+    assert all(name in text for name in ("Smithing", "Weaponcrafting", "Tailoring", "Woodcrafting", "Leatherworking"))
+    assert win._tiles["arcforge"].isChecked() and "Arcforge" in _texts(win._prof_card)
     tabs[0].click()
     assert win._stack.currentIndex() == 0
 

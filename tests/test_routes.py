@@ -1,5 +1,6 @@
 """How to get there: the route graph (KB map connections, taxis, boats, NPC trips), only through maps in the game;
-routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes); the Play tools page."""
+routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes); the ◎ window's way from the
+player's map and a map card's way there."""
 import json
 import os
 from pathlib import Path
@@ -78,7 +79,7 @@ def test_only_maps_in_the_game_are_on_the_graph(world):
     # the only walk to Perion passes Orbis: on foot there is no way, by cab there is
     assert g.route(HENESYS, PERION, taxi=False) is None
     assert _path(g, g.route(HENESYS, PERION)) == [("taxi", "Perion")]
-    assert g.route(HENESYS, ORBIS) is None and g.find("Orbis") is None and g.not_in_game("Orbis")
+    assert g.route(HENESYS, ORBIS) is None and g.find("Orbis") is None
 
 
 def test_on_foot_leaves_out_npc_teleports_but_keeps_boats(world):
@@ -364,7 +365,6 @@ def test_real_walks_and_closed_places(real):
     # Orbis and El Nath: not found while the guide keeps Ossyria shut, found once it opens
     for town in ("Orbis", "El Nath"):
         assert (g.find(town) is None) == (not o.place_open(town))
-    assert g.not_in_game("Orbis") == (not o.place_open("Orbis"))
     # Victoria Island reaches Maple Island only if some step leads there (today: none, Shanks' boat goes one way)
     maple = {m for m, info in g.maps.items() if info.continent == "Maple Island"}
     into = any(leg.to in maple for frm, legs in g.edges.items() if frm not in maple for leg in legs)
@@ -374,61 +374,12 @@ def test_real_walks_and_closed_places(real):
     assert all(c not in text for c in o.continents - o.confirmed if not o.place_open(c))
 
 
-# ---------------------------------------------------------------- Play tools and the chat card
+# ---------------------------------------------------------------- the ◎ window and the chat card
 
 @pytest.fixture
 def qt():
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
-
-
-@pytest.mark.parametrize("lang", ["he", "en"])
-def test_route_page(world, qt, isolated_store, lang):
-    from PySide6.QtWidgets import QFrame, QLabel
-
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    kb, g = world
-    p = isolated_store.Profiles()
-    c = p.add("Kiwi", "Warrior", "Fighter", 20)
-    c.map = "Snail Garden"
-    d = ToolsDialog(kb, p, isolated_store.Settings(), lang, "", {}, "route")
-    try:
-        assert d.route_from.text() == "Snail Garden"            # from the character's map
-        assert any("Pick a destination" in lb.text() or "בחרו לאן" in lb.text() for lb in d.pages["route"].findChildren(QLabel))
-        d.route_to_map(f"map/{PERION}")
-        assert d.stack.currentIndex() == PAGES.index("route") and d.route_to.text() == "Perion"
-        steps = [w for w in d.pages["route"].findChildren(QFrame, "Card") if w.isVisibleTo(d)]
-        assert len(steps) == 3                                   # two steps and the arrival
-        shown = " ".join(lb.text() for lb in d.pages["route"].findChildren(QLabel))
-        assert "Regular Cab" in shown and "Orbis" not in shown
-        d.route_taxi.setChecked(False)                           # on foot: the walk would cross Orbis
-        shown = " ".join(lb.text() for lb in d.pages["route"].findChildren(QLabel) if lb.isVisibleTo(d))
-        assert "no way" in shown or "אין דרך" in shown
-        d.route_to.setText("Orbis")
-        d._find_route()
-        shown = " ".join(lb.text() for lb in d.pages["route"].findChildren(QLabel) if lb.isVisibleTo(d))
-        assert "in the game yet" in shown or "עוד לא במשחק" in shown
-        asked = []
-        d.ask_requested.connect(lambda q, shot: asked.append(q))
-        d._ask_route(GARDEN, PERION)
-        assert asked == [d.t("route_q", a="Snail Garden", b="Perion")]
-    finally:
-        d.close()
-
-
-def test_a_shorter_last_row_of_tool_chips_fills_the_width(world, qt, isolated_store):
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    kb, _ = world
-    d = ToolsDialog(kb, isolated_store.Profiles(), isolated_store.Settings(), "en", "", {}, "train")
-    try:
-        d.resize(470, 800)
-        d.show()
-        qt.processEvents()
-        first, last = d.nav.button(0), d.nav.button(len(PAGES) - 1)
-        alone = len(PAGES) % 3 or 3                  # chips on the last row
-        assert last.width() > (3 / alone - 0.2) * first.width() and last.y() > d.nav.button(len(PAGES) - alone - 1).y()
-    finally:
-        d.close()
 
 
 def test_a_map_card_offers_the_way_there(world, qt):
@@ -490,29 +441,32 @@ def test_a_taxi_town_asked_from_nowhere_is_no_0_step_route_and_pason_is_not_free
     assert not [m.name for m in g.maps.values() if m.name != m.name.strip()]
 
 
-def test_route_page_dot_follows_the_player_like_the_map_window(world, qt, isolated_store):
-    """'How to get there' draws its steps as the ◎ window does: the legend on the player's map's card, and the blue
-    dot there moving with the minimap read, without rebuilding the page (the owner's, 2026-10-08)."""
+def test_the_map_windows_dot_follows_the_player_without_a_rebuild(world, qt, isolated_store):
+    """The ◎ window draws the way from the player's map as steps: the legend on the first step's card says which
+    dot is them, and the blue dot there moves with the minimap read in that same picture, without rebuilding the
+    window (the owner's, 2026-10-08)."""
+    from PySide6.QtWidgets import QFrame
+
     from maplehelper.minimap import Here
     from maplehelper.ui import mapview
     from maplehelper.ui.location import LOCATION
-    from maplehelper.ui.tools import ToolsDialog
-    kb, g = world
-    p = isolated_store.Profiles()
-    p.add("Kiwi", "Warrior", "Fighter", 20)
+    kb, _ = world
     old = LOCATION.here
     try:
         LOCATION.set(Here(GARDEN, (0.2, 0.5)))
-        d = ToolsDialog(kb, p, isolated_store.Settings(), "en", "", {}, "route")
+        s = isolated_store.Settings()
+        s["game_rides"] = True                         # Cabs & Teleports on: the way to Perion takes the cab
+        d = mapview.MapLocationDialog(kb, "en", "", s)
         try:
-            d.route_to_map(f"map/{PERION}")
-            mid, dot = d._route_live
-            assert mid == GARDEN and dot.legend is not None and dot.legend.you.isVisibleTo(d.pages["route"])
-            assert dot.pic._pic_spec[3] == (0.2, 0.5)
-            cards = d.pages["route"].findChildren(mapview.MapLegend)
-            assert len(cards) == 1
+            d.show_map(f"map/{PERION}")
+            pic, mid, _leg, _npc = d._first
+            assert mid == GARDEN and d._legend is not None and d._legend.you.isVisibleTo(d)
+            assert pic._pic_spec[3] == (0.2, 0.5)
+            assert len(d.findChildren(mapview.MapLegend)) == 1
+            cards = d.findChildren(QFrame, "Card")
             LOCATION.set(Here(GARDEN, (0.7, 0.4)))         # moved on the same map: the same picture repaints
-            assert d._route_live[1] is dot and dot.pic._pic_spec[3] == (0.7, 0.4)
+            assert d._first[0] is pic and pic._pic_spec[3] == (0.7, 0.4)
+            assert d.findChildren(QFrame, "Card") == cards
         finally:
             d.close()
     finally:

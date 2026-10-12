@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollA
 from .. import bidi, routes
 from ..i18n import I18n
 from . import theme
-from .controls import rtl_buttons
+from .controls import clear, rtl_buttons
 from .glass import SHADOW, EdgeResize, GlassDialog
 from .location import LOCATION
 from .patchnotes import gutter
@@ -68,7 +68,7 @@ class Spot:
     says: str                            # the string key of the line under the map's name
     name: str                            # what the line names: the place it leads to, or the NPC
     inside: str = ""                     # an NPC inside a building: the building ("npc_where_inside")
-    npc: bool = False                    # an NPC's own spot (green, as the route page rings an NPC), else a portal
+    npc: bool = False                    # an NPC's own spot (green, as the way there rings an NPC), else a portal
     role: str = ""                       # a quest's NPC: "quest_where_start" / "quest_where_end" (a heading above it)
 
 
@@ -136,7 +136,7 @@ def _whole(name: str) -> str:
 
 def route_says(t, g, leg) -> str:
     """One step's line, in the UI language: the portal (left/right when at the map's edge) or the NPC to talk to,
-    with the fare when a guide names it. The route page says the same (tools.py delegates here)."""
+    with the fare when a guide names it. The Maps search's way there says the same (gamesearch)."""
     rtl = t.rtl
     if leg is None:
         return t("route_arrive")
@@ -151,8 +151,8 @@ def route_says(t, g, leg) -> str:
 
 
 def says_html(t, text: str) -> str:
-    """A step line as the card shows it: **bold** rendered, aligned to the UI side, as the route page draws it
-    (tools._label: bidi.paragraph_html + Qt.RichText)."""
+    """A step line as the card shows it: **bold** rendered, aligned to the UI side (bidi.paragraph_html +
+    Qt.RichText)."""
     return bidi.paragraph_html(text, "rtl" if t.rtl else "ltr")
 
 
@@ -349,8 +349,7 @@ def route_picture(path, spot: tuple[float, float] | None = None, npc: bool = Fal
 
 def step_card(t, g, number: str, good: bool, mid: str, says: str, pm: QPixmap, spec=None) -> tuple[QFrame, QLabel]:
     """A step's frame: its number, the map's name, the line, and the picture (the caller keeps the QLabel to repaint
-    the live dot; spec redraws it at a new width on resize). The ◎ window and the play tools' "How to get there" both
-    draw their steps with it, so the two look and behave the same (the owner's, 2026-10-08)."""
+    the live dot; spec redraws it at a new width on resize)."""
     rtl = t.rtl
     card = QFrame(objectName="Card")
     col = QVBoxLayout(card)
@@ -373,8 +372,8 @@ def step_card(t, g, number: str, good: bool, mid: str, says: str, pm: QPixmap, s
         names.addWidget(QLabel(bidi.ltr_block(where, rtl), objectName="CardSub"))
     top.addLayout(names, 1)
     col.addLayout(top)
-    line = QLabel(objectName="RowLabel")              # rich: the step's **words** come out bold, as on the
-    line.setTextFormat(Qt.RichText)                   # route page (a plain label showed the asterisks)
+    line = QLabel(objectName="RowLabel")              # rich: the step's **words** come out bold (a plain label
+    line.setTextFormat(Qt.RichText)                   # showed the asterisks)
     line.setWordWrap(True)
     line.setText(says_html(t, says))
     col.addWidget(line)
@@ -386,25 +385,6 @@ def step_card(t, g, number: str, good: bool, mid: str, says: str, pm: QPixmap, s
     pic.setAccessibleName(g.name(mid))
     col.addWidget(pic, 0, Qt.AlignHCenter)
     return card, pic
-
-
-class LiveDot:
-    """The player's dot on one step's picture, following the minimap read while the step is shown: a moved dot
-    repaints that picture only (rebuilding every second flickered), and the legend's "You are here" follows whether
-    the read has a dot. `spec` is the picture's (path, target spot, npc) without the player."""
-
-    def __init__(self, pic: QLabel, spec: tuple, legend: MapLegend | None, cap) -> None:
-        self.pic, self.spec, self.legend, self.cap = pic, spec, legend, cap
-
-    def show(self, you) -> None:
-        try:
-            if self.legend is not None:
-                self.legend.show_you(you is not None)
-            full = (*self.spec, you)
-            self.pic._pic_spec = full
-            self.pic.setPixmap(route_picture(*full, cap_w=self.cap()))
-        except RuntimeError:
-            pass                                       # closed meanwhile
 
 
 class MapLocationDialog(EdgeResize, GlassDialog):
@@ -510,7 +490,6 @@ class MapLocationDialog(EdgeResize, GlassDialog):
     def show_map(self, key: str) -> None:
         """Where a map, an NPC or a quest's NPCs are (one window: a second ◎ shows its thing here instead of opening
         another). With the player's live map known, the way from there instead of the generic ways in."""
-        from .tools import clear
         t, rtl, g = self.t, self.t.rtl, routes.of(self.kb)
         self.key = key
         self._shown_cap = self._picture_cap()     # the width the new cards' pictures draw at

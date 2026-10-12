@@ -807,12 +807,11 @@ class GuideWindow(QWidget):
         self.legend.setVisible(shown)
 
 
-def minimap_box(settings, screens: list) -> QRect | None:
+def minimap_box(screens: list) -> QRect | None:
     """Where the game's minimap window is on screen, in logical pixels, for the windows over the game to sit by:
-    LOCATION.box (found on its own at the game's top left, else the box the player drew, as the reads use it), else
-    the drawn box (settings["minimap_region"], before the first read); None while neither is there. `screens` is
-    [(geometry, devicePixelRatio)] of every screen."""
-    region = LOCATION.box if LOCATION.box is not None else _picked(settings, "minimap_region")
+    LOCATION.box (found on its own at the game's top left, as the reads use it); None while it isn't there.
+    `screens` is [(geometry, devicePixelRatio)] of every screen."""
+    region = LOCATION.box
     if not isinstance(region, dict):
         return None
     try:
@@ -998,7 +997,7 @@ class NpcOverlay(EdgeResize, QWidget):
         icon = hint = ""
         if self._mid is None:
             key, icon = "npc_overlay_unknown", NO_MAP
-            # the game's minimap window found (or drawn) but its map not read yet, or no minimap window at all
+            # the game's minimap window found but its map not read yet, or no minimap window at all
             hint = "npc_overlay_unknown_box" if LOCATION.box is not None else "npc_overlay_unknown_nobox"
         elif not self._npcs:
             key, icon, hint = "npc_overlay_none", NO_NPCS, "npc_overlay_none_hint"
@@ -1252,7 +1251,7 @@ class NpcOverlay(EdgeResize, QWidget):
         """Just right of the game's minimap window (minimap_box: the window is about the map in it), else the
         primary screen's top-left corner."""
         screens = [(s.geometry(), s.devicePixelRatio()) for s in QGuiApplication.screens()]
-        box = minimap_box(self._settings, screens)
+        box = minimap_box(screens)
         primary = QGuiApplication.primaryScreen().availableGeometry()
         if box is not None:
             screen = next((g for g, _ in screens if g.intersects(box)), primary)

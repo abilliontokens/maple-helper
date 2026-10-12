@@ -25,6 +25,10 @@ for pkg in ("faster_whisper", "ctranslate2", "sounddevice", "rapidocr"):     # r
     datas += d
     binaries += b
     hiddenimports += h
+# every ui module: app.py imports the Tools card's windows by their name on the first ask (TOOL_WINDOWS), an import
+# PyInstaller's analysis can't see
+hiddenimports += [f"maplehelper.ui.{p.stem}" for p in sorted((ROOT / "maplehelper" / "ui").glob("*.py"))
+                  if p.stem != "__init__"]
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],

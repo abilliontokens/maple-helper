@@ -120,9 +120,9 @@ def check(key: str) -> bool:
 # ---------------------------------------------------------------- what's missing
 
 def cash_jobs(kb, root: Path) -> list[dict]:
-    """What the Cash Shop sells now (OSMS Data Explorer, the Shop page) with words that have no Hebrew yet: the game's
-    own words, unless the KB's Hebrew was made from the same ones. An item the Cash Shop adds reads in Hebrew from the
-    next night on (osms.py: one fetch a night, well within ohmi's hourly terms)."""
+    """What the Cash Shop sells now (OSMS Data Explorer, the Cash shop window) with words that have no Hebrew yet: the
+    game's own words, unless the KB's Hebrew was made from the same ones. An item the Cash Shop adds reads in Hebrew
+    from the next night on (osms.py: one fetch a night, well within ohmi's hourly terms)."""
     from maplehelper import osms, translations
     from maplehelper.ui import shoppage
     try:

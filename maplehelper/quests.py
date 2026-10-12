@@ -1,5 +1,6 @@
 """Quests for the player's level, straight from the KB's quest pages: who gives them, what they ask,
-what they pay. Done quests are kept per character (Character.quests_done)."""
+what they pay, and the questlines their prerequisites make (chain_of, progress, chains_for). Done quests are kept
+per character (Character.quests_done)."""
 from __future__ import annotations
 
 import json
@@ -269,6 +270,35 @@ def expire_cycles(kb, c, now: float | None = None) -> bool:
     return changed
 
 
+def mark_done(kb, c, keys, now: float | None = None) -> list[str]:
+    """These quests marked done for the character (Character.quests_done, in this order: the last is the newest): a
+    daily / weekly one with when (cycle_done: it comes back after the reset), each leaving the chat's started quests
+    (Character.finish_quest: done here is done for the AI too). The keys newly marked; the caller saves."""
+    import time
+    now = time.time() if now is None else now
+    out = []
+    for key in keys:
+        if key in c.quests_done:
+            continue
+        c.quests_done.append(key)
+        out.append(key)
+        q = quest(kb, key)
+        if q and q.cycle:
+            c.cycle_done[key] = now
+        if q:
+            c.finish_quest(q.name)
+    return out
+
+
+def unmark(c, key: str) -> bool:
+    """A quest marked done by mistake (or a donation to do again) back on the lists. True if it was marked."""
+    if key not in c.quests_done:
+        return False
+    c.quests_done.remove(key)
+    c.cycle_done.pop(key, None)
+    return True
+
+
 _TASKS_HE: dict | None = None
 
 
@@ -372,7 +402,7 @@ def for_level(kb, level: int, base_class: str = "", job: str = "", done: list[st
 
     A quest finished only from a higher level ("Level 52+ to complete") counts at that level; one that asks a
     profession level the character doesn't have (crafts given) is left out."""
-    # worked out once per character state and KB object: the quests page, its search and a click to a quest each
+    # worked out once per character state and KB object: the Quests window, its search and a click to a quest each
     # asked for the same lists again (~1 s on a cold open, TL1-4); fresh lists each time, so a caller can't spoil them
     state = (level, base_class, job, frozenset(done or []), tuple(sorted((crafts or {}).items())) if crafts else None)
     cache = getattr(kb, "_quests_for_level", None)
@@ -409,12 +439,12 @@ def _for_level(kb, level: int, base_class: str, job: str, done: list[str] | None
             future.append(q)
     now.sort(key=lambda q: (-q.exp, q.level))
     future.sort(key=lambda q: (q.opens_at(), -q.exp))
-    # the play tools' tabs (the owner's): the next level alone is "coming up", every level after it "later"; one
+    # the Quests window's tabs (the owner's): the next level alone is "coming up", every level after it "later"; one
     # level up, each list moves along (32's become this level's, 33's come up next)
     soon = [q for q in future if q.opens_at() == level + 1]
     later = [q for q in future if q.opens_at() > level + 1]
     town.sort(key=lambda q: -q.exp)
-    # the play tools' two lists (the owner's): the quests that open at this very level, and every one from a level
+    # the Quests window's two lists (the owner's): the quests that open at this very level, and every one from a level
     # before it that isn't done, newest level first (a Lv. 31 quest left undone moves there at 32)
     at_level = [q for q in now if q.opens_at() == level]
     missed = sorted((q for q in now if q.opens_at() < level), key=lambda q: (-q.opens_at(), -q.exp))
@@ -472,3 +502,291 @@ def citizenship(kb, town: str, level: int, done: list[str] | None = None) -> lis
         if q and q.area == "Citizenship" and q.opens_at() <= level and town_of(kb, q) == town:
             out.append(q)
     return sorted(out, key=lambda q: (-q.exp, q.level))
+
+
+# ------------------------------------------------------------------ quest chains
+# A quest's page names the quests to finish first ("Quest Complete Delivering the Weird Medicine"), by name. Read
+# backwards they are the game's questlines: each quest follows the deepest of them (the longest way back to a quest
+# that asks none), so it sits on one line, at the step its page says ("Questline · Step 8 of 11": Maya's First
+# Collection, pages/quest/10115.md), and a line splits where several quests follow one ("Line splits here.": after
+# Delivering the Weird Medicine, Maya's collections, Old Gladius and An Unknown Savior). Any other quest a step asks
+# stays a prerequisite of it (An Unknown Savior also asks First Greeting with Maya, a step of no line of its own),
+# never a step: a reason it is locked.
+
+
+def _name_key(name: str) -> str:
+    """A quest's name as the prerequisites are matched by it: spaces collapsed as _required does, a closing period
+    and the case aside ("Asking After Mrs. Ming Ming, the Town Resident." is its page's name)."""
+    return " ".join(str(name).split()).rstrip(".").casefold()
+
+
+@dataclass
+class _Links:
+    """Every quest's prerequisites as keys, worked out once per KB (_links)."""
+    parents: dict[str, list[str]]       # quest -> the quests to finish first (resolved names, the page's order)
+    depth: dict[str, int]               # quest -> its step on its line: 1 + the deepest prerequisite's
+    prev: dict[str, str]                # quest -> the prerequisite whose line it continues ("" for a line's first)
+    kids: dict[str, list[str]]          # quest -> the quests continuing its line, the lowest level first
+    firsts: dict[str, str]              # another first step of a line -> the step it opens there (The Stump Horror
+                                        # Story -> I Need to Find My Daughter 1)
+
+
+def _links(kb) -> _Links:
+    got = kb.__dict__.get("_quest_links")
+    if got is not None:
+        return got
+    qs = {k: q for k, e in kb.entities.items() if e.get("category") == "quest" and (q := _quest(kb, k))}
+    by_name: dict[str, list[str]] = {}
+    for k, q in qs.items():
+        by_name.setdefault(_name_key(q.name), []).append(k)
+    parents: dict[str, list[str]] = {}
+    for k, q in qs.items():
+        out: list[str] = []
+        for name in q.afters:
+            hits = [h for h in by_name.get(_name_key(name), []) if h != k]
+            if len(hits) > 1:
+                # a name two quests share ("Becoming a Citizen of Honor", Henesys' and Kerning City's): the one of
+                # the asking quest's own town, else of its area
+                town = town_of(kb, q)
+                hits = ([h for h in hits if town and town_of(kb, qs[h]) == town]
+                        or [h for h in hits if qs[h].area == q.area] or hits)[:1]
+            out += [h for h in hits if h not in out]
+        parents[k] = out
+    depth: dict[str, int] = {}
+
+    def deep(k: str, path: set) -> int:
+        if k not in depth:
+            path.add(k)
+            # (a loop the KB should never have is cut where it closes)
+            depth[k] = 1 + max((deep(p, path) for p in parents[k] if p not in path), default=0)
+            path.discard(k)
+        return depth[k]
+    for k in qs:
+        deep(k, set())
+    prev: dict[str, str] = {}
+    kids: dict[str, list[str]] = {}
+    for k, ps in parents.items():
+        # the deepest prerequisite; a tie: one off the Citizenship board (Camila's Gem, not First Greeting with
+        # Camila: A Gift for Pia continues Camila's story), then the page's order
+        below = [p for p in ps if depth[p] < depth[k]]
+        best = max(below, key=lambda p: (depth[p], qs[p].area != "Citizenship", -ps.index(p)), default="")
+        prev[k] = best
+        if best:
+            kids.setdefault(best, []).append(k)
+    for ks in kids.values():
+        ks.sort(key=lambda k: (qs[k].opens_at(), qs[k].name))
+    # a line's first quest tied with another first quest (I Need to Find My Daughter 1 asks both The Reason Behind the
+    # Mushroom Studies and The Stump Horror Story, each a line's first step): the one left with no line of its own is
+    # the other first step of that line, as its page says ("Questline · Step 1 of 3", pages/quest/10411.md)
+    firsts: dict[str, str] = {}
+    for k, ps in parents.items():
+        best = prev[k]
+        for p in ps:
+            if best and p != best and depth[p] == depth[best] == 1 and p not in kids and p not in firsts:
+                firsts[p] = k
+    got = _Links(parents, depth, prev, kids, firsts)
+    kb.__dict__["_quest_links"] = got
+    return got
+
+
+@dataclass
+class Chain:
+    """A questline from the quest that starts it (root), as a character can do it: only the quests the KB confirms
+    are in the game and that fit the character's job, a step left out with every step after it. order: every step,
+    each followed by the steps after it (a split's lines the lowest level first; another first step, _Links.firsts,
+    right after the root); prev: the step each follows ("" for a first); nexts: the steps right after it (two or more:
+    the line splits there); step: its number on its line; also: the other quests a step asks first, off the line."""
+    root: str
+    order: list[str]
+    prev: dict[str, str]
+    nexts: dict[str, list[str]]
+    step: dict[str, int]
+    also: dict[str, list[str]]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.step
+
+    def __len__(self) -> int:
+        return len(self.order)
+
+    def line(self, key: str) -> list[str]:
+        """The line a step is on: back to the chain's first step, then on until the line ends or splits."""
+        back = [key]
+        while self.prev.get(back[-1]):
+            back.append(self.prev[back[-1]])
+        out = back[::-1]
+        while len(self.nexts.get(out[-1], [])) == 1:
+            out.append(self.nexts[out[-1]][0])
+        return out
+
+    def at(self, key: str) -> tuple[int, int]:
+        """(the step's number, how many steps its line has): "Step 8 of 11"."""
+        return self.step[key], len(self.line(key))
+
+    def before(self, key: str) -> list[str]:
+        """The steps before this one on its line, the first first."""
+        out = []
+        while self.prev.get(key):
+            key = self.prev[key]
+            out.append(key)
+        return out[::-1]
+
+    def branch(self, key: str) -> int:
+        """How many splits lie before this step (0 on the first line): how far in a list of the chain it sits."""
+        return sum(1 for k in self.before(key) if len(self.nexts.get(k, [])) > 1)
+
+
+def chain_of(kb, key: str, base_class: str = "", job: str = "") -> Chain | None:
+    """The questline a quest is on, for a character of this class and job (none given: every class's), or None when
+    it is on none: no other quest asks it, it asks none, or the character can't do two of its steps."""
+    links = _links(kb)
+    if key not in links.prev:
+        return None
+    root = links.firsts.get(key, key)
+    while links.prev[root]:
+        root = links.prev[root]
+    open_ = availability.of(kb)
+
+    def fits(k: str) -> bool:
+        q = quest(kb, k)
+        return q is not None and open_.quest_open(k) and (not base_class or job_fits(q, base_class, job))
+    if not fits(root):
+        return None
+    order: list[str] = []
+    prev, nexts, step, also = {root: ""}, {}, {root: 1}, {}
+    todo = [root]
+    while todo:
+        k = todo.pop()
+        order.append(k)
+        also[k] = [p for p in links.parents[k] if p != prev[k]]
+        nexts[k] = [c for c in links.kids.get(k, []) if fits(c)]
+        for c in nexts[k]:
+            prev[c], step[c] = k, step[k] + 1
+        todo += reversed(nexts[k])          # depth first: a line, then the next line of a split
+    for first, opens in links.firsts.items():
+        if opens in step and step[opens] == 2 and fits(first):
+            order.insert(1, first)
+            prev[first], nexts[first], step[first], also[first] = "", [opens], 1, list(links.parents[first])
+    if len(order) < 2 or key not in step:
+        return None
+    return Chain(root, order, prev, nexts, step, also)
+
+
+def _before(links: _Links, keys) -> set[str]:
+    """Every quest before these: their prerequisites, and theirs."""
+    seen: set[str] = set()
+    todo = [p for k in keys for p in links.parents.get(k, [])]
+    while todo:
+        k = todo.pop()
+        if k not in seen:
+            seen.add(k)
+            todo += links.parents.get(k, [])
+    return seen
+
+
+def prerequisites(kb, key: str) -> list[str]:
+    """The quests this one asks to finish first, as keys (its "Quest Complete" names resolved, the page's order)."""
+    return list(_links(kb).parents.get(key, []))
+
+
+def opens(kb, key: str) -> list[str]:
+    """The quests that ask this one first: what finishing it opens."""
+    return [k for k, ps in _links(kb).parents.items() if key in ps]
+
+
+def earlier_steps(kb, key: str) -> list[str]:
+    """Every quest done before this one can be: its prerequisites and theirs, the first first (what to mark done
+    with it: the game never lets a step be done before them)."""
+    links = _links(kb)
+    return sorted(_before(links, [key]) - {key}, key=lambda k: (links.depth.get(k, 0), k))
+
+
+def done_with_earlier(kb, done) -> set[str]:
+    """The quests marked done and every quest before one of them: the game lets no quest be done before the ones it
+    asks, marked or not."""
+    return set(done or []) | _before(_links(kb), done or [])
+
+
+@dataclass
+class ChainState:
+    """Where a character stands on a chain. done: the steps done (marked, or before a step marked: the game lets no
+    step be done before the ones it asks); open: the steps to do now, in the chain's order; why: each other step's
+    reasons, (kind, value) in this order: ("level", 47) opens at that level, ("after", key) that quest first,
+    ("profession", ("Smithing", 5)) that profession's level; exp_left: the EXP of the steps not done."""
+    chain: Chain
+    done: set[str]
+    open: list[str]
+    why: dict[str, list[tuple[str, object]]]
+    exp_left: int
+
+    def state(self, key: str) -> str:
+        """"done", "open" (can be done now) or "locked"."""
+        return "done" if key in self.done else "open" if key in self.open else "locked"
+
+    @property
+    def total(self) -> int:
+        return len(self.chain)
+
+    @property
+    def status(self) -> str:
+        """"done" (every step), "progress" (some done), "start" (none, the first can be done now) or "later"."""
+        n = len(self.done)
+        return "done" if n == self.total else "progress" if n else "start" if self.open else "later"
+
+    @property
+    def next(self) -> str:
+        """The step to do next: the first that can be done now, else the first not done (locked); "" when all are."""
+        return next(iter(self.open), next((k for k in self.chain.order if k not in self.done), ""))
+
+
+def progress(kb, chain: Chain, level: int, done: list[str] | None = None, crafts: dict | None = None) -> ChainState:
+    """Each step of the chain for a character at this level who marked these quests done (Character.quests_done);
+    crafts (Character.crafts, when the player set them) locks a step that asks a profession level not reached."""
+    links = _links(kb)
+    did = done_with_earlier(kb, done)
+    opened, why, left = [], {}, 0
+    for k in chain.order:
+        if k in did:
+            continue
+        q = quest(kb, k)
+        left += q.exp if q else 0
+        reasons: list[tuple[str, object]] = []
+        if q and q.opens_at() > level:
+            reasons.append(("level", q.opens_at()))
+        reasons += [("after", p) for p in links.parents.get(k, []) if p not in did]
+        if q and crafts is not None and not craft_fits(q, crafts):
+            reasons.append(("profession", q.profession))
+        if reasons:
+            why[k] = reasons
+        else:
+            opened.append(k)
+    return ChainState(chain, did & set(chain.order), opened, why, left)
+
+
+def chains_for(kb, level: int, base_class: str = "", job: str = "", done: list[str] | None = None,
+               crafts: dict | None = None, citizenship: bool = False) -> dict[str, list[ChainState]]:
+    """The questlines a character can do, by where they stand: {"progress": started, the ones with a step to do now
+    first, then the most done; "start": none done yet, the first step open now, the ones opening nearest the level
+    first; "later": the first step still locked, the soonest first; "done": every step done}. citizenship: the lines
+    that start on the Citizenship board (First Greeting with Maya -> Asking After Maya), else every other line."""
+    links = _links(kb)
+    out: dict[str, list[ChainState]] = {"progress": [], "start": [], "later": [], "done": []}
+    for root, kids in links.kids.items():
+        if links.prev.get(root) or not kids:
+            continue
+        q = quest(kb, root)
+        if q is None or (q.area == "Citizenship") != citizenship:
+            continue
+        chain = chain_of(kb, root, base_class, job)
+        if chain is not None:
+            s = progress(kb, chain, level, done, crafts)
+            out[s.status].append(s)
+
+    def opens(s: ChainState) -> int:
+        r = quest(kb, s.chain.root)
+        return r.opens_at() if r else 0
+    out["progress"].sort(key=lambda s: (not s.open, -len(s.done) / s.total, opens(s)))
+    out["start"].sort(key=lambda s: (-opens(s), -s.exp_left))
+    out["later"].sort(key=lambda s: (opens(s), -s.exp_left))
+    out["done"].sort(key=lambda s: opens(s))
+    return out

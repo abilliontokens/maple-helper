@@ -217,7 +217,6 @@ def test_shop_prices_keep_the_kbs_cot2_label(real):
     for k in labelled:
         p = market.npc_prices(real, k)
         assert p.shops and any(p.test_price(s) and p.source(s) == "COT2" for s in p.shops), k
-    assert "COT2" in t("price_hint") and "COT2" in I18n("he")("price_hint")
     assert sources.price_note(t, "COT2") == "(COT2 test price)"
 
 

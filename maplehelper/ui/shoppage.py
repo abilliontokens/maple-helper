@@ -1,28 +1,32 @@
-"""The Play tools' Shop page (חנות): what the Cash Shop sells right now, laid out as the game's own Cash Shop is (the
-owner's screenshots, 2026-10-11): Special (the Founder's Mystery Fashion Crate and what it can give), Fashion (Hats,
-Outfits, Tops, Bottoms, Shoes), Beauty (Hairstyles, Faces, Misc), Pets (Pets, Pet Equip, Pet Care, and the pets guide
-that was its own page) and Utility (Convenience, Social, Atmospheric Effect). Each item: its picture, name, what it
-is, its NX price and how long it lasts; a click opens its details window.
+"""The Cash shop window's pieces (ui/cashshop.py): what the Cash Shop sells right now, laid out as the game's own Cash
+Shop is (the owner's screenshots, 2026-10-11): Special (the Founder's Mystery Fashion Crate and what it can give),
+Fashion (Hats, Outfits, Tops, Bottoms, Shoes), Beauty (Hairstyles, Faces, Misc), Pets (Pets, Pet Equip, Pet Care, and
+the pets guide) and Utility (Convenience, Social, Atmospheric Effect). Each item: its picture, name, what it is, its
+NX price and how long it lasts; a click opens its details window (ITEM_REQUESTS, the item's ⓘ).
 
 All of it follows the game by itself, from two sources the owner has permission for: the items and their prices from
 OSMS Data Explorer (osms.py, the game client's own Cash Shop list, checked every hour), the crate's chances from
-MesoWatch (mesowatch.py, every 15 minutes). An item the Cash Shop adds shows up, one it drops goes away."""
+MesoWatch (mesowatch.py, every 15 minutes). An item the Cash Shop adds shows up, one it drops goes away.
+
+Here: which KB item an OSMS name is and what an item is in the player's language (Catalog; tools/translate_kb.py reads
+kb_names / kb_hebrew too), and an item's row and a crate tile in the glass's style names (cashshop.CashShop.extra_qss:
+ShopName, ShopPrice, ShopLasts, ShopTile, Pic; Card, Muted, Note from ui/toolwindow.py)."""
 from __future__ import annotations
 
-import threading
+import re
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedWidget,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from .. import bidi, itemdetails, mesowatch, osms, sources, translations
-from .controls import FlowLayout, Segmented
-from .widgets import ITEM_REQUESTS, fit_picture, source_tag
+from .. import bidi, itemdetails, mesowatch, osms, translations
+from .widgets import ITEM_REQUESTS
 
-POLL_MS = 60 * 1000            # how often the page looks for a newer list (the checks: hourly / every 15 minutes)
 GUIDE = "guide"                # the Pets tab's pets guide (the old Pets page)
 CRATE_COLUMNS = 4              # the crate's tiles a row (the owner)
+PIC = 44                       # an item's picture, in its tile
+PIC_BOX = 52                   # ... the tile behind it
+TILE_PIC = 40                  # a crate tile's picture
+TILE_BOX = 46
 
 
 def fold(name: str) -> str:
@@ -42,7 +46,6 @@ def kb_names(kb) -> dict[str, list[str]]:
 
 def same_text(a: str, b: str) -> bool:
     """The same words, whatever the spacing, line breaks and punctuation."""
-    import re
     norm = lambda t: re.sub(r"[^a-z0-9%]+", " ", str(t or "").lower()).strip()      # noqa: E731
     return norm(a) == norm(b)
 
@@ -64,221 +67,28 @@ def kb_hebrew(kb, root, keys: list[str], game_text: str = "") -> str | None:
     return None
 
 
-class ShopRow(QFrame):
-    """One item: picture, name and description on the reading side, the NX price and how long it lasts on the
-    other; click: its details window."""
+class Catalog:
+    """The KB's side of the Cash Shop's items, for one KB and one language: which KB item an OSMS name is (key_of),
+    and what an item is, whole, in the player's language (describe, cached)."""
 
-    def __init__(self, page: "ShopPage", item: osms.Item, key: str | None):
-        super().__init__(objectName="Card")
-        t = page.t
-        self.key, self.item = key, item
-        if key:
-            self.setCursor(Qt.PointingHandCursor)
-            self.setToolTip(t("shop_open_item"))
-        row = QHBoxLayout(self)
-        row.setContentsMargins(12, 10, 12, 10)
-        row.setSpacing(12)
-        self.pic = QLabel()
-        self.pic.setFixedSize(48, 48)
-        self.pic.setAlignment(Qt.AlignCenter)
-        page.picture(self.pic, key, item, 44)
-        row.addWidget(self.pic, 0, Qt.AlignTop)
-        col = QVBoxLayout()
-        col.setSpacing(3)
-        name = (page.kb.get(key) or {}).get("name") if key else None
-        title = QLabel(bidi.ltr_name(name or item.name, t.rtl), objectName="ShopName")
-        title.setAlignment(page.align)
-        col.addWidget(title)
-        desc = page.describe(item.name, item.description, item.game_id)
-        if desc:
-            lb = QLabel(desc, objectName="ShopText")
-            lb.setWordWrap(True)
-            lb.setAlignment(page.align)
-            col.addWidget(lb)
-        row.addLayout(col, 1)
-        end = QVBoxLayout()
-        end.setSpacing(2)
-        price = QLabel(bidi.ltr_block(f"{item.nx:,} NX", t.rtl), objectName="ShopPrice")
-        price.setAlignment((Qt.AlignLeft if t.rtl else Qt.AlignRight) | Qt.AlignAbsolute)
-        end.addWidget(price)
-        lasts = QLabel(bidi.plain(t("shop_days", n=item.days) if item.days else t("shop_permanent"), t.rtl),
-                       objectName="ShopText")
-        lasts.setAlignment((Qt.AlignLeft if t.rtl else Qt.AlignRight) | Qt.AlignAbsolute)
-        end.addWidget(lasts)
-        row.addLayout(end, 0)
-
-    def mousePressEvent(self, e):
-        if self.key and e.button() == Qt.LeftButton:
-            ITEM_REQUESTS.requested.emit(self.key)
-        super().mousePressEvent(e)
-
-
-class CrateTile(QFrame):
-    """One thing the crate can give: its picture, name and chance."""
-
-    def __init__(self, page: "ShopPage", s: mesowatch.Sales, key: str | None):
-        super().__init__(objectName="Card")
-        t = page.t
-        self.key = key
-        self.setFixedHeight(156)             # room for a two-line name under the picture; four share a row
-        if key:
-            self.setCursor(Qt.PointingHandCursor)
-            self.setToolTip(t("shop_open_item"))
-        col = QVBoxLayout(self)
-        col.setContentsMargins(6, 8, 6, 8)
-        col.setSpacing(3)
-        pic = QLabel()
-        pic.setFixedSize(48, 48)
-        pic.setAlignment(Qt.AlignCenter)
-        page.picture(pic, key, None, 44)
-        col.addWidget(pic, 0, Qt.AlignHCenter)
-        name = (page.kb.get(key) or {}).get("name") if key else None
-        lb = QLabel(bidi.ltr_name(name or s.name, t.rtl), objectName="ShopTile")
-        lb.setAlignment(Qt.AlignCenter)
-        lb.setWordWrap(True)
-        lb.setFixedHeight(40)
-        col.addWidget(lb)
-        odds = QLabel(bidi.plain(t("shop_chance", pct=f"{s.crate_odds:g}%"), t.rtl), objectName="ShopText")
-        odds.setAlignment(Qt.AlignCenter)
-        col.addWidget(odds)
-
-    def mousePressEvent(self, e):
-        if self.key and e.button() == Qt.LeftButton:
-            ITEM_REQUESTS.requested.emit(self.key)
-        super().mousePressEvent(e)
-
-
-class ShopPage(QWidget):
-    ready = Signal(object, object)          # (OSMS's items or None, MesoWatch's snapshot or None)
-    picture_ready = Signal(object, object)  # (label, path): an OSMS picture is on disk
-
-    def __init__(self, kb, t, pets: QWidget | None = None):
-        super().__init__()
-        from . import theme
+    def __init__(self, kb, t):
         self.kb, self.t = kb, t
-        self.align = (Qt.AlignRight if t.rtl else Qt.AlignLeft) | Qt.AlignAbsolute
-        self.items, self.snap, self._desc, self._loaded = None, None, {}, False
-        self._versions = (-1, -1)
-        self.tab, self.section = "fashion", "hats"
-        self._by_name = self._kb_names()
-        c = theme.P()
-        # no small text (the owner): everything at the body size or larger
-        self.setStyleSheet(f"#ShopPrice {{ font-size: 17px; font-weight: 700; color: {theme.accent_text()}; }}"
-                           f"#ShopName {{ font-size: 16px; font-weight: 600; color: {c['text']}; }}"
-                           f"#ShopTile {{ font-size: 14px; font-weight: 600; color: {c['text']}; }}"
-                           f"#ShopText {{ font-size: 14px; color: {c['muted']}; }}"
-                           f"#ShopHead {{ font-size: 16px; font-weight: 700; color: {c['text']}; }}")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(10)
-        top = QHBoxLayout()
-        intro = QLabel(bidi.plain(t("shop_intro"), t.rtl), objectName="ShopText")
-        intro.setWordWrap(True)
-        intro.setAlignment(self.align)
-        top.addWidget(intro, 1)
-        chips = QVBoxLayout()
-        chips.setSpacing(4)
-        chips.addWidget(source_tag(t, sources.OSMS), 0, Qt.AlignRight)
-        top.addLayout(chips, 0)
-        lay.addLayout(top)
-        # the credit and link OSMS's terms ask for (a label: a button laid the Hebrew words out reversed)
-        credit = QLabel(objectName="ShopText")
-        credit.setTextFormat(Qt.RichText)
-        credit.setOpenExternalLinks(True)
-        from html import escape
-        d = "rtl" if t.rtl else "ltr"
-        before = escape(t("shop_credit", link="@LINK@")).split("@LINK@")
-        credit.setText(f'<p dir="{d}" align="{"right" if t.rtl else "left"}">{before[0]}'
-                       f'<a href="{osms.SITE}" style="color:{theme.accent_text()}; text-decoration:none;">'
-                       f'<span dir="ltr">{escape(osms.CREDIT)}</span></a>{before[-1]}</p>')
-        credit.setAlignment(self.align)
-        self.credit = credit
-        lay.addWidget(credit)
-        # the game's tabs, then the open tab's sections
-        holder = QWidget()
-        holder.setLayoutDirection(Qt.RightToLeft if t.rtl else Qt.LeftToRight)
-        flow = FlowLayout(holder)
-        self.tab_buttons: dict[str, QPushButton] = {}
-        for tab in osms.TABS:
-            b = QPushButton(bidi.plain(t(f"shop_tab_{tab}"), t.rtl), objectName="Chip")
-            b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, x=tab: self.pick(x))
-            flow.addWidget(b)
-            self.tab_buttons[tab] = b
-        lay.addWidget(holder)
-        self.sections_box = QVBoxLayout()
-        lay.addLayout(self.sections_box)
-        self.stack = QStackedWidget()
-        lay.addWidget(self.stack, 1)
-        listing = QWidget(objectName="Feed")
-        ml = QVBoxLayout(listing)
-        from .patchnotes import gutter
-        ml.setContentsMargins(*gutter(t.rtl))
-        ml.setSpacing(8)
-        self.status = QLabel(bidi.plain(t("shop_loading"), t.rtl), objectName="ShopText")
-        self.status.setAlignment(self.align)
-        ml.addWidget(self.status)
-        self.list = QVBoxLayout()
-        self.list.setSpacing(8)
-        ml.addLayout(self.list)
-        ml.addStretch(1)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setWidget(listing)
-        self.stack.addWidget(self.scroll)
-        self.pets = pets or QWidget()
-        self.stack.addWidget(self.pets)
-        self.ready.connect(self._on_ready)
-        self.picture_ready.connect(self._set_picture)
-        self._wanted: list[tuple[QLabel, osms.Item]] = []
-        self.timer = QTimer(self, interval=POLL_MS, timeout=self._poll)
-        self.timer.start()
-        self.pick("fashion")
-        self.load()
-
-    # ------------------------------------------------------------ data
-
-    def load(self) -> None:
-        """Both lists in the background (the first of a run may download them)."""
-        def run():
-            try:
-                found = osms.items()
-            except Exception:      # noqa: BLE001 - shown as "can't reach"
-                found = None
-            try:
-                snap = mesowatch.snapshot()
-            except Exception:      # noqa: BLE001 - no crate chances
-                snap = None
-            try:
-                self.ready.emit(found, snap)
-            except RuntimeError:
-                pass                # the window was closed meanwhile
-        threading.Thread(target=run, daemon=True, name="shop").start()
-
-    def _poll(self) -> None:
-        """A different list came in (OSMS's hourly check, MesoWatch's 15-minute one): the page follows it."""
-        if (osms.version(), mesowatch.version()) != self._versions:
-            self.load()
-
-    def _on_ready(self, found, snap) -> None:
-        self._versions = (osms.version(), mesowatch.version())
-        self.items, self.snap, self._loaded = found, snap, True
-        self._refill()
-
-    def _kb_names(self) -> dict[str, list[str]]:
-        return kb_names(self.kb)
+        self._by_name = kb_names(kb)
+        self._desc: dict[tuple[str, str], str] = {}
 
     def key_of(self, name: str) -> str | None:
         keys = self._by_name.get(fold(name)) or []
         return keys[0] if keys else None
 
+    def name_of(self, key: str | None, fallback: str) -> str:
+        """The KB's name of the item (its own spelling), else OSMS's."""
+        return ((self.kb.get(key) or {}).get("name") if key else None) or fallback
+
     def describe(self, name: str, english: str = "", game_id: int | None = None) -> str:
         """What the item is, whole (the owner: never cut). The game's own words (OSMS) win over the KB's, which can be
-        the closed test's: in a Hebrew window, the Hebrew made from OSMS's words (the app's file, then the KB's nightly
+        the closed test's: in Hebrew, the Hebrew made from OSMS's words (the app's file, then the KB's nightly
         "cash_desc"), or the KB's Hebrew of a text that says the same; for an item OSMS has no words for (most
-        equips), the KB's Hebrew; else English. Cached."""
+        equips), the KB's Hebrew; else English. In the reading order of the language (bidi)."""
         cache = (name, english)
         if cache not in self._desc:
             keys = self._by_name.get(fold(name)) or []
@@ -304,111 +114,83 @@ class ShopPage(QWidget):
             self._desc[cache] = bidi.plain(text, self.t.rtl) if hebrew else bidi.ltr_block(text, self.t.rtl)
         return self._desc[cache]
 
-    def picture(self, label: QLabel, key: str | None, item: osms.Item | None, px: int) -> None:
-        """The KB's picture of the item; else OSMS's, fetched in the background."""
-        path = self.kb.picture(key) if key else None
-        if path:
-            pm = QPixmap(str(path))
-            if not pm.isNull():
-                label.setPixmap(fit_picture(pm, px, px, label))
-                return
-        if item is not None and item.thumbnail:
-            self._wanted.append((label, item))
 
-    def _fetch_pictures(self) -> None:
-        wanted, self._wanted = self._wanted, []
-        if not wanted:
-            return
+def picture_box(size: int) -> QLabel:
+    """The soft tile a sprite sits on (Pic), its picture set later (the KB's, or OSMS's once fetched)."""
+    pic = QLabel(objectName="Pic")
+    pic.setFixedSize(size, size)
+    pic.setAlignment(Qt.AlignCenter)
+    return pic
 
-        def run():
-            for label, item in wanted:
-                path = osms.thumbnail_file(item)
-                if path is not None:
-                    try:
-                        self.picture_ready.emit(label, path)
-                    except RuntimeError:
-                        return
-        threading.Thread(target=run, daemon=True, name="osms-pictures").start()
 
-    @staticmethod
-    def _set_picture(label: QLabel, path) -> None:
-        try:
-            pm = QPixmap(str(path))
-            if not pm.isNull():
-                label.setPixmap(fit_picture(pm, 44, 44, label))
-        except RuntimeError:
-            pass                    # redrawn meanwhile
+class _Clickable(QFrame):
+    """A card that opens its item's details window on a click (ITEM_REQUESTS), lit under the mouse."""
 
-    # ------------------------------------------------------------ the tabs
+    def __init__(self, key: str | None, t):
+        super().__init__(objectName="Card")
+        self.key = key
+        if key:
+            self.setProperty("click", True)
+            self.setCursor(Qt.PointingHandCursor)
+            self.setToolTip(t("shop_open_item"))
 
-    def pick(self, tab: str, section: str | None = None) -> None:
-        from .tools import clear
-        self.tab = tab
-        self.section = section or osms.SECTIONS[tab][0]
-        for x, b in self.tab_buttons.items():
-            b.setChecked(x == tab)
-        clear(self.sections_box)
-        secs = osms.SECTIONS[tab]
-        if len(secs) > 1:
-            seg = Segmented([(self.t(f"shop_sec_{s}"), s) for s in secs], self.section, self.t.rtl)
-            seg.set_label(self.t(f"shop_tab_{tab}"))
-            seg.changed.connect(lambda s, x=tab: self.pick(x, s))
-            self.sections_box.addWidget(seg, 0, self.align)
-            self.sections = seg
-        self.stack.setCurrentIndex(1 if self.section == GUIDE else 0)
-        if self.section != GUIDE:
-            self._refill()
+    def mousePressEvent(self, e):
+        if self.key and e.button() == Qt.LeftButton:
+            ITEM_REQUESTS.requested.emit(self.key)
+        super().mousePressEvent(e)
 
-    def rows(self) -> list[osms.Item]:
-        return sorted((i for i in self.items or [] if osms.place(i) == (self.tab, self.section)),
-                      key=lambda i: (i.nx, i.name))
 
-    def _refill(self) -> None:
-        from .tools import clear
-        if self.section == GUIDE:
-            return
-        clear(self.list)
-        t = self.t
-        if not self._loaded:
-            self.status.setText(bidi.plain(t("shop_loading"), t.rtl))
-            return
-        if self.items is None:
-            self.status.setText(bidi.plain(t("shop_offline"), t.rtl))
-            return
-        self.status.setText(bidi.plain(t("shop_status", n=len(self.items)), t.rtl))
-        rows = self.rows()
-        for item in rows:
-            self.list.addWidget(ShopRow(self, item, self.key_of(item.name)))
-        if self.section == "crate":
-            self._crate()
-        elif not rows:
-            empty = QLabel(bidi.plain(t("shop_empty"), t.rtl), objectName="ShopText")
-            empty.setAlignment(self.align)
-            self.list.addWidget(empty)
-        self._fetch_pictures()
+class ShopRow(_Clickable):
+    """One item: its picture, name and what it is on the reading side, the NX price and how long it lasts on the
+    other. `pic` is filled by the window (CashShop.picture)."""
 
-    def _crate(self) -> None:
-        """What the crate can give, each with its chance (MesoWatch: Nexon's published rates)."""
-        t = self.t
-        inside = mesowatch.crate(self.snap)
-        head = QHBoxLayout()
-        title = QLabel(bidi.plain(t("shop_crate_head"), t.rtl), objectName="ShopHead")
-        title.setAlignment(self.align)
-        head.addWidget(title, 1)
-        head.addWidget(source_tag(t, sources.MESOWATCH), 0, Qt.AlignVCenter)
-        self.list.addLayout(head)
-        if not inside:
-            note = QLabel(bidi.plain(t("shop_crate_none"), t.rtl), objectName="ShopText")
-            note.setAlignment(self.align)
-            self.list.addWidget(note)
-            return
-        holder = QWidget()
-        holder.setLayoutDirection(Qt.RightToLeft if t.rtl else Qt.LeftToRight)      # the first tile on the reading side
-        grid = QGridLayout(holder)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(8)
-        for n, s in enumerate(inside):
-            grid.addWidget(CrateTile(self, s, self.key_of(s.name)), n // CRATE_COLUMNS, n % CRATE_COLUMNS)
-        for c in range(CRATE_COLUMNS):
-            grid.setColumnStretch(c, 1)
-        self.list.addWidget(holder)
+    def __init__(self, item: osms.Item, key: str | None, name: str, desc: str, t):
+        super().__init__(key, t)
+        self.item = item
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 10, 12, 10)
+        row.setSpacing(12)
+        self.pic = picture_box(PIC_BOX)
+        row.addWidget(self.pic, 0, Qt.AlignTop)
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 2, 0, 0)
+        col.setSpacing(3)
+        col.addWidget(QLabel(bidi.ltr_name(name, t.rtl), objectName="ShopName"))
+        if desc:
+            lb = QLabel(desc, objectName="Muted")
+            lb.setWordWrap(True)
+            col.addWidget(lb)
+        col.addStretch(1)
+        row.addLayout(col, 1)
+        end = QVBoxLayout()
+        end.setContentsMargins(0, 2, 0, 0)
+        end.setSpacing(2)
+        price = QLabel(bidi.ltr_block(f"{item.nx:,} NX", t.rtl), objectName="ShopPrice")
+        price.setAlignment(Qt.AlignRight | Qt.AlignVCenter)        # the far edge (the left in Hebrew)
+        end.addWidget(price)
+        lasts = QLabel(bidi.plain(t("shop_days", n=item.days) if item.days else t("shop_permanent"), t.rtl),
+                       objectName="ShopLasts")
+        lasts.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        end.addWidget(lasts)
+        end.addStretch(1)
+        row.addLayout(end, 0)
+
+
+class CrateTile(_Clickable):
+    """One thing the crate can give: its picture, name and chance. `pic` is filled by the window."""
+
+    def __init__(self, s: mesowatch.Sales, key: str | None, name: str, t):
+        super().__init__(key, t)
+        self.sales = s
+        col = QVBoxLayout(self)
+        col.setContentsMargins(6, 10, 6, 9)
+        col.setSpacing(4)
+        self.pic = picture_box(TILE_BOX)
+        col.addWidget(self.pic, 0, Qt.AlignHCenter)
+        lb = QLabel(bidi.ltr_name(name, t.rtl), objectName="ShopTile")
+        lb.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        lb.setWordWrap(True)
+        col.addWidget(lb, 1)
+        odds = QLabel(bidi.plain(t("shop_chance", pct=f"{s.crate_odds:g}%"), t.rtl), objectName="ShopOdds")
+        odds.setAlignment(Qt.AlignCenter)
+        col.addWidget(odds)

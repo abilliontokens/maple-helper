@@ -23,13 +23,13 @@ STEPS = (
     ("input", "tour_input"),
     ("recapture_btn", "tour_camera"),
     ("mic_btn", "tour_mic"),
-    # the header in its on-screen order (overlay.py: search, news, guides, wishlist, play tools, settings), the News
-    # megaphone included: it was skipped and the light jumped back and forth (audit OVL-23, UX-20)
+    # the header in its on-screen order (overlay.py: search, news, guides, wishlist, the toolbar's show/hide,
+    # settings), the News megaphone included: it was skipped and the light jumped back and forth (audit OVL-23, UX-20)
     ("history_btn", "tour_history"),
     ("news_btn", "tour_news"),
     ("guides_btn", "tour_guides"),
     ("wish_btn", "tour_wish"),
-    ("tools_btn", "tour_tools"),
+    ("toolbar_btn", "tour_toolbar"),
     ("settings_btn", "tour_settings"),
     ("min_btn", "tour_min"),
     ("close_btn", "tour_close"),

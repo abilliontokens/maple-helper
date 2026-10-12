@@ -1,4 +1,4 @@
-"""Combat math for the play tools: hit chance, accuracy needed, hits to kill, where to train.
+"""Combat math for Grind spots and the search's Hit & damage: hit chance, accuracy needed, hits to kill, where to train.
 
 Formulas from the KB's guide "Explaining the Damage Formula" (MapleStory Classic World, COT2):
   L = max(0, MobLevel - PlayerLevel);  A = TotalACC x 100 / (10 x L + 255);  D = A - MobAvoid
@@ -293,3 +293,56 @@ def kills_to_level(kb, level: int, exp_pct: float | None, m: Monster) -> int | N
         return None
     left = need * (1 - (exp_pct or 0) / 100)
     return max(0, math.ceil(left / m.exp))
+
+
+def map_key(kb, cell: str) -> str | None:
+    """The KB key ("map/<id>") of a map as a monster page's map cell writes it ("Snail Hunting Ground I Maple Road":
+    a Spot's map), for its page and the way there; else the one map of that bare name; None when the KB has neither."""
+    cell = (cell or "").strip()
+    if not cell:
+        return None
+    hit = next((k for k, c in availability.of(kb).map_cell.items() if c == cell), None)
+    if hit:
+        return hit
+    named = [k for k, e in kb.entities.items() if e.get("category") == "map" and e.get("name") == cell]
+    return named[0] if len(named) == 1 else None
+
+
+# ------------------------------------------------------------------ one character on one monster
+
+@dataclass(frozen=True)
+class Matchup:
+    """Hit & damage for a character on one monster (the toolbar search's monster page): each figure None where the
+    character's typed stats can't give it."""
+    acc_needed: int                      # total ACC to never miss at the character's level (0: it never dodges)
+    acc_needed90: int                    # ... for a 90% hit chance
+    hit: float | None                    # hit chance 0..1 with the typed ACC; None without one
+    acc_short: int                       # ACC still missing for 100% (0: never misses, or no ACC typed)
+    stat_points: int                     # points of `stat` that close that gap (base ACC per point)
+    stat: str                            # what adds ACC: INT for a Magician, else DEX
+    damage: tuple[int, int] | None       # the stat window's range as typed (damage_range); None without one
+    landed: tuple[int, int] | None       # ... on this monster: after its P.DEF and the higher-level penalty
+    hits: int | None                     # basic hits that always kill it
+    avg_hits: float | None               # ... on average
+    exp: int                             # EXP one kill gives
+    kills: int | None                    # kills to the next level (None past the EXP table)
+
+
+def matchup(kb, m: Monster, level: int, base_class: str, exp_pct: float | None, stats: dict | None) -> Matchup:
+    """The Hit & damage figures for a character (its level, class, EXP bar and stat-window stats: acc, dmg_min,
+    dmg_max) on monster m. The stat window's range is one basic attack — for a Magician the staff swing, a physical
+    hit — so the damage is against P.DEF for every class, as the stat window deals it."""
+    s = stats or {}
+    acc = int(s.get("acc") or 0) or None
+    dmg = damage_range(s.get("dmg_min"), s.get("dmg_max"))
+    magic = base_class == MAGE
+    need = acc_needed(level, m.level, m.avoid)
+    hit = hit_chance(acc, level, m.level, m.avoid) if acc else None
+    short = max(0, need - acc) if acc and hit is not None and hit < 0.999 else 0
+    hits = avg = landed_range = None
+    if dmg:
+        hits, avg = hits_to_kill(dmg[0], dmg[1], m, level)
+        landed_range = (int(landed(dmg[0], m.pdef, level, m.level)), int(landed(dmg[1], m.pdef, level, m.level)))
+    return Matchup(need, acc_needed(level, m.level, m.avoid, 0.9), hit, short,
+                   math.ceil(short / acc_per_point(base_class)) if short else 0, "INT" if magic else "DEX",
+                   dmg, landed_range, hits, avg, m.exp, kills_to_level(kb, level, exp_pct, m))

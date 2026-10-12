@@ -2,9 +2,8 @@
 
 Every read finds the minimap first: the game's MINI MAP window always sits at the top left of the game's picture
 (gamearea.GameArea), so one grab of that corner and minimapfind.find_window place it, whatever its size (it changes
-with the map, and folds to its title strip inside a building). The box the player drew around it is the fallback,
-read when there is no game window or no minimap window in it. The box a read used goes to LOCATION.box: the windows
-over the game place themselves by it.
+with the map, and folds to its title strip inside a building). With no game window, or no minimap window in it,
+there is nothing to read. The box a read used goes to LOCATION.box: the windows over the game place themselves by it.
 
 A QTimer ticks on the GUI thread; the read itself (finding the window, the screenshot, then reading the minimap's
 title for the map and aligning its picture for the dot) runs on a worker thread, so the chat never freezes on it.
@@ -27,7 +26,7 @@ from PIL import Image
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .. import capture, minimap, minimapfind, routes
-from ..gamearea import GameArea, valid_region
+from ..gamearea import GameArea
 from ..kb import KnowledgeBase
 from ..store import Settings
 from .location import LOCATION
@@ -62,14 +61,14 @@ def _window_box(found: tuple[int, int, int, int], rect: tuple[int, int, int, int
 
 
 class MinimapScanner(QObject):
-    """Reads the game's minimap every few seconds (its window, found at the game's top left; else the drawn box) and
-    reports it through LOCATION, with the box read.
+    """Reads the game's minimap every few seconds (its window, found at the game's top left) and reports it through
+    LOCATION, with the box read.
 
     The Locator is built lazily once per KB and kept between reads (it holds the OCR engine, the header rows and
     its lock on the picture); a KB update drops it so the next read rebuilds it, and a read of another box than the
     last one (a map change resizes the window) drops its lock. A read still going when the timer ticks skips that
     tick (no pile-up). A read with no recognizable title, or nothing to read, backs off (a wasted read costs most of
-    a second of CPU); a hit reads every interval again, as does a restart (a new box, interval)."""
+    a second of CPU); a hit reads every interval again, as does a restart (a new interval)."""
 
     _found = Signal(object, object)   # (Here | None, the box read | None): a read's answer, from the worker thread
     _failed = Signal(str, object)     # a read's error as text ("Kind: message") and the box it had found (or None)
@@ -81,7 +80,6 @@ class MinimapScanner(QObject):
         self._settings = settings
         self._locator: minimap.Locator | None = None
         self._graph: routes.Graph | None = None
-        self._region: dict | None = None      # the box the player drew (ints): the reads' fallback
         self._box: dict | None = None         # the box the last read used, published; the fast follow grabs it
         # the reads' own, worker thread only (one read at a time): the game's picture, the last box read (another
         # one drops the locator's lock), and what was logged (a game window there, the minimap window's last size)
@@ -123,13 +121,9 @@ class MinimapScanner(QObject):
                 log.debug("minimap locator reset failed: %r", e)
 
     def restart(self) -> None:
-        """Settings changed (the drawn box, the interval): pick them up. The reads run whether or not a box was drawn:
-        the minimap window is found on its own at the game's top left, the drawn box is only its fallback."""
-        region = self._settings["minimap_region"]
-        # ints for grab_image (a hand-edited float still reads the same box, not an error every interval)
-        self._region = {k: int(region[k]) for k in ("x", "y", "w", "h")} if valid_region(region) else None
+        """Settings changed (the interval): pick it up, and read right away."""
         self.reset_locator()
-        self._cooldown_until = 0.0     # a new box or interval: read right away, don't keep an old backoff
+        self._cooldown_until = 0.0     # a new interval: read right away, don't keep an old backoff
         self._miss_since = None
         self._pending = (None, 0)
         LOCATION.set_follow(None)
@@ -158,8 +152,7 @@ class MinimapScanner(QObject):
             if self._reading:
                 return          # the last read is still going: skip this tick, don't pile up
             self._reading = True
-        drawn = dict(self._region) if self._region is not None else None
-        threading.Thread(target=self._read, args=(drawn,), daemon=True).start()
+        threading.Thread(target=self._read, daemon=True).start()
 
     def _locator_for(self) -> tuple:
         if self._locator is None:
@@ -167,21 +160,18 @@ class MinimapScanner(QObject):
             self._locator = minimap.Locator(self._graph)
         return self._locator, self._graph
 
-    def _read(self, drawn: dict | None) -> None:
-        """One read, on the worker thread: the minimap window found at the game's top left, else the drawn box. A box
-        other than the last one read (a map change resizes the window, the game moved, a box drawn) drops the
-        locator's lock on the picture, once: the same box keeps it."""
+    def _read(self) -> None:
+        """One read, on the worker thread: the minimap window found at the game's top left. A box other than the last
+        one read (a map change resizes the window, the game moved) drops the locator's lock on the picture, once: the
+        same box keeps it."""
         box = None
         try:
             locator, _ = self._locator_for()
             found = self._window()
             if found is not None:
                 box, img = found
-            elif drawn is not None:
-                box = drawn
-                img = capture.grab_image(box["x"], box["y"], box["w"], box["h"])
             else:
-                img = None          # neither: nothing to read, a miss
+                img = None          # no minimap window: nothing to read, a miss
             if box is not None and box != self._read_box:
                 self._read_box = box
                 self.reset_locator()
@@ -280,7 +270,7 @@ class MinimapScanner(QObject):
         return max(3.0, 3.0 * self._interval())
 
     def _miss(self) -> None:
-        """A read with no recognizable title, or nothing to read (no minimap window found, no box drawn). A known map
+        """A read with no recognizable title, or nothing to read (no minimap window found). A known map
         is never dropped for it (the owner's, 2026-10-08: the card flipped to "not recognized" and back every few
         seconds and reset the way shown mid-walk): it stays until a read names another map. Misses past the grace (or
         with no map known yet) only slow the reads to max(2 s, 2 x interval) with a map kept, max(5 s, 5 x interval)
@@ -303,7 +293,7 @@ class MinimapScanner(QObject):
         LOCATION.set_state("unknown")
 
     def _use_box(self, box: dict | None) -> None:
-        """The box a read used, back on the GUI thread (None: no minimap window found, no box drawn): published, and
+        """The box a read used, back on the GUI thread (None: no minimap window found): published, and
         grabbed by the fast follow from now on. Another box than the last drops the follow, whose placing was in the
         old one: the read's own placing starts it again in the new one."""
         LOCATION.set_box(box)

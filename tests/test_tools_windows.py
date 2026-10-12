@@ -1,7 +1,6 @@
-"""Play tools, guides, history, wishlist and pins: the audit's tools-windows findings, one test each."""
+"""The game search's lists, guides, history, wishlist and pins: the audit's tools-windows findings, one test each."""
 import datetime
 import os
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,165 +43,35 @@ def real_kb():
     return KnowledgeBase(REAL_KB)
 
 
-@pytest.fixture
-def tools(isolated_store, real_kb):
-    """make(cls, job, level, page, lang) -> (ToolsDialog, character)."""
-    from maplehelper.ui.tools import ToolsDialog
-    made = []
-
-    def make(base, job, level, page="train", lang="en"):
-        p = isolated_store.Profiles()
-        c = p.add("Kiwi", base, job, level)
-        d = ToolsDialog(real_kb, p, isolated_store.Settings(), lang, "", {}, page)
-        made.append(d)
-        return d, c
-    yield make
-    for d in made:
-        try:
-            d.close()
-        except RuntimeError:
-            pass
-
-
 def cards(layout):
     return [layout.itemAt(i).widget() for i in range(layout.count())
             if layout.itemAt(i).widget() is not None and layout.itemAt(i).widget().objectName() == "Card"]
 
 
-def more_button(layout):
-    return next((w for i in range(layout.count()) if isinstance(w := layout.itemAt(i).widget(), QPushButton)), None)
-
-
-# ------------------------------------------------------------------ Play tools
+# ------------------------------------------------------------------ the game search's lists
 
 @needs_kb
-def test_quest_lists_past_40_say_so_and_show_the_rest(tools):
-    """The header counted every quest but only 40 cards were made, with nothing saying the rest were hidden."""
-    from maplehelper import quests
-    from maplehelper.ui.tools import MAX_QUESTS
-    d, c = tools("Warrior", "Fighter", 20, "quests")
-    d.q_mode.group.buttons()[1].click()            # the quests not done from earlier levels: the long list
-    rows = len(quests.for_level(d.kb, c.level, c.base_class, c.job, c.quests_done)["missed"])
-    assert rows > MAX_QUESTS
-    assert len(cards(d.q_list)) == MAX_QUESTS
-    btn = more_button(d.q_list)
-    hint = [w.text() for w in d.findChildren(QLabel, "RowHint") if f"40 of {rows} quests" in w.text()]
-    assert btn is not None and btn.text() == "Show more quests" and hint
-    btn.click()
-    assert len(cards(d.q_list)) == min(rows, 2 * MAX_QUESTS)
-    d._fill_quests(new_list=True)                     # another list starts at its first 40 again
-    assert d._q_limit == MAX_QUESTS
-
-
-@needs_kb
-def test_citizenship_list_past_40_has_more_too(tools):
-    from maplehelper import quests
-    from maplehelper.ui.tools import MAX_QUESTS
-    d, c = tools("Bowman", "Hunter", 50, "town")
-    c.town = "Henesys"
-    d.refresh("town")
-    rows = quests.citizenship(d.kb, "Henesys", 50, c.quests_done)
-    assert len(rows) > MAX_QUESTS and len(cards(d.town_list)) == MAX_QUESTS
-    more_button(d.town_list).click()
-    assert len(cards(d.town_list)) == len(rows) and more_button(d.town_list) is None
-
-
-@needs_kb
-def test_opening_on_the_build_page_keeps_the_other_pages_for_later(tools):
-    """_skill_icons' hasattr("_skills") went through __getattr__, which built all eight other pages at once."""
-    d, _ = tools("Thief", "Assassin", 34, "build")
-    from maplehelper.ui.tools import PAGES
-    assert d._skill_icons()                        # the build tables have their icons
-    assert len(d._pending) == len(PAGES) - 1       # every other page, still to come
-    end = time.time() + 10
-    while d._pending and time.time() < end:
-        pump()
-    assert not d._pending                          # and the rest still come right after
-    assert d.q_list is not None                    # a public widget of an unbuilt page is still built on demand
-
-
-@needs_kb
-def test_done_toggle_closes_when_the_last_done_quest_is_undone(tools):
-    from maplehelper import quests
-    d, c = tools("Thief", "Assassin", 34, "quests")
-    key = quests.for_level(d.kb, 34, "Thief", "Assassin", [])["now"][0].key
-    d._quest_done(key)
-    d.q_done_toggle.setChecked(True)
-    d._quest_undo(key)
-    assert not d.q_done_toggle.isChecked() and d.q_done_toggle.isHidden()
-    d._quest_done(key)                              # the next one marked done doesn't open the list on its own
-    assert not d.q_done_toggle.isChecked() and cards(d.q_done) == []
-
-
-@needs_kb
-def test_tab_switch_back_keeps_the_quest_cards(tools):
-    """Every switch to Quests / Citizenship rebuilt up to 40 cards (~0.3 s) though nothing had changed."""
-    from maplehelper.ui.tools import PAGES
-    d, c = tools("Thief", "Thief", 15, "quests")      # (quests open at 15: the level tab has cards)
-    d.q_mode.group.buttons()[1].click()            # another tab: back on "Quests for level N" after leaving
-    d.show_page(PAGES.index("train"))
-    d.show_page(PAGES.index("quests"))
-    assert d.q_mode.group.buttons()[0].isChecked()
-    first = cards(d.q_list)[0]
-    d.show_page(PAGES.index("train"))
-    d.show_page(PAGES.index("quests"))
-    assert cards(d.q_list)[0] is first
-    c.level = 16                                    # the character changed: the page follows
-    d.show_page(PAGES.index("train"))
-    d.show_page(PAGES.index("quests"))
-    assert cards(d.q_list)[0] is not first
-    d.show_page(PAGES.index("town"))
-    town_first = cards(d.town_list)[0]
-    d.show_page(PAGES.index("train"))
-    d.show_page(PAGES.index("town"))
-    assert cards(d.town_list)[0] is town_first
-
-
-@needs_kb
-def test_closing_during_a_free_market_lookup_logs_nothing(tools, monkeypatch):
-    from maplehelper import mesowatch
-    release, errors = threading.Event(), []
-    # the card's Free Market lookup is MesoWatch's (the owner: item prices from MesoWatch only)
-    monkeypatch.setattr(mesowatch, "for_item", lambda kb, key, *a, **k: release.wait(5) and (None, None))
-    monkeypatch.setattr(threading, "excepthook", lambda a: errors.append(a.exc_value))
-    d, _ = tools("Thief", "Assassin", 34, "prices")
-    before = set(threading.enumerate())
-    d.price_input.setText("Red Potion")
-    d._fill_prices()
-    worker = next(iter(t for t in set(threading.enumerate()) - before if t.is_alive()))
-    deleted_on_close(d)
-    release.set()
-    worker.join(5)
-    assert errors == []
-
-
-@needs_kb
-def test_pickers_offer_only_what_the_kb_says_is_in_the_game(tools, real_kb):
-    from maplehelper import availability
-    from maplehelper.ui.tools import map_rows, monster_rows
-    from maplehelper import combat
+def test_the_game_search_offers_only_what_the_kb_says_is_in_the_game(real_kb):
+    from maplehelper import availability, combat
+    from maplehelper.ui.gamesearch import _map_hits, _monster_hits, search
     o = availability.of(real_kb)
     assert o.known
     # Ossyria's maps and monsters (and Jr. Sentinel's Forgotten Hollow) stay out while the release guide keeps them
     # shut, by the guide, not by this list: the day one opens, the nightly still passes
-    maps = map_rows(real_kb)
-    assert maps and all(o.place_open(s.split("  ·  ")[-1]) for s, _, _ in maps if "  ·  " in s)
+    maps = {h.name for h in _map_hits(real_kb)}
     every = [(e["name"], o.entity_open(k)) for k, e in real_kb.entities.items() if e.get("category") == "map"]
     shut = {n for n, op in every if not op} - {n for n, op in every if op}      # (a name both ways: not shut)
-    assert not shut & {n for _, n, _ in maps}            # today: Dead Mine I, Wolf Territory I, Cloud Park I, ...
-    names = {n for _, n, _ in monster_rows(real_kb)}
+    assert maps and not shut & maps                      # today: Dead Mine I, Wolf Territory I, Cloud Park I, ...
+    names = {h.name for h in _monster_hits(real_kb)}
     assert "Green Mushroom" in names
     closed = {m.name for m in combat.monsters(real_kb)} - {m.name for m in combat.monsters(real_kb)
                                                             if o.monster_key_open(m.key)}
     assert not names & closed
-    # typed by hand, the calculator doesn't find a closed one either (today Star Pixie)
-    d, _ = tools("Thief", "Assassin", 34, "calc")
+    # typed by hand, the search doesn't find a closed one either (today Star Pixie)
     hidden = next((n for n in ("Star Pixie", "Hector", "White Fang") if n in closed), next(iter(sorted(closed)), None))
     if hidden:
-        d.calc_input.setText(hidden)
-        assert d._calc_monster() is None
-    d.calc_input.setText("Green Mushroom")
-    assert d._calc_monster().name == "Green Mushroom"
+        assert hidden not in {h.name for h in search(real_kb, "monster", hidden)[0]}
+    assert search(real_kb, "monster", "Green Mushroom")[0][0].name == "Green Mushroom"
     assert closed or not o.not_at_launch                 # something is shut while the guide names something
 
 
@@ -516,62 +385,3 @@ def test_share_card_ellipsizes_a_long_name_and_wraps_a_long_map(isolated_store, 
     # full run ("ElipazThe…" once), so the cut is checked, not its exact place
     assert "Kiwi" in names and any(t.endswith("…") and len(t) > 6 and long.name.startswith(t[:-1]) for t in names)
     assert a.width() == b.width() and b.height() >= a.height()        # the long map took a second line
-
-
-@needs_kb
-def test_a_quests_prerequisite_is_a_tap_away(tools):
-    """"Opens once you finish X": a tap shows X, on its own tab, alone (the owner)."""
-    from maplehelper import quests
-    d, c = tools("Thief", "Assassin", 31, "quests")
-    r = quests.for_level(d.kb, c.level, c.base_class, c.job, c.quests_done)
-    later = next(q for m in ("level", "missed", "soon", "later") for q in r[m] if q.afters
-                 and any(p.name == q.afters[0] for mm in ("level", "missed", "soon", "later") for p in r[mm]))
-    d._goto_quest(later.afters[0])
-    assert d.q_search.text() == later.afters[0]
-    names = [w.text() for w in d.findChildren(QLabel, "CardName") if w.isVisibleTo(d)]
-    assert names and all(later.afters[0] in n for n in names)
-
-
-@needs_kb
-def test_a_prerequisite_already_done_is_not_mentioned(tools):
-    from maplehelper import quests
-    d, c = tools("Thief", "Assassin", 31, "quests")
-    r = quests.for_level(d.kb, c.level, c.base_class, c.job, c.quests_done)
-    q = next(q for m in ("level", "missed", "soon", "later") for q in r[m] if len(q.afters) == 1)
-    before = next(k for k, e in d.kb.entities.items() if e.get("category") == "quest" and e["name"] == q.afters[0])
-    def mentions():
-        card = d._quest_card(q)              # (kept while read: a card nobody holds goes at once)
-        return [w.text() for w in card.findChildren(QLabel) if "href='go'" in w.text()]
-    assert mentions()
-    c.quests_done.append(before)
-    assert not mentions()
-
-
-@needs_kb
-def test_opening_the_tools_shows_no_stray_windows(tools):
-    """A widget shown before it is in a page is a window of its own: it flashed behind the tools window on open
-    (the train page's "why" line, the pets section)."""
-    from PySide6.QtCore import QObject
-    from PySide6.QtWidgets import QWidget
-    from maplehelper.ui.tools import PAGES
-    stray, own = [], []
-
-    class Watch(QObject):
-        def eventFilter(self, o, e):
-            if e.type() == QEvent.Show and isinstance(o, QWidget) and o.isWindow() and o not in own:
-                stray.append(f"{type(o).__name__} {o.objectName()}")
-            return False
-    w = Watch()
-    app.installEventFilter(w)
-    try:
-        d, _ = tools("Warrior", "Fighter", 35, "train")
-        own.append(d)
-        d._build_rest()
-        for i in range(len(PAGES)):
-            d.show_page(i)
-            pump()
-    finally:
-        app.removeEventFilter(w)
-    assert not stray
-    d.show_page(PAGES.index("train"))
-    assert d.train_why.text() and d.train_why.isVisibleTo(d)

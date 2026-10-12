@@ -2,12 +2,11 @@
 
 Where they are is found on its own: the game's picture (gamearea.GameArea: its window without the black bars a 16:9
 game draws on an ultrawide screen), and lootlog.auto_box in it. That follows the window when it moves, and any
-resolution or window size, since the game's interface scales with it. A box the player drew ("loot_region") is used
-instead when there is one. A QTimer ticks on the GUI thread; finding the window, the grab and the OCR run on a worker
-thread (the chat never freezes on them), and the read lines come back through a signal to lootlog.Tracker, which
-turns them into the log's events. The running log is kept here, live, and saved to loot.json every few seconds and
-when it ends (a log outlives the tools window and an app restart); each pickup, once no later read can correct it,
-also goes into the loot database for good (lootdb.py).
+resolution or window size, since the game's interface scales with it. A QTimer ticks on the GUI thread; finding the
+window, the grab and the OCR run on a worker thread (the chat never freezes on them), and the read lines come back
+through a signal to lootlog.Tracker, which turns them into the log's events. The running log is kept here, live, and
+saved to loot.json every few seconds and when it ends (a log outlives its window and an app restart); each
+pickup, once no later read can correct it, also goes into the loot database for good (lootdb.py).
 
 The running log is the grind's run too (the grind bar and window, grindlive.py). Each pickup gets the map the player
 is on (the minimap reads' ui/location.LOCATION, taken when the read comes back) and the player's level (the latest
@@ -29,7 +28,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .. import capture, hud, lootdb, lootlog, plan
-from ..gamearea import GameArea, valid_region
+from ..gamearea import GameArea
 from ..kb import KnowledgeBase
 from ..store import Profiles, Settings
 from .location import LOCATION
@@ -70,8 +69,8 @@ class LootScanner(QObject):
         self._hud_reading = False
         self._logged: set[str] = set()
         self._box_size: tuple[int, int] | None = None     # the size of the last box read: another one starts over
-        self.state = "ok"                     # the last read: "ok", "no_game", "covered" or "no_reader" (the page
-                                              # and the card say why nothing counts)
+        self.state = "ok"                     # the last read: "ok", "no_game", "covered" or "no_reader" (the card
+                                              # says why nothing counts)
         self.last_read: float | None = None   # when a read last found a message line
         self._read_done.connect(self._deliver)
         self._hud_done.connect(self._hud_deliver)
@@ -85,11 +84,6 @@ class LootScanner(QObject):
         """The active character's id ("" with none: the log works without a character)."""
         c = self._profiles.active
         return c.id if c else ""
-
-    def region(self) -> dict | None:
-        """The box the player drew, when there is one (None: the messages are found on their own)."""
-        r = self._settings["loot_region"]
-        return {k: int(r[k]) for k in ("x", "y", "w", "h")} if valid_region(r) else None
 
     def set_kb(self, kb: KnowledgeBase) -> None:
         self.kb = kb
@@ -258,15 +252,12 @@ class LootScanner(QObject):
             if self._reading:
                 return          # the last read is still going: skip this tick, don't pile up
             self._reading = True
-        threading.Thread(target=self._read, args=(self.region(),), daemon=True).start()
+        threading.Thread(target=self._read, daemon=True).start()
 
-    def _read(self, drawn: dict | None) -> None:
+    def _read(self) -> None:
         try:
-            if drawn is None:
-                play = self._game.find()
-                box = lootlog.auto_box(play) if play else None
-            else:
-                box = drawn
+            play = self._game.find()
+            box = lootlog.auto_box(play) if play else None
             rows, state = None, "ok"
             if box is None:
                 state = "no_game"
@@ -291,7 +282,7 @@ class LootScanner(QObject):
         box, state = read
         if state != self.state:
             self.state = state
-            self.changed.emit()             # the page and the card say why nothing counts
+            self.changed.emit()             # the card says why nothing counts
         if state == "covered":
             # what is on screen when the game comes back in front is a new baseline (the messages moved meanwhile)
             self._tracker.reset()
@@ -300,7 +291,7 @@ class LootScanner(QObject):
             return
         size = (box["w"], box["h"])
         if size != self._box_size:
-            # another size of box (the game resized, a box drawn): rows and their spacing start over, and what is
+            # another size of box (the game resized): rows and their spacing start over, and what is
             # on screen now is the new baseline
             if self._box_size is not None:
                 self._tracker.reset()

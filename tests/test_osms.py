@@ -126,9 +126,7 @@ def test_the_games_words_win_over_the_kbs_in_hebrew(monkeypatch, tmp_path):
         "cash_desc": {"cash/5140003": {"en": "Open a store for up to 18 items.", "he": "חנות עד 18 פריטים"}}},
         ensure_ascii=False), encoding="utf-8")
     translations._cache.clear()
-    page = shoppage.ShopPage.__new__(shoppage.ShopPage)
-    page.kb, page.t, page._desc = KB(), I18n("he"), {}
-    page._by_name = shoppage.kb_names(page.kb)
+    page = shoppage.Catalog(KB(), I18n("he"))
     import re
 
     def text(*a):

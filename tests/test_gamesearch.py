@@ -93,10 +93,15 @@ def delete_window(qapp, w):
 
 
 @pytest.fixture
-def win(qapp, settings, kb):
+def profiles(isolated_store):
+    return isolated_store.Profiles()
+
+
+@pytest.fixture
+def win(qapp, settings, profiles, kb):
     from maplehelper.i18n import I18n
     from maplehelper.ui.gamesearch import GameSearch
-    w = GameSearch(kb, settings, I18n("en"))
+    w = GameSearch(kb, settings, profiles, I18n("en"))
     yield w
     delete_window(qapp, w)
 
@@ -311,8 +316,9 @@ def test_clicking_a_monster_opens_the_detail_window_docked_beside(win, qapp, cle
     # the header card: the monster's picture, larger than a row's, its name, its level chip, its HP and EXP
     assert _head(d) == ("Snail", ["Monster · Lv. 1"], "8 HP · 3 EXP")
     assert not d.pic.pixmap().isNull() and d.pic.size() == QSize(gamesearch.HEAD_PIC, gamesearch.HEAD_PIC)
-    # where it lives: a titled block, each map a row with its picture and how many spawn there on the end
-    assert _texts(d) == ["Where Snail lives"]
+    # where it lives: a titled block, each map a row with its picture and how many spawn there on the end; then Hit
+    # & damage, which needs a character (none here)
+    assert _texts(d) == ["Where Snail lives", win.t("tool_calc"), win.t("md_no_char")]
     assert [(_seen(r), r.toolTip()) for r in _links(d)] == [
         (("Snail Garden", [], "Victoria Road", "6", "on the map"), "Click to see this map and the way there")]
     assert _links(d)[0].pic.size() == QSize(*gamesearch.MAP_PIC) and not _links(d)[0].pic.pixmap().isNull()
@@ -490,6 +496,33 @@ def test_an_item_nothing_drops_or_sells_says_so(win, qapp, clean_location, graph
     pump(qapp, 200)
     win._rows[0].clicked.emit()
     assert _texts(win._detail) == ["No known drops or shops"]     # the fixture KB gives Red Potion no type line
+
+
+def test_a_tradeable_items_page_links_to_its_free_market_prices(win, qapp, kb, clean_location, graph, monkeypatch):
+    """The Free Market details window (MesoWatch's sales, where to buy: ui/marketview.py), reached from an item's
+    page — the old Play tools' Item price page held its only way in — for an item players can trade; an untradeable
+    one (a pet: the Cash Shop only) has none."""
+    from maplehelper import gamelookup, sitedata
+    from maplehelper.ui.widgets import MARKET_REQUESTS
+    monkeypatch.setattr(gamelookup, "item_sources", lambda kb, key: ([], []))
+    monkeypatch.setattr(sitedata, "sell_list", lambda kb: sitedata.SellList("2026-10-10", {}))
+    d = win._detail
+    asked = []
+    MARKET_REQUESTS.requested.connect(asked.append)
+    try:
+        d.open_view("item", "item/2000000")
+        assert d.market_link is not None and d.market_link.text() == win.t("md_market") + " ›"
+        d.market_link.click()
+        d.open_view("sell", "item/2000000")                # its Safe to sell? page too, under the NPC price
+        d.market_link.click()
+        assert asked == ["item/2000000", "item/2000000"]
+        monkeypatch.setattr(sitedata, "untradeable", lambda kb, key: True)
+        d.open_view("item", "item/2000000")
+        assert d.market_link is None
+        d.open_view("sell", "item/2000000")
+        assert d.market_link is None
+    finally:
+        MARKET_REQUESTS.requested.disconnect(asked.append)
 
 
 def test_safe_to_sell_says_keep_with_what_needs_it_or_safe_with_the_npc_price(
@@ -889,6 +922,188 @@ def test_the_white_glass_takes_dark_text_and_back(win, qapp, settings):
     sheet = win.styleSheet()
     assert f"color: {npcoverlay.DARK.text};" in sheet and npcoverlay.LIGHT.text not in sheet
     assert win._detail.styleSheet() == sheet
+
+
+# ---------------------------------------------------------------- a monster's Hit & damage (the old Play tools page)
+
+STUMP, SNAIL_KEY, RED_SNAIL = "monster/5130104", "monster/100100", "monster/130101"
+
+
+@pytest.fixture
+def fight_kb(_own_kb, tmp_path, monkeypatch):
+    """This file's KB with an AVOID and P.DEF for Axe Stump (Lv. 17; the fixture pages have none), the players' mesos
+    for Snail (as test_community's KB has them) and an EXP table for level 15."""
+    import json
+    import shutil
+
+    from maplehelper import plan
+    from maplehelper.kb import KnowledgeBase
+    root = tmp_path / "fight_kb"
+    shutil.copytree(_own_kb, root)
+    page = root / "pages" / "monster" / "5130104.md"
+    page.write_text(page.read_text(encoding="utf-8") + "\nAVOID\n20\nP.DEF\n15\n", encoding="utf-8")
+    (root / "community.json").write_text(json.dumps({"source": "test", "fetched": "2026-10-04", "monsters": {
+        SNAIL_KEY: {"drops": [], "mesos": {"min": 18, "max": 23, "chance": 60, "count": 12, "trusted": 9},
+                    "fetched": "2026-10-04"}}}), encoding="utf-8")
+    monkeypatch.setattr(plan, "exp_table", lambda kb: {15: 1000})
+    return KnowledgeBase(root)
+
+
+@pytest.fixture
+def fight(qapp, settings, profiles, fight_kb):
+    from maplehelper.i18n import I18n
+    from maplehelper.ui.gamesearch import GameSearch
+    w = GameSearch(fight_kb, settings, profiles, I18n("en"))
+    yield w
+    delete_window(qapp, w)
+
+
+def _figures(d) -> dict[str, tuple[str, str]]:
+    """The Hit & damage figures as the player reads them: each one's name -> (its big number, the line under it)."""
+    from maplehelper import bidi
+
+    def strip(s: str) -> str:
+        return "".join(ch for ch in s if ch not in (bidi.LRI, bidi.PDI, bidi.RLM))
+    return {strip(label): (strip(value), strip(sub)) for label, value, sub in (f.figure for f in d.hit_figures)}
+
+
+def _calc_block(d):
+    """The page's last block: Hit & damage."""
+    from maplehelper.ui.gamesearch import _Block
+    block = d._rows[-1]
+    assert isinstance(block, _Block) and block.title.text() == d._owner.t("tool_calc")
+    return block
+
+
+@pytest.mark.parametrize("cls, job, stat", [("Thief", "Assassin", "DEX"), ("Magician", "Wizard", "INT")])
+def test_hit_and_damage_are_combats_figures_for_the_active_character(fight, fight_kb, profiles, cls, job, stat):
+    """Each figure is combat's own for the character on the monster: the hit chance with its ACC and what is missing
+    for 100% (in DEX, a Magician's INT), the ACC to never miss, the stat window's damage after the monster's P.DEF
+    and the basic hits that kill it (a Magician's too: the staff swing), the EXP a kill gives, the kills to the next
+    level from the EXP bar."""
+    import math
+
+    from maplehelper import combat
+    c = profiles.add("Kiwi", cls, job, 15)
+    c.exp_pct = 40.0
+    c.stats = {"acc": 60, "dmg_min": 20, "dmg_max": 40}
+    m = combat.monster(fight_kb, STUMP)
+    assert (m.level, m.avoid, m.pdef) == (17, 20, 15)
+    fight._detail.open_view("monster", STUMP)
+    t, figs = fight.t, _figures(fight._detail)
+    hit = combat.hit_chance(60, 15, 17, 20)
+    need = combat.acc_needed(15, 17, 20)
+    assert 0 < hit < 1                                  # a gap to close
+    short = need - 60
+    pts = math.ceil(short / combat.acc_per_point(cls))
+    assert figs[t("calc_hit")] == (f"{round(hit * 100)}%", t("calc_more_acc", n=short, pts=pts, stat=stat))
+    assert figs[t("md_acc")] == (str(need), t("calc_acc_need90", n=combat.acc_needed(15, 17, 20, 0.9)))
+    lo, hi = (int(combat.landed(x, 15, 15, 17)) for x in (20, 40))
+    assert figs[t("md_damage")] == (f"{lo}–{hi}", t("md_damage_sub", range="20–40", n="15"))
+    hits, avg = combat.hits_to_kill(20, 40, m, 15)
+    assert figs[t("md_hits")] == (str(hits), t("md_avg", n=f"{avg:.1f}") if avg < hits - 0.05 else "")
+    assert figs[t("md_exp")] == ("32", "")
+    kills = combat.kills_to_level(fight_kb, 15, 40.0, m)
+    assert kills == math.ceil(1000 * 0.6 / 32) and figs[t("md_kills", n=16)] == (f"{kills:,}", "")
+    assert fight._detail.stats_link is None                         # every stat typed: nothing to ask for
+    notes = [w.text() for w in _calc_block(fight._detail).items if hasattr(w, "text")]
+    assert t("calc_hits_mage" if cls == "Magician" else "calc_hits_basic") in notes
+
+
+def test_a_monster_that_never_dodges_is_always_hit(fight, profiles):
+    c = profiles.add("Kiwi", "Thief", "Assassin", 15)
+    c.stats = {"acc": 5}
+    fight._detail.open_view("monster", SNAIL_KEY)            # Avoid 0
+    t, d = fight.t, fight._detail
+    figs = _figures(d)
+    assert figs[t("calc_hit")] == ("100%", "") and figs[t("md_acc")] == ("0", t("md_never_dodges"))
+    hit = next(f for f in d.hit_figures if f.figure[0] == t("calc_hit"))
+    assert hit.findChildren(type(d.title), "FigValue")[0].property("tone") == "good"
+
+
+def test_without_a_character_hit_and_damage_is_one_line(fight):
+    fight._detail.open_view("monster", STUMP)
+    d = fight._detail
+    block = _calc_block(d)
+    assert [w.text() for w in block.items] == [fight.t("md_no_char")]
+    assert d.hit_figures == [] and d.stats_link is None
+
+
+def test_without_stats_it_says_which_and_links_to_the_stats_editor(fight, profiles):
+    """No ACC and no damage typed: only what needs none (the ACC to never miss, EXP, kills), the line saying both are
+    needed and "Type your stats", which opens Grind spots (its stats editor). The ACC alone: the hit chance, and the
+    damage still asked for."""
+    from maplehelper.ui.toolwindow import NAV
+    c = profiles.add("Kiwi", "Thief", "Assassin", 15)
+    d, t = fight._detail, fight.t
+    d.open_view("monster", STUMP)
+    figs = _figures(d)
+    assert t("calc_hit") not in figs and t("md_damage") not in figs and t("md_hits") not in figs
+    assert {t("md_acc"), t("md_exp"), t("md_kills", n=16)} <= set(figs)
+    assert figs[t("md_kills", n=16)][1] == t("md_kills_from0")     # no EXP bar read: counted from 0%
+    texts = [w.text() for w in _calc_block(d).items if hasattr(w, "text")]
+    assert t("md_need_both") in texts and d.stats_link is not None
+    asked = []
+    NAV.tool_requested.connect(lambda key, arg: asked.append((key, arg)))
+    try:
+        d.stats_link.click()
+    finally:
+        NAV.tool_requested.disconnect()
+    assert asked == [("grind_spots", "")]
+    c.stats = {"acc": 60}
+    fight.character_changed()                     # the stats typed: the page drawn again for them
+    figs = _figures(d)
+    assert t("calc_hit") in figs and t("md_damage") not in figs
+    texts = [w.text() for w in _calc_block(d).items if hasattr(w, "text")]
+    assert t("md_need_dmg") in texts and t("md_need_both") not in texts
+    c.stats = {"acc": 60, "dmg_min": 20, "dmg_max": 40}
+    fight.character_changed()
+    assert t("md_damage") in _figures(d) and d.stats_link is None
+
+
+def test_another_character_redraws_the_monster_page(fight, profiles):
+    a = profiles.add("Kiwi", "Thief", "Assassin", 15)
+    a.stats = {"acc": 60}
+    d = fight._detail
+    d.open_view("monster", STUMP)
+    assert fight.t("calc_hit") in _figures(d)
+    b = profiles.add("Mango", "Warrior", "Fighter", 15)
+    profiles.active_id = b.id
+    fight.character_changed()
+    assert fight.t("calc_hit") not in _figures(d) and d.stats_link is not None
+    profiles.active_id = None
+    fight.character_changed()
+    assert d.hit_figures == []
+
+
+def test_hit_and_damage_shows_the_mesos_players_reported(fight, fight_kb, profiles):
+    """Ported from the old Play tools' Hit & damage (test_community): the mesos range players reported and its
+    average per kill; a monster nobody reported says so."""
+    profiles.add("Kiwi", "Thief", "Thief", 3)
+    d, t = fight._detail, fight.t
+    d.open_view("monster", SNAIL_KEY)
+    assert _figures(d)[t("calc_mesos")] == ("18–23", t("md_avg", n=f"{fight_kb.mesos_per_kill(SNAIL_KEY):,.0f}"))
+    assert f"{fight_kb.mesos_per_kill(SNAIL_KEY):,.0f}" == "12"
+    d.open_view("monster", RED_SNAIL)
+    assert _figures(d)[t("calc_mesos")] == ("\u2014", t("mesos_none"))
+
+
+def test_the_hebrew_figures_read_left_to_right(fight_kb, qapp, settings, profiles):
+    from maplehelper import bidi
+    from maplehelper.i18n import I18n
+    from maplehelper.ui.gamesearch import GameSearch
+    c = profiles.add("Kiwi", "Thief", "Assassin", 15)
+    c.stats = {"acc": 60, "dmg_min": 20, "dmg_max": 40}
+    w = GameSearch(fight_kb, settings, profiles, I18n("he"))
+    try:
+        w._detail.open_view("monster", STUMP)
+        values = [f.figure[1] for f in w._detail.hit_figures if f.figure[1] != "\u2014"]    # (no mesos reported)
+        assert len(values) == 6 and all(bidi.LRI in v and bidi.PDI in v for v in values)
+        from PySide6.QtCore import Qt
+        assert w._detail.layoutDirection() == Qt.RightToLeft
+    finally:
+        delete_window(qapp, w)
+
 
 
 # ---------------------------------------------------------------- its place on the screen

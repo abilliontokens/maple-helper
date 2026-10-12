@@ -158,27 +158,36 @@ def test_the_loot_log_button_is_the_loot_windows_setting(bar):
     assert w._loot.isChecked()
 
 
-@pytest.mark.parametrize("key,text", [("scroll_planner", "Scrolls"), ("gear_advisor", "Gear"),
-                                      ("craft_advisor", "Crafting")])
-def test_each_tool_in_the_tools_card_is_its_windows_setting(bar, key, text):
-    """Scrolls, Gear and Crafting, in the Tools card: each flips its window's setting and names it in tool_toggled,
-    and refresh follows the setting (the window's ✕ turned it off)."""
+TOOL_NAMES = ["Grind spots", "Farm", "Quests", "Citizenship", "Build & skills", "Gear", "Scrolls", "Crafting",
+              "Cash shop"]
+
+
+@pytest.mark.parametrize("key,name", [("grind_spots", "Grind spots"), ("farm_tool", "Farm"), ("quest_tool", "Quests"),
+                                      ("citizenship", "Citizenship"), ("build_tool", "Build & skills"),
+                                      ("gear_advisor", "Gear"), ("scroll_planner", "Scrolls"),
+                                      ("craft_advisor", "Crafting"), ("cash_shop", "Cash shop")])
+def test_each_tool_in_the_tools_card_is_its_windows_setting(bar, key, name):
+    """Each tool in the Tools card flips its window's setting and names it in tool_toggled, and refresh follows the
+    setting (the window's ✕ turned it off), the button lit while it is on."""
+    from maplehelper.ui import gametoolbar
     w, s = bar
     w.refresh()
     seen = []
     w.tool_toggled.connect(lambda k: seen.append((k, s[k])))
-    assert w._tools[key].text() == text and not w._tools[key].isChecked()
-    w._tools[key].click()
-    w._tools[key].click()
+    b = w._tools[key]
+    assert b.accessibleName() == name and b.text() == name.replace("&", "&&")   # "&" alone: Qt's shortcut mark
+    assert b.toolTip() == w.t(gametoolbar.TOOLS[key] + "_tip") and not b.isChecked()
+    b.click()
+    b.click()
     assert seen == [(key, True), (key, False)]
     s[key] = True
     w.refresh()
-    assert w._tools[key].isChecked()
+    assert b.isChecked()
     assert [k for k in w._tools if w._tools[k].isChecked()] == [key]     # the other ones stay off
 
 
 def test_tools_opens_its_card_under_the_bar_and_a_pick_tools_again_or_a_move_closes_it(bar):
-    """Tools, after Loot Log and Grind, lit while its card is up; the card under the lying bar holds the three tools.
+    """Tools, after Loot Log and Grind, lit while its card is up; the card under the lying bar holds the nine tools.
     It goes on a pick (the window opening), on Tools again, and when the bar is dragged away."""
     from maplehelper.ui import gametoolbar
     w, s = bar
@@ -186,7 +195,7 @@ def test_tools_opens_its_card_under_the_bar_and_a_pick_tools_again_or_a_move_clo
     keys = [key for _, key in w._buttons()]
     at = keys.index("tb_loot")
     assert keys[at + 1:at + 3] == ["tb_grind", "tb_tools"] and w._tools_btn.text() == "Tools"
-    assert [b.text() for b in w._tools.values()] == ["Scrolls", "Gear", "Crafting"] and not w._menu.isVisible()
+    assert [b.accessibleName() for b in w._tools.values()] == TOOL_NAMES and not w._menu.isVisible()
     w._tools_btn.click()
     m = w._menu
     assert m.isVisible() and w._tools_btn.property("on") is True
@@ -210,6 +219,29 @@ def test_the_tools_card_stands_beside_an_upright_bar(bar):
     m = w._menu
     assert m.x() + gametoolbar.SHADOW > w.x() + w.width() - gametoolbar.SHADOW      # at its side, not under it
     assert abs(m.y() + gametoolbar.SHADOW - w._tools_btn.mapToGlobal(QPoint(0, 0)).y()) <= 8
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_tools_card_reads_in_rows_from_the_leading_edge_all_one_width(qapp, isolated_store, lang):
+    """The nine tools in TOOLS' order, MENU_COLS a row read from the leading edge (the right, in Hebrew), every
+    button as wide as the widest whatever the language's words."""
+    from maplehelper.ui import gametoolbar
+    w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n(lang))
+    try:
+        w.refresh()
+        w._tools_btn.click()
+        t, cols = I18n(lang), gametoolbar.MENU_COLS
+        buttons = list(w._tools.values())
+        assert [b.accessibleName() for b in buttons] == [t(name) for name in gametoolbar.TOOLS.values()]
+        assert len({b.width() for b in buttons}) == 1
+        for i, b in enumerate(buttons):
+            row, col = divmod(i, cols)
+            assert b.y() == buttons[row * cols].y() and (row == 0 or b.y() > buttons[(row - 1) * cols].y())
+            if col:
+                before = buttons[i - 1]
+                assert b.x() < before.x() if lang == "he" else b.x() > before.x()
+    finally:
+        w.close()
 
 
 def test_the_tools_card_goes_once_the_mouse_has_been_away_a_second(bar, monkeypatch):
@@ -689,12 +721,11 @@ def _spare_x(s):
 
 
 def test_it_opens_just_above_the_minimap_box(bar):
-    """Above LOCATION.box (the minimap window found, or the box the reads use), not the drawn box in the settings."""
+    """Above LOCATION.box (the minimap window found at the game's top left)."""
     from maplehelper.ui import gametoolbar
     from maplehelper.ui.location import LOCATION
     w, s = bar
     x = _spare_x(s)
-    s["minimap_region"] = {"x": x + 50, "y": 400, "w": 100, "h": 100}  # drawn: only the fallback
     LOCATION.set_box({"x": x, "y": 300, "w": 200, "h": 200})          # 1:1 on the offscreen screen
     w.refresh()
     assert w.pos() == QPoint(x, 300 - w.height() - gametoolbar.GAP)   # its left edge lined up with the box's

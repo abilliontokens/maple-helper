@@ -77,6 +77,7 @@ class Segmented(QFrame):
         """per_row: segments per row, in equal rows (the six AI providers: two of three, one row of six was wider
         than Settings)."""
         super().__init__(objectName="Segmented")
+        self._rtl = rtl
         from PySide6.QtWidgets import QGridLayout
         lay = QGridLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
@@ -87,7 +88,7 @@ class Segmented(QFrame):
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
         for i, (label, value) in enumerate(options):
-            b = QPushButton(bidi.plain(label, rtl), objectName="Segment")
+            b = QPushButton(bidi.button(label, rtl), objectName="Segment")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
             b.setProperty("value", value)
@@ -115,7 +116,7 @@ class Segmented(QFrame):
         """A segment's new text, its width measured again ("Quests for level 31" was cut to the width of the
         label it had before the level was known)."""
         b = self.group.buttons()[i]
-        b.setText(text)
+        b.setText(bidi.button(text, self._rtl))
         self._fit(b)
 
     def value(self):
@@ -511,15 +512,6 @@ class Stepper(QFrame):
             self.setValue(lo)
         self._sync()
 
-    def setMaximum(self, hi: int):
-        """Raise/lower the ceiling: the typed-value check and the + button follow (a value above moves down, emits)."""
-        self.hi = hi
-        from PySide6.QtGui import QIntValidator
-        self.edit.setValidator(QIntValidator(self.lo, hi, self))
-        if self._v > hi:
-            self.setValue(hi)
-        self._sync()
-
     def setValue(self, v: int):
         v = max(self.lo, min(self.hi, int(v)))
         if v != self._v:
@@ -680,41 +672,17 @@ class AdaptiveRow(QWidget):
         self._lay.setAlignment(self._side, Qt.AlignVCenter if wide else Qt.AlignLeft)
 
 
-class WrapLink(QLabel):
-    """A link-styled action whose text wraps (a QPushButton#Link never does: a long one widened the window)."""
-
-    clicked = Signal()
-
-    def __init__(self, text: str = "", rtl: bool = False):
-        super().__init__()
-        self.setObjectName("WrapLink")
-        self.setWordWrap(True)
-        self.setTextFormat(Qt.RichText)
-        self.setCursor(Qt.PointingHandCursor)
-        # reachable with Tab and run with Enter or Space, like the buttons around it (a QLabel takes no focus:
-        # "Read my stats from the screen" was mouse-only)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self._rtl = rtl
-        self.set_text(text)
-
-    def set_text(self, text: str) -> None:
-        import html
-        self.setAccessibleName(text)        # the plain words, not the rich-text markup around them
-        d, side = ("rtl", "right") if self._rtl else ("ltr", "left")
-        self.setText(f"<div dir='{d}' align='{side}'><span style='color:{theme.accent_text()}; font-weight:500;'>"
-                     f"{html.escape(bidi.plain(text, self._rtl))}</span></div>")
-
-    def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
-            self.clicked.emit()
-            return
-        super().mouseReleaseEvent(e)
-
-    def keyPressEvent(self, e):
-        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and not e.isAutoRepeat():
-            self.clicked.emit()
-            return
-        super().keyPressEvent(e)
+def clear(layout) -> None:
+    """Everything out of a layout a window fills again, the layouts inside it emptied too. Each widget hidden now:
+    deleteLater alone left the old rows drawn under the new ones."""
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.hide()
+            w.deleteLater()
+        elif item.layout() is not None:
+            clear(item.layout())
 
 
 def follow_typing(edit, rtl: bool) -> None:

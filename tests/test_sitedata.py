@@ -331,57 +331,6 @@ def test_chat_cards_show_skill_changes_and_pets(real_site):
         assert any(bare(w.text()) == "Closed test" for w in pet.findChildren(QLabel, "SourceTag"))
 
 
-@pytest.mark.parametrize("lang", ["he", "en"])
-def test_play_tools_build_and_bag_pages(real_site, isolated_store, lang):
-    from PySide6.QtWidgets import QApplication, QFrame, QLabel
-    app = QApplication.instance() or QApplication([])
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    p = isolated_store.Profiles()
-    p.add("Kiwi", "Warrior", "Fighter", 35)
-    d = ToolsDialog(real_site, p, isolated_store.Settings(), lang, "", {}, "build")
-    d.show()
-    app.processEvents()
-    # the SP table: a chip at the first mention of a changed skill, its changes on hover. Which skills the Warrior
-    # guide's table names is the guide's (Final Attack: Axe and Rage tonight): every chip is once, a changed skill
-    # of this character's line (never the Page's), and the guide still names some of them
-    html = d.build_view.toHtml()
-    chips = re.findall(r"change:(skill/[\w-]+)", html)
-    changed = set(sitedata.skill_changes(real_site))
-    assert chips and set(chips) <= changed
-    assert all(chips.count(k) == 1 for k in chips) and not any(k.startswith("skill/page__") for k in chips)
-    assert all(k.split("/")[1].split("__")[0] in ("warrior", "fighter", "beginner") for k in chips)
-    shown = []
-    from maplehelper.ui import terms
-    real = terms.show_html
-    terms.show_html = lambda body, rtl=False: shown.append(body)
-    try:
-        d._skill_change_tip("change:" + chips[0])
-    finally:
-        terms.show_html = real
-    ch = sitedata.skill_change(real_site, chips[0])
-    assert shown and all(str(v) in shown[0] for row in ch.changes[:1] for v in row[1:3] if v not in (None, ""))
-    # the community tier card: one row for a Fighter, a grade per column
-    cards = d.build_tier.itemAt(0).widget().findChildren(QFrame, "Card")
-    assert len(cards) == 1                                     # a card a 2nd job (a Bowman gets two)
-    card = cards[0]
-    assert isinstance(card, QFrame) and any(bare(w.text()) in ("קהילה", "Community") for w in card.findChildren(QLabel, "SourceTag"))
-    assert len(card.findChildren(QLabel, "TagGood")) + len(card.findChildren(QLabel, "TagWarn")) + \
-        len([w for w in card.findChildren(QLabel, "Tag")]) == 8
-    # the bag page: pets sold now first, then easiest to level, then all twelve
-    d.show_page(PAGES.index("more"))
-    app.processEvents()
-
-    def names():
-        return [bare(d.pet_list.itemAt(i).widget().findChild(QLabel, "CardName").text())
-                for i in range(d.pet_list.count())]
-    assert names() == ["Brown Kitty", "Pink Bunny", "Husky"]
-    d.pet_filter.group.buttons()[1].click()
-    assert names()[0] == "Black Pig" and len(names()) == 12
-    d.pet_filter.group.buttons()[2].click()
-    assert names()[0] == "Brown Kitty" and names()[-1] == "Snail"
-    d.close()
-
-
 def test_a_skill_change_note_reads_in_hebrew_when_translated(real_site):
     """The tooltip showed NiaMeowDB's English note under "(in English)" and read as a jumble (the owner's report)."""
     from maplehelper.i18n import I18n

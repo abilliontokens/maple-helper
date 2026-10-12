@@ -139,7 +139,7 @@ def test_short_english_names_stay_whole_in_hebrew():
     he, en = I18n("he"), I18n("en")
     plan = he("ob_need_plan")
     assert f"Claude{NBSP}Code" in plan          # (the plan line names Claude Code since UX-10)
-    assert f"Free{NBSP}Market" in he("sell_why_no_price")
+    assert f"Free{NBSP}Market" in he("gw_profit_tip")
     assert "Claude Code" in en("ob_need_plan")                    # English lines wrap normally
     # a name through a placeholder; a long KB name stays as spelled (bidi keeps it whole by that spelling)
     assert f"Red{NBSP}Snail" in he("other_char_switch", name="Red Snail")
@@ -174,7 +174,7 @@ def test_windows_wording_is_unchanged(monkeypatch):
 
 
 def test_hebrew_addresses_the_player_in_plural():
-    assert "שלכם" in I18n("he")("q_no_match") and "שלך." not in I18n("he")("q_no_match")
+    assert "שלכם" in I18n("he")("train_none") and "שלך." not in I18n("he")("train_none")
 
 
 @pytest.mark.parametrize("key", ["appearance_dark", "appearance_light", "q_needs", "q_gets"])
@@ -185,7 +185,7 @@ def test_unused_audit_strings_are_gone(key):
 def test_no_default_key_letters_the_kb_does_not_give():
     # the KB says key layouts can be rebound (pages/guide/controls-and-settings.md) and names no Stat/Inventory key
     from maplehelper import glossary
-    texts = [v[lang] for k in ("inv_not_found", "my_stats_hint", "sell_body") for v in [STRINGS[k]] for lang in v]
+    texts = [v[lang] for k in ("inv_not_found", "gs_need_stats", "gs_read_tip") for v in [STRINGS[k]] for lang in v]
     texts += list(glossary.APP["ACC"])
     assert not any(re.search(r"\(\**[SI]\** key\)|מקש \**[SI]\b", s) for s in texts)
 

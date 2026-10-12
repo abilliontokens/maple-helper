@@ -314,21 +314,7 @@ def test_a_hidden_first_row_leaves_no_separator_on_top(qapp):
     sec.close()
 
 
-# --- keyboard -------------------------------------------------------------------------------------------------
-
-def test_wrap_link_is_reachable_and_runs_from_the_keyboard(qapp):
-    from PySide6.QtCore import Qt
-    from PySide6.QtTest import QTest
-    from maplehelper.ui.controls import WrapLink
-    link = WrapLink("Read my stats from the screen")
-    hits = []
-    link.clicked.connect(lambda: hits.append(1))
-    assert link.focusPolicy() & Qt.TabFocus
-    assert link.accessibleName() == "Read my stats from the screen"
-    QTest.keyClick(link, Qt.Key_Return)
-    QTest.keyClick(link, Qt.Key_Space)
-    assert hits == [1, 1]
-
+# --- microphone -----------------------------------------------------------------------------------------------
 
 def test_a_long_microphone_name_never_widens_settings(env, monkeypatch):
     """"Microphone (Logitech PRO X Wireless Gaming Headset)" pushed the window wider than the screen showed."""

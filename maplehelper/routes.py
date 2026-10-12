@@ -311,12 +311,6 @@ class Graph:
         hits.sort(key=lambda m: (not m.town, -len(self.edges[m.id]), m.id))
         return hits[0].id if hits else None
 
-    def not_in_game(self, name: str) -> bool:
-        """A map the KB has by this name, none of them in the game (Orbis, El Nath)."""
-        t = re.sub(r"\s+", " ", name.strip()).lower()
-        return not self.exact(name) and any(e.get("category") == "map" and e.get("name", "").lower() == t
-                                            for e in self.kb.entities.values())
-
     def of_key(self, key: str) -> str | None:
         """The map a KB entity is: a map's own key, or the map an NPC stands on."""
         cat, _, slug = key.partition("/")

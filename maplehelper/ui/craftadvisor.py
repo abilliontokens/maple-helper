@@ -4,9 +4,13 @@ modelled on (maplestorycrafting.com/planner.html): inputs on one side, the Forge
 "Crafting" (CraftAdvisor) takes the inputs on three tabs: what to craft — a table of the gear the class can hold
 with its level, the class's attack stat, the recipe, the craft cost from raw mats and what crafting saves against
 the NPC's price, a Make count each, the search finding every other recipe; the bag — what the plan uses plus what
-is carried, a count each; the professions — the character's level, each profession's level and Mastery bar %, and
-the crafting EXP per level with the player's own measured values. A one-line summary under the title says where
-the plan stands on every tab.
+is carried, a count each; the professions — the character's level, then a switch of the six professions (a tile
+each, the character's level in it) and the picked one's card: its level and Mastery bar %, the EXP to its next
+level and the character level that asks for, what that level opens, the crafting EXP table with the player's own
+measured values; under it the profession's recipes (what the level allows, every one, one level; searched by a
+recipe's or an ingredient's name; each ingredient's item page a click away, where it comes from on its row) or
+its teacher, where to craft, and its first and master quests. A one-line summary under the title says where the
+plan stands on every tab.
 
 "Forge plan" (ForgePlanWindow) is a window of its own docked beside it: the plan craftplan.py makes of the inputs —
 its totals, what to farm first and where it drops, then the crafts in order (materials, the profession level-ups
@@ -25,31 +29,33 @@ import logging
 import re
 from html import escape
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPixmap
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .. import bidi, craftplan, itemterms
+from .. import bidi, crafting, craftplan, itemterms, quests, tables
 from ..craftplan import CATEGORY_ORDER, DEFAULT_MODE, DISCIPLINE_KEY, FarmItem, Plan, Row, Stage, Step
 from ..i18n import NBSP, I18n
 from ..kb import KnowledgeBase
 from ..store import Character, Profiles, Settings
 from . import mapview, theme
-from .controls import Segmented
+from .controls import BalancedRow, FlowLayout, Segmented
 from .gamesearch import SCROLLBAR_W, _SearchBox, glass_qss, rim
 from .glass import EdgeResize
+from .lookpick import line_icon
 from .npcoverlay import (
     BOTTOM,
     GEOM_DEBOUNCE_MS,
@@ -68,6 +74,7 @@ from .npcoverlay import (
     set_capturable,
 )
 from .npcoverlay import keep_over_game
+from .toolwindow import NAV
 from .widgets import fit_picture, zoom_on_hover
 
 log = logging.getLogger("maplehelper")
@@ -112,6 +119,31 @@ BADGE_KEYS = {"prep": "cp_badge_prep", "level": "cp_badge_level", "final": "cp_b
 LOSS = "#FF8A80"  # crafting dearer than the shop: a warm red that reads on every glass tint (ink: darker on white)
 # the stage kinds' badges, readable on every glass whatever accent is picked (the accent lights what is chosen)
 BADGE_COLORS = {"prep": "#64B5FF", "level": "#FFB066", "final": "#4CD07D"}
+# the Professions tab: each profession's line icon (assets/icons/toolbar, Lucide's), and what the tab shows of it
+PROF_ICONS = {
+    "smithing": "hammer",
+    "weaponcrafting": "sword",
+    "tailoring": "shirt",
+    "woodcrafting": "bow-arrow",
+    "leatherworking": "footprints",
+    "arcforge": "wand-sparkles",
+}
+# the switch under the profession's card, in the owner's order (the old crafting page's): its teacher and quests, then
+# its recipes; it opens on the recipes
+PROF_MODES = (("teacher", "craft_mode_teacher"), ("recipes", "craft_mode_recipes"))
+TILE_ICON = 16  # a profession tile's line icon
+TITLE_ICON = 18  # ... the picked profession's, on its card
+GLYPH = 12  # the small line icon before where an ingredient comes from (a monster, a coin, a profession)
+RECIPE_PIC = 36  # a recipe card's product
+ING_PIC = 22  # an ingredient's picture, a quest need's
+NEXT_PIC = 26  # what the next level opens, pictured on the profession's card
+NPC_PIC = (48, 56)  # the teacher (NPCs stand taller than wide)
+NEXT_PICS = 8  # the next level's products pictured before "+N"
+RECIPES_SHOWN = 30  # recipe cards listed before "and N more"
+BAR_H = 6  # the Mastery bar
+EXP_COLOR = "#64B5FF"  # EXP chips: the Loot Log's EXP blue (ink: darker on the white glass)
+WARN = BADGE_COLORS["level"]  # a level the character can't reach yet: the level-up badge's orange
+LV_GAP = NBSP + "\u2006"  # Hebrew "רמה 1": with a plain space the 1's ink touched the word ("רמה1", TL2-16)
 
 
 def _rgba(color: str, alpha: float) -> str:
@@ -134,6 +166,7 @@ def qss(settings) -> str:
         f" font-size: 11px; font-weight: 700; }}"
         for kind, c in BADGE_COLORS.items()
     )
+    chip = "border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 700;"
     return (
         glass_qss()
         + f"""
@@ -208,6 +241,49 @@ QCheckBox {{ background: transparent; color: {text}; spacing: 0; }}
 QCheckBox::indicator {{ background: {fill1}; border: 1px solid {rim(0.25)}; border-radius: 5px;
                         width: 14px; height: 14px; }}
 QCheckBox::indicator:checked {{ background: {fill}; border-color: {fill}; }}
+QPushButton#ProfTile {{ background: {fill1}; border: 1px solid transparent; border-radius: 10px; padding: 0;
+                        min-height: 0; text-align: left; }}
+QPushButton#ProfTile:hover:!checked {{ background: {fill2}; }}
+QPushButton#ProfTile:checked {{ background: {_rgba(fill, 0.16)}; border: 1px solid {fill}; }}
+#TileName {{ color: {text}; font-size: 12px; font-weight: 600; }}
+#TileName[lit="true"] {{ color: {lit}; }}
+#TileLv {{ color: {muted}; font-size: 11px; }}
+QFrame#Card {{ background: {fill1}; border: 1px solid transparent; border-radius: 12px; }}
+QFrame#Card[lit="true"] {{ background: {_rgba(fill, 0.10)}; border: 1px solid {fill}; }}
+#ProfTitle {{ color: {text}; font-size: 15px; font-weight: 700; }}
+#CardTitle {{ color: {text}; font-size: 13px; font-weight: 700; }}
+#CardSub {{ color: {muted}; font-size: 12px; }}
+#Caption {{ color: {muted}; font-size: 10px; font-weight: 700; padding: 4px 2px 0 2px; }}
+#Text {{ color: {text}; font-size: 12px; }}
+#Warn {{ color: {ink(WARN)}; font-size: 11px; font-weight: 600; }}
+#CellOn {{ color: {lit}; font-size: 13px; font-weight: 700; }}
+QLabel#Chip {{ color: {text}; background: {rim(0.10)}; {chip} }}
+QLabel#ChipOn {{ color: {lit}; background: {_rgba(fill, 0.16)}; {chip} }}
+QLabel#ChipExp {{ color: {ink(EXP_COLOR)}; background: {_rgba(EXP_COLOR, 0.16)}; {chip} }}
+QLabel#ChipWarn {{ color: {ink(WARN)}; background: {_rgba(WARN, 0.16)}; {chip} }}
+QPushButton#Scope {{ background: {fill1}; color: {muted}; border: 1px solid transparent; border-radius: 11px;
+                     min-height: 22px; max-height: 22px; padding: 0 10px; font-size: 12px; font-weight: 600;
+                     text-align: center; }}
+QPushButton#Scope:hover:!checked {{ background: {fill2}; color: {text}; }}
+QPushButton#Scope:checked {{ background: {_rgba(fill, 0.16)}; border: 1px solid {fill}; color: {lit}; }}
+QPushButton#LvChip {{ background: {fill1}; color: {text}; border: 1px solid transparent; border-radius: 11px;
+                      min-width: 20px; min-height: 22px; max-height: 22px; padding: 0 2px; font-size: 11px;
+                      font-weight: 700; text-align: center; }}
+QPushButton#LvChip[locked="true"] {{ color: {muted}; font-weight: 600; }}
+QPushButton#LvChip:hover:!checked {{ background: {fill2}; color: {text}; }}
+QPushButton#LvChip:checked {{ background: {_rgba(fill, 0.16)}; border: 1px solid {fill}; color: {lit}; }}
+QPushButton#Link {{ background: transparent; color: {lit}; border: none; border-radius: 0; padding: 1px 0;
+                    font-size: 12px; font-weight: 700; text-align: left; }}
+QPushButton#Link:hover {{ background: transparent; text-decoration: underline; }}
+QFrame#IngRow {{ background: transparent; border: none; border-radius: 8px; }}
+QFrame#IngRow[link="true"]:hover {{ background: {fill2}; }}
+#IngName {{ color: {text}; font-size: 12px; }}
+#IngWhere {{ color: {muted}; font-size: 11px; }}
+#Chevron {{ color: {muted}; font-size: 14px; }}
+#NeedHead {{ color: {muted}; font-size: 11px; font-weight: 700; padding-top: 2px; }}
+QFrame#FoldHead[flat="true"] {{ background: transparent; border: none; border-top: 1px solid {rim(0.08)};
+                                border-radius: 0; }}
+QFrame#FoldHead[flat="true"]:hover {{ background: transparent; }}
 """
     )
 
@@ -261,6 +337,19 @@ def _label(text: str, name: str, wrap: bool = False, align=None) -> QLabel:
     return w
 
 
+def _button_words(words: str, rtl: bool) -> str:
+    """A button's words (bidi.button: one right-to-left isolate in Hebrew), a lone "&" kept, not a shortcut's mark."""
+    return bidi.button(words, rtl).replace("&", "&&")
+
+
+def _rename(w: QWidget, name: str) -> None:
+    """Another of the style's names for a widget, its look re-polished (only when it changed: a polish is not free)."""
+    if w.objectName() != name:
+        w.setObjectName(name)
+        w.style().unpolish(w)
+        w.style().polish(w)
+
+
 def _min_width(w: QWidget) -> int:
     """The width a cell needs: a wrapping label (a column's header) its longest word, anything else its own hint."""
     if isinstance(w, QLabel) and w.wordWrap():
@@ -292,13 +381,14 @@ class _Pictures:
     def __init__(self, kb):
         self._kb = kb
         self._paths: dict[str, object] = {}
-        self._fitted: dict[tuple[str, int, float], QPixmap] = {}
+        self._fitted: dict[tuple[str, int, int, float], QPixmap] = {}
 
-    def label(self, key: str, size: int) -> QLabel:
-        """The picture in a fixed square (an item with no KB key: the square empty, the columns still line up),
-        shown large on hover."""
+    def label(self, key: str, size: int, h: int | None = None, caption: str = "") -> QLabel:
+        """The picture in a fixed box, size wide and h tall (a square by default; an item with no KB key: the box
+        empty, the columns still line up), shown large on hover with its caption under it."""
+        h = size if h is None else h
         pic = QLabel(objectName="Pic")
-        pic.setFixedSize(size, size)
+        pic.setFixedSize(size, h)
         pic.setAlignment(Qt.AlignCenter)
         if not key:
             return pic
@@ -308,27 +398,27 @@ class _Pictures:
         if not path:
             return pic
         dpr = pic.devicePixelRatioF()
-        pm = self._fitted.get((key, size, dpr))
+        pm = self._fitted.get((key, size, h, dpr))
         if pm is None:
             raw = QPixmap(str(path))
-            pm = fit_picture(raw, size, size, pic) if not raw.isNull() else QPixmap()
-            self._fitted[(key, size, dpr)] = pm
+            pm = fit_picture(raw, size, h, pic) if not raw.isNull() else QPixmap()
+            self._fitted[(key, size, h, dpr)] = pm
         if not pm.isNull():
             pic.setPixmap(pm)
-            zoom_on_hover(pic, path)
+            zoom_on_hover(pic, path, caption)
         return pic
 
 
 class _Stepper(QFrame):
     """A small − n + counter in the overlay's own look: a spin box's arrows don't survive the dark glass, and the
-    counts are usually small clicks."""
+    counts are usually small clicks. Its − and + grey out at its floor and ceiling."""
 
     changed = Signal(int)
 
-    def __init__(self, value: int = 0, hi: int = MAX_MAKE):
+    def __init__(self, value: int = 0, hi: int = MAX_MAKE, lo: int = 0):
         super().__init__(objectName="Stepper")
-        self._hi = hi
-        self._v = 0
+        self._lo, self._hi = lo, hi
+        self._v = lo
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 2, 2, 2)
         row.setSpacing(2)
@@ -346,11 +436,16 @@ class _Stepper(QFrame):
     def value(self) -> int:
         return self._v
 
+    def set_top(self, hi: int) -> None:
+        """Another ceiling (a profession's top level, from the KB): the count kept under it."""
+        self._hi = max(self._lo, int(hi))
+        self.setValue(self._v)
+
     def setValue(self, v: int) -> None:
-        v = min(self._hi, max(0, int(v)))
+        v = min(self._hi, max(self._lo, int(v)))
         self._v = v
         self._num.setText(str(v))
-        self._minus.setEnabled(v > 0)
+        self._minus.setEnabled(v > self._lo)
         self._plus.setEnabled(v < self._hi)
         self.changed.emit(v)
 
@@ -360,11 +455,13 @@ class _FoldHead(QFrame):
 
     clicked = Signal()
 
-    def __init__(self):
+    def __init__(self, flat: bool = False):
         super().__init__(objectName="FoldHead")
         self.setCursor(Qt.PointingHandCursor)
+        if flat:
+            self.setProperty("flat", True)  # at a card's foot: no fill of its own, a hairline over it
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 7, 10, 7)
+        row.setContentsMargins(*((0, 9, 0, 1) if flat else (10, 7, 10, 7)))
         row.setSpacing(6)
         self.title = QLabel(objectName="FoldTitle")
         self.mark = QLabel(objectName="FoldMark")
@@ -373,6 +470,116 @@ class _FoldHead(QFrame):
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(e)
+
+
+class _Glyph(QLabel):
+    """A small line icon (assets/icons/toolbar, lookpick.line_icon) in one of the glass's colours, its tone "muted",
+    "text" or "lit" (the accent's): drawn again whenever the glass or the accent changes (CraftAdvisor._paint_glyphs),
+    in the colours it was last given."""
+
+    def __init__(self, name: str, px: int, tone: str = "muted"):
+        super().__init__(objectName="Glyph", alignment=Qt.AlignCenter)
+        self.icon_name, self.px, self.tone = name, px, tone
+        self._colours: dict[str, str] = {}
+        self.setFixedSize(px, px)
+
+    def paint(self, colours: dict[str, str] | None = None) -> None:
+        if colours is not None:
+            self._colours = colours
+        if self._colours:
+            icon = line_icon(self.icon_name, self._colours[self.tone])
+            self.setPixmap(icon.pixmap(QSize(self.px, self.px), self.devicePixelRatioF()))
+
+
+class _Bar(QWidget):
+    """The Mastery bar: the track in the glass's own fill, the part earned in the accent, filled from the reading end
+    (the right, in Hebrew), like the grind window's bars."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(BAR_H)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.frac, self.colour = 0.0, ""
+
+    def set(self, frac: float, colour: str) -> None:
+        frac = min(1.0, max(0.0, float(frac)))
+        if (frac, colour) != (self.frac, self.colour):
+            self.frac, self.colour = frac, colour
+            self.update()
+
+    def paintEvent(self, e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        r = QRectF(self.rect())
+        rad = r.height() / 2
+        p.setBrush(theme.qcolor(palette().fill2))  # read at paint: the white glass's track is dark
+        p.drawRoundedRect(r, rad, rad)
+        if self.frac > 0 and self.colour:
+            w = max(r.height(), r.width() * self.frac)
+            p.setBrush(theme.qcolor(self.colour))
+            p.drawRoundedRect(QRectF(r.right() - w if self.isRightToLeft() else r.left(), r.top(), w, r.height()), rad, rad)
+        p.end()
+
+
+class _ProfTile(QPushButton):
+    """One profession in the Professions tab's switch: its line icon over its name and the character's level in it,
+    lit in the accent while it is the one shown (a checkable button of the switch's exclusive group). Upright, so three
+    fit a row at the window's narrowest in the app's own font (Rubik's "Weaponcrafting" is 104 px)."""
+
+    def __init__(self, prof: str):
+        super().__init__(objectName="ProfTile")
+        self.prof = prof
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(6, 7, 6, 6)
+        v.setSpacing(2)
+        self.glyph = _Glyph(PROF_ICONS[prof], TILE_ICON)
+        self.name = QLabel(objectName="TileName", alignment=Qt.AlignCenter)
+        self.level = QLabel(objectName="TileLv", alignment=Qt.AlignCenter)
+        v.addWidget(self.glyph, 0, Qt.AlignHCenter)
+        v.addSpacing(1)
+        v.addWidget(self.name)
+        v.addWidget(self.level)
+        for w in (self.glyph, self.name, self.level):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents)  # the tile takes the click and the hover
+        self.toggled.connect(self._lit)
+
+    def sizeHint(self) -> QSize:
+        return self.layout().sizeHint()  # its labels', not a text button's
+
+    def minimumSizeHint(self) -> QSize:
+        return self.layout().minimumSize()
+
+    def _lit(self, on: bool) -> None:
+        self.name.setProperty("lit", on)
+        self.name.style().unpolish(self.name)
+        self.name.style().polish(self.name)
+        self.glyph.tone = "lit" if on else "muted"
+        self.glyph.paint()
+
+
+class _LinkRow(QFrame):
+    """A row a click opens a page from (an ingredient's item page, a quest need's monster or item): lit under the
+    mouse, a chevron at its end. Without a page to open it is a plain row."""
+
+    clicked = Signal()
+
+    def __init__(self, link: bool):
+        super().__init__(objectName="IngRow")
+        self._link = link
+        self.setProperty("link", link)
+        if link:
+            self.setAttribute(Qt.WA_Hover, True)
+            self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, e):
+        if self._link and e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
             self.clicked.emit()
         super().mouseReleaseEvent(e)
 
@@ -416,7 +623,19 @@ class CraftAdvisor(EdgeResize, QWidget):
         self._bag_boxes: dict[str, _SearchBox] = {}
         self._exp_boxes: dict[int, _SearchBox] = {}
         self._exp_marks: dict[int, QLabel] = {}
-        self._exp_folded = True  # the EXP table folded under the professions until the player opens it
+        self._exp_words: dict[int, QLabel] = {}  # each EXP row's "Lv. 3 → Lv. 4" (the picked profession's lit)
+        self._exp_folded = True  # the EXP table folded on the profession's card until the player opens it
+        self._prof = crafting.PROFESSIONS[0]  # the profession the Professions tab shows
+        self._prof_for = ""  # ... picked for this character's id (another character: their own highest)
+        self._prof_mode = "recipes"  # its recipes, or its teacher and quests (PROF_MODES)
+        self._scope: str | int = "now"  # the recipes: what the level allows ("now"), every one ("all"), or one level
+        self._prof_tabs: Segmented | None = None  # the Teacher & quests / Recipes switch (made with its words)
+        self._recipes_in = palette()  # the palette the recipe cards were drawn in (a name's muted aside is in its html)
+        self._infos: dict[str, crafting.Info] = {}  # each profession's teacher, stations and quests, once per KB
+        self._econ: dict[str, dict] = {}  # ... its recipes' NiaMeowDB numbers (crafting.economy), once per KB
+        self._quest_keys: dict[str, str] | None = None  # a quest's name (case and a closing "!" aside) -> its key
+        self._quest_needs: dict[str, list[dict]] | None = None  # a quest's key -> its quest_reqs rows
+        self._npc_maps: dict[str, str] | None = None  # an NPC's key -> the map it stands on
         self._opacity = OPACITY_DEFAULT
         self._placed = False  # geometry applied at least once: there is a place to remember
         self._under: QRect | None = None  # the toolbar's rect, where the window first opens
@@ -424,6 +643,7 @@ class CraftAdvisor(EdgeResize, QWidget):
         self._geom = QTimer(self, singleShot=True, interval=GEOM_DEBOUNCE_MS, timeout=self._remember)
         self._typing = QTimer(self, singleShot=True, interval=TYPE_DEBOUNCE_MS, timeout=self._fill_items)
         self._bag_typing = QTimer(self, singleShot=True, interval=TYPE_DEBOUNCE_MS, timeout=self._fill_bag)
+        self._rec_typing = QTimer(self, singleShot=True, interval=TYPE_DEBOUNCE_MS, timeout=self._fill_recipes)
         self._edit = QTimer(self, singleShot=True, interval=EDIT_DEBOUNCE_MS, timeout=self._edits_saved)
         self.setStyleSheet(qss(self._settings))
         self._build()
@@ -502,8 +722,10 @@ class CraftAdvisor(EdgeResize, QWidget):
         return page
 
     def _build_prof(self) -> QWidget:
-        """The professions: the character level, the six professions' level and bar % boxes (built once, refilled
-        from the character), then the EXP table folded under them."""
+        """The professions, top to bottom: the character level; the switch (a tile a profession, the character's
+        level in each); the picked profession's card (its level, the Mastery bar, the EXP to the next level and the
+        character level it asks for, what that level opens, the EXP table folded at its foot); then its recipes, or
+        its teacher and quests (a switch). Built once; _show_prof fills it from the character."""
         scroll, lay = _scroller()
         self._prof_lay = lay
         lay.setSpacing(8)
@@ -520,54 +742,142 @@ class CraftAdvisor(EdgeResize, QWidget):
         h.addWidget(self._lv_box)
         h.addStretch(1)
         lay.addWidget(row)
-        self._char_hint = _label("", "Note", wrap=True)
-        lay.addWidget(self._char_hint)
-        self._prof_hint = _label("", "Note", wrap=True)
-        lay.addWidget(self._prof_hint)
-        cards = QWidget()
-        grid = QGridLayout(cards)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(8)
-        # each profession: its name (the game's own word), the level box, the Mastery bar % box
-        self._prof_boxes: dict[str, tuple[QLabel, QLabel, _SearchBox, QLabel, _SearchBox]] = {}
-        for i, disc in enumerate(sorted(DISCIPLINE_KEY, key=lambda d: DISCIPLINE_KEY[d])):
-            card = QFrame(objectName="ProfCard")
-            cv = QVBoxLayout(card)
-            cv.setContentsMargins(10, 8, 10, 10)
-            cv.setSpacing(6)
-            name = _label("", "ProfName")
-            cv.addWidget(name)
-            boxes = QHBoxLayout()
-            boxes.setSpacing(6)
-            lv_word, bar_word = _label("", "FieldLabel"), _label("", "FieldLabel")
-            lv = _SearchBox(objectName="Num", maxLength=2)
-            lv.setFixedWidth(40)
-            pct = _SearchBox(objectName="Num", maxLength=3)
-            pct.setFixedWidth(46)
-            for box in (lv, pct):
-                box.setAlignment(Qt.AlignCenter)
-                box.textChanged.connect(lambda _t: self._edit.start())
-            boxes.addWidget(lv_word)
-            boxes.addWidget(lv)
-            boxes.addStretch(1)
-            boxes.addWidget(bar_word)
-            boxes.addWidget(pct)
-            cv.addLayout(boxes)
-            grid.addWidget(card, i // 2, i % 2)
-            self._prof_boxes[disc] = (name, lv_word, lv, bar_word, pct)
-        lay.addWidget(cards)
-        self._exp_head = _FoldHead()
-        self._exp_head.clicked.connect(self._fold_exp)
-        lay.addWidget(self._exp_head)
-        self._exp_body = QWidget()
-        self._exp_lay = QVBoxLayout(self._exp_body)
-        self._exp_lay.setContentsMargins(0, 0, 0, 0)
-        self._exp_lay.setSpacing(2)
-        self._exp_body.setVisible(not self._exp_folded)
-        lay.addWidget(self._exp_body)
+        # the six on one row when they fit, else two rows of three (never one alone on a row of its own)
+        self._prof_group = QButtonGroup(self)
+        self._prof_group.setExclusive(True)
+        self._tiles: dict[str, _ProfTile] = {}
+        for prof in crafting.PROFESSIONS:
+            tile = _ProfTile(prof)
+            tile.clicked.connect(lambda _=False, p=prof: self._prof_pick(p))
+            self._prof_group.addButton(tile)
+            self._tiles[prof] = tile
+        lay.addWidget(BalancedRow(list(self._tiles.values()), spacing=6))
+        lay.addWidget(self._build_prof_card())
+        self._prof_tabs_slot = QVBoxLayout()
+        self._prof_tabs_slot.setContentsMargins(0, 2, 0, 0)
+        lay.addLayout(self._prof_tabs_slot)
+        lay.addWidget(self._build_recipes())
+        lay.addWidget(self._build_teacher())
         lay.addStretch(1)
         self._prof_scroll = scroll
         return scroll
+
+    def _build_prof_card(self) -> QFrame:
+        """The picked profession's card: its icon and name with the level stepper, what it makes, the Mastery bar
+        with its % box, the way to the next level, what that level opens, and the EXP table folded at its foot."""
+        card = QFrame(objectName="Card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 8)
+        v.setSpacing(6)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        self._prof_glyph = _Glyph(PROF_ICONS[self._prof], TITLE_ICON, "lit")
+        self._prof_name = _label("", "ProfTitle")
+        self._step_word = _label("", "FieldLabel")
+        self._step = _Stepper(1, craftplan.LEVEL_CAP, lo=1)  # its top: the KB's (_show_prof)
+        self._step.changed.connect(self._prof_level_set)
+        top.addWidget(self._prof_glyph, 0, Qt.AlignVCenter)
+        top.addWidget(self._prof_name, 1, Qt.AlignVCenter)
+        top.addWidget(self._step_word, 0, Qt.AlignVCenter)
+        top.addWidget(self._step, 0, Qt.AlignVCenter)
+        v.addLayout(top)
+        self._prof_makes = _label("", "Muted", wrap=True)
+        v.addWidget(self._prof_makes)
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 4, 0, 0)
+        bar.setSpacing(8)
+        self._bar = _Bar()
+        self._pct_word = _label("", "FieldLabel")
+        self._pct_box = _SearchBox(objectName="Num", maxLength=3)
+        self._pct_box.setFixedWidth(46)
+        self._pct_box.setAlignment(Qt.AlignCenter)
+        self._pct_box.setPlaceholderText("0")
+        self._pct_box.textChanged.connect(lambda _t: self._edit.start())
+        bar.addWidget(self._bar, 1, Qt.AlignVCenter)
+        bar.addWidget(self._pct_word, 0, Qt.AlignVCenter)
+        bar.addWidget(self._pct_box, 0, Qt.AlignVCenter)
+        v.addLayout(bar)
+        self._exp_line = _label("", "Text", wrap=True)
+        self._exp_line.setTextFormat(Qt.RichText)  # the EXP figures in bold
+        self._req_line = _label("", "Note", wrap=True)
+        v.addWidget(self._exp_line)
+        v.addWidget(self._req_line)
+        # what the next level opens: its words and a link to its recipes, their products' pictures under them
+        self._next_box = QWidget()
+        nv = QVBoxLayout(self._next_box)
+        nv.setContentsMargins(0, 4, 0, 0)
+        nv.setSpacing(4)
+        nh = QHBoxLayout()
+        nh.setSpacing(10)
+        self._next_words = _label("", "FieldLabel")
+        self._next_link = QPushButton(objectName="Link")
+        self._next_link.setCursor(Qt.PointingHandCursor)
+        self._next_link.setFocusPolicy(Qt.NoFocus)
+        self._next_link.clicked.connect(self._see_next)
+        nh.addWidget(self._next_words, 0, Qt.AlignVCenter)
+        nh.addWidget(self._next_link, 0, Qt.AlignVCenter)
+        nh.addStretch(1)
+        nv.addLayout(nh)
+        self._next_pics = QHBoxLayout()
+        self._next_pics.setSpacing(6)
+        nv.addLayout(self._next_pics)
+        v.addWidget(self._next_box)
+        # the EXP table: one for every profession, the plan's numbers (the player's measured ones replace the KB's)
+        self._exp_head = _FoldHead(flat=True)
+        self._exp_head.clicked.connect(self._fold_exp)
+        v.addWidget(self._exp_head)
+        self._exp_body = QWidget()
+        self._exp_lay = QVBoxLayout(self._exp_body)
+        self._exp_lay.setContentsMargins(0, 0, 0, 4)
+        self._exp_lay.setSpacing(2)
+        self._exp_body.setVisible(not self._exp_folded)
+        v.addWidget(self._exp_body)
+        self._prof_card = card
+        return card
+
+    def _build_recipes(self) -> QWidget:
+        """The Recipes side: the search (a recipe's name or an ingredient's), the scope chips (what the level allows,
+        every recipe, one level), the line saying what shows, then the cards level by level (_fill_recipes)."""
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(8)
+        self._rec_search = _SearchBox(objectName="Search")
+        self._rec_search.setClearButtonEnabled(True)
+        self._rec_search.textChanged.connect(lambda _t: self._rec_typing.start())
+        v.addWidget(self._rec_search)
+        # what the level allows / every recipe, then a chip a level (the one level's recipes)
+        self._scope_box = QWidget()
+        self._scope_flow = FlowLayout(self._scope_box, spacing=4, line_spacing=4)
+        v.addWidget(self._scope_box)
+        levels = QHBoxLayout()
+        levels.setContentsMargins(0, 0, 0, 0)
+        levels.setSpacing(8)
+        self._levels_word = _label("", "FieldLabel")
+        self._levels_word.setContentsMargins(0, 4, 0, 0)  # level with the first row of chips
+        self._levels_box = QWidget()
+        self._levels_flow = FlowLayout(self._levels_box, spacing=4, line_spacing=4)
+        levels.addWidget(self._levels_word, 0, Qt.AlignTop)
+        levels.addWidget(self._levels_box, 1)
+        v.addLayout(levels)
+        self._rec_head = _label("", "Sub", wrap=True)
+        self._rec_head.setTextFormat(Qt.RichText)
+        v.addWidget(self._rec_head)
+        self._rec_lay = QVBoxLayout()
+        self._rec_lay.setContentsMargins(0, 0, 0, 0)
+        self._rec_lay.setSpacing(8)
+        v.addLayout(self._rec_lay)
+        self._rec_box = box
+        return box
+
+    def _build_teacher(self) -> QWidget:
+        """The Teacher side: who teaches the profession and where to craft, then its first and master quests
+        (_fill_teacher)."""
+        self._teach_box = QWidget()
+        self._teach_lay = QVBoxLayout(self._teach_box)
+        self._teach_lay.setContentsMargins(0, 0, 0, 0)
+        self._teach_lay.setSpacing(8)
+        return self._teach_box
 
     def _clear_of_scrollbar(self) -> None:
         """The bodies keep a little room on their scrollbar's side (right, or left in Hebrew, where Qt moves it), and
@@ -615,10 +925,17 @@ class CraftAdvisor(EdgeResize, QWidget):
 
     def _restyle(self) -> None:
         """The accent the settings pick, in both windows' style sheets (their glass is painted in the tint by
-        _paint_glass); skipped when it is the same — a restyle re-polishes every row."""
+        _paint_glass); skipped when it is the same — a restyle re-polishes every row. The line icons and the Mastery
+        bar take the new colours, and the recipe cards are drawn again on another glass (a name's muted aside is in
+        its html)."""
         sheet = qss(self._settings)
         if sheet != self.styleSheet():
             self.setStyleSheet(sheet)
+            self._paint_glyphs()
+            self._bar.set(self._bar.frac, accent_of(self._settings)[0])
+            shown = self.isVisible() and self._c is not None and self._prof_mode == "recipes"
+            if shown and self._recipes_in != palette():  # (a hidden window draws them again as it opens)
+                self._fill_recipes()
         if self.plan_window is not None:
             self.plan_window.restyle(sheet)
 
@@ -640,11 +957,22 @@ class CraftAdvisor(EdgeResize, QWidget):
         self._pics = _Pictures(kb)
         self._pool = None
         self._choices = {}
+        self._infos, self._econ, self._quest_keys, self._quest_needs, self._npc_maps = {}, {}, None, None, None
         self._rebuild()
 
     def character_changed(self) -> None:
         self._choices = {}
         self._rebuild()
+
+    def open_with(self, arg: str) -> None:
+        """NAV.tool_requested("craft_advisor", <a profession>): the Professions tab on it ("smithing" or "Smithing").
+        Anything else leaves the window as it is (the app has shown it already)."""
+        prof = str(arg or "").strip().lower()
+        if prof not in self._tiles or self._c is None:
+            return
+        self._tabs.set_value("prof")
+        self._tab_set("prof")
+        self._prof_pick(prof)
 
     # ------------------------------------------------------------ everything again (apply_language is just this)
 
@@ -662,8 +990,10 @@ class CraftAdvisor(EdgeResize, QWidget):
             self._replan()
             return
         self._rows = craftplan.craftable(self._kb, c)
-        self._retext_prof()
+        if c.id != self._prof_for:  # another character: the tab opens on the profession they are highest in
+            self._prof_for, self._prof, self._scope = c.id, self._top_prof(c), "now"
         self._fill_exp()
+        self._show_prof()
         self._fill_items()
         self._replan()
         QTimer.singleShot(0, self, self._show_picked)
@@ -700,36 +1030,33 @@ class CraftAdvisor(EdgeResize, QWidget):
         self._bag_search.setPlaceholderText(bidi.plain(t("cp_bag_search_ph"), rtl))
         self._bag_hint.setText(bidi.plain(t("cp_bag_hint"), rtl))
         self._char_word.setText(bidi.plain(t("cp_char"), rtl))
-        self._char_hint.setText(bidi.plain(t("cp_char_tip"), rtl))
         self._lv_box.setAccessibleName(t("cp_char"))
         self._lv_box.setToolTip(t("cp_char_tip"))
-        self._prof_hint.setText(bidi.plain(t("cp_prof_hint"), rtl))
-        for disc, (name, lv_word, lv, bar_word, pct) in self._prof_boxes.items():
-            word = bidi.ltr_name(disc, rtl)
-            name.setText(word)
-            lv_word.setText(bidi.plain(t("cp_prof_lv"), rtl))
-            bar_word.setText(bidi.plain(t("cp_bar"), rtl))
-            lv.setAccessibleName(t("cp_prof_tip", disc=disc))
-            lv.setToolTip(t("cp_prof_tip", disc=disc))
-            pct.setAccessibleName(t("cp_bar_tip"))
-            pct.setToolTip(t("cp_bar_tip"))
+        for prof, tile in self._tiles.items():
+            name = crafting.NAMES[prof]
+            tile.name.setText(bidi.ltr_name(name, rtl))  # the game's own word, in English in Hebrew too
+            tile.setAccessibleName(name)
+            tile.setAccessibleDescription(t("craft_profession"))
+        self._step_word.setText(bidi.plain(t("cp_prof_lv"), rtl))
+        self._pct_word.setText(bidi.plain(t("cp_bar"), rtl))
+        self._pct_box.setAccessibleName(t("cp_bar_tip"))
+        self._pct_box.setToolTip(t("cp_bar_tip"))
+        self._rec_search.setPlaceholderText(bidi.plain(t("craft_search"), rtl))
+        if self._prof_tabs is not None:
+            self._prof_tabs_slot.removeWidget(self._prof_tabs)
+            self._prof_tabs.hide()
+            self._prof_tabs.deleteLater()
+        # "Teacher & quests": a lone "&" would be a shortcut's mark on a button
+        modes = [(t(key).replace("&", "&&"), mode) for mode, key in PROF_MODES]
+        self._prof_tabs = Segmented(modes, self._prof_mode, rtl)
+        self._prof_tabs.set_label(t("cp_tabs_a11y"))
+        for b in self._prof_tabs.group.buttons():
+            b.setFocusPolicy(Qt.NoFocus)
+        self._prof_tabs.changed.connect(self._prof_mode_set)
+        self._prof_tabs_slot.addWidget(self._prof_tabs)
         self._exp_head.title.setText(bidi.plain(t("cp_exp_table"), rtl))
         self._exp_head.mark.setText("+" if self._exp_folded else "\u2013")
-
-    def _retext_prof(self) -> None:
-        """The professions' boxes filled from the character (signals off: a re-read is not the player's edit). An
-        unlearned profession's box shows the 1 the plan counts it as, greyed (its placeholder)."""
-        c = self._c
-        self._lv_box.blockSignals(True)
-        self._lv_box.setText(str(c.level) if c.level else "")
-        self._lv_box.blockSignals(False)
-        for disc, (_name, _lw, lv, _bw, pct) in self._prof_boxes.items():
-            key = DISCIPLINE_KEY[disc]
-            for box, have, hint in ((lv, c.crafts.get(key), "1"), (pct, c.craft_pct.get(key), "0")):
-                box.blockSignals(True)
-                box.setText(str(have) if have else "")
-                box.setPlaceholderText(hint)
-                box.blockSignals(False)
+        self._paint_glyphs()
 
     def _retext_summary(self) -> None:
         """The strip under the title: the job, the level, how many items the plan makes and what it costs."""
@@ -1158,36 +1485,622 @@ class CraftAdvisor(EdgeResize, QWidget):
         lay.addWidget(box, 0, Qt.AlignVCenter)
         return row
 
+    # ------------------------------------------------------------ the professions: the switch and the card
+
+    def _top_prof(self, c: Character) -> str:
+        """The profession a character is highest in (the first of a tie; Smithing when none is learned yet): where
+        the tab opens for them."""
+        crafts = c.crafts or {}
+        return max(crafting.PROFESSIONS, key=lambda p: (int(crafts.get(p, 0) or 0), -crafting.PROFESSIONS.index(p)))
+
+    def _glyph_colours(self) -> dict[str, str]:
+        pal = palette()
+        return {"muted": pal.muted, "text": pal.text, "lit": ink(accent_of(self._settings)[0])}
+
+    def _paint_glyphs(self) -> None:
+        """Every line icon in the glass's and the accent's colours now (another look: drawn again)."""
+        colours = self._glyph_colours()
+        for g in self.findChildren(_Glyph):
+            g.paint(colours)
+
+    def _glyph(self, name: str, px: int = GLYPH, tone: str = "muted") -> _Glyph:
+        g = _Glyph(name, px, tone)
+        g.paint(self._glyph_colours())
+        return g
+
+    def _lv_words(self, key: str, n: int) -> str:
+        """ "Lv. 3", "Level 3" (key: lv_short, craft_lv_tag, craft_level_group) for a chip or a heading: in Hebrew
+        with a gap the digit's ink keeps clear of the word ("רמה1" read as one word, TL2-16)."""
+        words = self.t(key, n=n)
+        return words.replace(" ", LV_GAP, 1) if self.t.rtl else words
+
+    def _show_prof(self) -> None:
+        """The picked profession on the tab: the character level box, its tile lit, its card's stepper and bar % box
+        read from the character (signals off: a re-read is not the player's edit), then all that follows them."""
+        c = self._c
+        if c is None:
+            return
+        t, rtl, prof = self.t, self.t.rtl, self._prof
+        name = crafting.NAMES[prof]
+        self._lv_box.blockSignals(True)
+        self._lv_box.setText(str(c.level) if c.level else "")
+        self._lv_box.blockSignals(False)
+        self._tiles[prof].setChecked(True)
+        self._prof_glyph.icon_name = PROF_ICONS[prof]
+        self._prof_glyph.paint()
+        self._prof_name.setText(bidi.ltr_name(name, rtl))
+        self._prof_makes.setText(bidi.plain(t(f"craft_makes_{prof}"), rtl))
+        self._step.blockSignals(True)
+        self._step.set_top(craftplan.top_level(self._kb))  # the + greys out at the KB's own cap
+        self._step.setValue(craftplan.progress(self._kb, c, prof).level)  # a saved 50 shows as the top (TL1-6)
+        self._step.blockSignals(False)
+        self._step.setToolTip(t("cp_prof_tip", disc=name))
+        self._step.setAccessibleName(t("cp_prof_tip", disc=name))
+        pct = (c.craft_pct or {}).get(prof)
+        self._pct_box.blockSignals(True)
+        self._pct_box.setText(str(pct) if pct else "")
+        self._pct_box.blockSignals(False)
+        self._refresh_prof()
+        self._fill_mode()
+
+    def _refresh_prof(self) -> None:
+        """All that follows the levels and the bar %: each tile's level line, the picked profession's bar, its EXP to
+        the next level and the character level that one asks for, what it opens, the EXP table's row lit."""
+        c = self._c
+        if c is None:
+            return
+        t, rtl = self.t, self.t.rtl
+        table = self._settings["craft_exp_table"]
+        for prof, tile in self._tiles.items():
+            p = craftplan.progress(self._kb, c, prof, table)
+            words = self._lv_words("lv_short", p.level) + (f" · {p.pct}%" if p.pct else "")
+            tile.level.setText(bidi.plain(words, rtl))
+        pr = craftplan.progress(self._kb, c, self._prof, table)
+        self._bar.set(pr.pct / 100, accent_of(self._settings)[0])
+        if pr.next is None:
+            line = t("cp_prog_top", prof=crafting.NAMES[self._prof])
+        elif pr.exp is None:
+            line = t("cp_prog_unknown", lv=t("lv_short", n=pr.next))
+        else:
+            line = t("cp_prog", have=_mesos(pr.have), need=_mesos(pr.exp), left=_mesos(pr.left), lv=t("lv_short", n=pr.next))
+            if pr.measured:
+                line += f" ({t('cp_exp_yours')})"
+        self._exp_line.setText(bidi.paragraph_html(line, "rtl" if rtl else "ltr", style="margin:0;"))
+        asks = pr.next is not None and bool(pr.char_level)
+        if asks:
+            nxt, short = t("lv_short", n=pr.next), pr.char_level - int(c.level or 0)
+            words = (
+                t("cp_req_short", lv=nxt, char=pr.char_level, n=short)
+                if short > 0
+                else t("cp_req_ok", lv=nxt, char=pr.char_level)
+            )
+            self._req_line.setText(bidi.plain(words, rtl))
+            _rename(self._req_line, "Warn" if short > 0 else "Note")
+        self._req_line.setVisible(asks)
+        self._fill_next(pr)
+        self._mark_exp()
+
+    def _fill_next(self, pr: craftplan.Progress) -> None:
+        """What the next level opens, on the profession's card: "Lv. 4 unlocks 6 recipes", a link to them, their
+        products' pictures (each named on hover). Hidden at the cap, or when that level opens nothing."""
+        t, rtl = self.t, self.t.rtl
+        _clear(self._next_pics)
+        opens = [r for r in craftplan.profession_recipes(self._kb, self._prof) if pr.next and r.prof_lv == pr.next]
+        self._next_box.setVisible(bool(opens))
+        if not opens:
+            return
+        self._next_words.setText(bidi.plain(t("cp_next_unlocks", lv=t("lv_short", n=pr.next), n=len(opens)), rtl))
+        self._next_link.setText(_button_words(t("cp_next_see", n=len(opens)), rtl))
+        keys: dict[str, str] = {}  # each product once, though it has two recipes at that level
+        for r in opens:
+            keys.setdefault(r.product, r.key)
+        for name, key in list(keys.items())[:NEXT_PICS]:
+            self._next_pics.addWidget(self._pics.label(key or self._key_of(name), NEXT_PIC, caption=name))
+        if len(keys) > NEXT_PICS:
+            self._next_pics.addWidget(_label(bidi.plain(f"+{len(keys) - NEXT_PICS}", rtl), "Note"), 0, Qt.AlignVCenter)
+        self._next_pics.addStretch(1)
+
+    def _see_next(self) -> None:
+        """The card's link to the next level's recipes: the Recipes side on that level, scrolled up to them."""
+        c = self._c
+        if c is None:
+            return
+        pr = craftplan.progress(self._kb, c, self._prof, self._settings["craft_exp_table"])
+        if pr.next is None:
+            return
+        self._scope, self._prof_mode = pr.next, "recipes"
+        self._fill_mode()
+        bar = self._prof_scroll.verticalScrollBar()
+        QTimer.singleShot(
+            0, self, lambda: bar.setValue(self._prof_tabs.mapTo(self._prof_scroll.widget(), QPoint(0, 0)).y() - 4)
+        )
+
+    def _prof_pick(self, prof: str) -> None:
+        """A tile clicked (or open_with): the tab on that profession. A bar % still being typed is saved first, to
+        the profession it was typed for; one level picked among the recipes goes back to what the level allows."""
+        if prof not in self._tiles or self._c is None:
+            return
+        if self._edit.isActive():
+            self._edit.stop()
+            self._edits_saved()
+        self._prof = prof
+        if isinstance(self._scope, int):
+            self._scope = "now"
+        self._show_prof()
+
+    def _prof_level_set(self, v: int) -> None:
+        """The level stepper: the character's level in the profession, saved at once (Character.crafts); its tile, its
+        card and its recipes follow now, the plan once the clicks pause."""
+        c = self._profiles.active
+        if c is None:
+            return
+        c.crafts = {**(c.crafts or {}), self._prof: int(v)}
+        self._profiles.save()
+        self._refresh_prof()
+        self._fill_mode()  # the recipes it allows now, or the quests' profession chips
+        self._edit.start()
+
+    def _prof_mode_set(self, mode: str) -> None:
+        """The Recipes / Teacher & quests switch."""
+        if mode != self._prof_mode:
+            self._prof_mode = mode
+            self._fill_mode()
+
+    def _fill_mode(self) -> None:
+        """The side the switch shows, filled for the picked profession (the other waits, hidden, until picked)."""
+        recipes = self._prof_mode == "recipes"
+        if self._prof_tabs is not None:
+            self._prof_tabs.set_value(self._prof_mode)
+        self._rec_box.setVisible(recipes)
+        self._teach_box.setVisible(not recipes)
+        if recipes:
+            self._fill_recipes()
+        else:
+            self._fill_teacher()
+
+    # ------------------------------------------------------------ the professions: the recipes
+
+    def _scope_set(self, scope) -> None:
+        self._scope = scope
+        self._fill_recipes()
+
+    def _fill_recipes(self) -> None:
+        """The recipes in the scope picked — what the level allows (the newest level first, its best value on top),
+        every one (by level, the next one and the locked ones marked), or one level — with the search's words in a
+        recipe's name or an ingredient's ("Garnet Ore" finds what it goes into), as cards level by level (in a level,
+        the fewest mesos burned per EXP first: NiaMeowDB's numbers), RECIPES_SHOWN of them before "and N more". Only
+        the cards change: the search box keeps the keyboard."""
+        self._recipes_in = palette()
+        _clear(self._rec_lay)
+        _clear(self._scope_flow)
+        _clear(self._levels_flow)
+        c = self._c
+        if c is None:
+            return
+        t, rtl, prof = self.t, self.t.rtl, self._prof
+        name = crafting.NAMES[prof]
+        level = craftplan.progress(self._kb, c, prof).level
+        every = craftplan.profession_recipes(self._kb, prof)
+        levels = sorted({r.prof_lv for r in every})
+        if self._scope not in ("now", "all") and self._scope not in levels:
+            self._scope = "now"
+        scope = self._scope
+        self._levels_word.setText(bidi.plain(t("cp_prof_lv"), rtl))
+        for value, words in (("now", t("craft_mode_now")), ("all", t("craft_mode_all"))):
+            self._scope_flow.addWidget(self._scope_chip(value, words, "Scope"))
+        for lv in levels:
+            chip = self._scope_chip(lv, str(lv), "LvChip")
+            chip.setProperty("locked", lv > level)  # past the character's level: muted
+            chip.setToolTip(t("cp_level_tip", lv=t("lv_short", n=lv)))
+            chip.setAccessibleName(t("lv_short", n=lv))
+            self._levels_flow.addWidget(chip)
+        if prof not in self._econ:  # (the search refills the cards on every pause: the page is read once)
+            self._econ[prof] = crafting.economy(self._kb, prof)
+        econ = self._econ[prof]
+
+        def worth(r: craftplan.Recipe) -> crafting.Recipe | None:
+            return econ.get((r.product.casefold(), r.prof_lv, r.makes))
+
+        def order(r: craftplan.Recipe) -> tuple:  # in a level: the fewest mesos burned per EXP, then the most EXP
+            e = worth(r)
+            return (crafting.burn_per_exp(e) if e is not None else float("inf"), -r.exp, r.product.casefold(), r.num)
+
+        if scope == "now":
+            shown = sorted((r for r in every if r.prof_lv <= level), key=lambda r: (-r.prof_lv, *order(r)))
+            head = t("craft_head", n=len(shown), prof=name, lv=level)
+        elif scope == "all":
+            shown = sorted(every, key=lambda r: (r.prof_lv, *order(r)))
+            head = t("craft_head_all", n=len(shown), prof=name)
+        else:
+            shown = sorted((r for r in every if r.prof_lv == scope), key=order)
+            head = t("cp_head_level", n=len(shown), prof=name, lv=scope)
+            if scope > level:
+                head += " " + t("cp_head_locked", lv=level)
+        self._rec_head.setText(bidi.paragraph_html(head, "rtl" if rtl else "ltr", style="margin:0;"))
+        query = self._rec_search.text().strip()
+        if query:
+            shown = [r for r in shown if _match(r.product, query) or any(_match(i.name, query) for i in r.ingredients)]
+        if not shown:
+            self._rec_lay.addWidget(_label(bidi.plain(t("craft_no_match" if query else "craft_none"), rtl), "Sub", wrap=True))
+            return
+        # the best value: what the level allows, the newest level's first (the old crafting page's own pick)
+        top = worth(shown[0])
+        best = shown[0] if scope == "now" and not query and top is not None and top.exp > 0 else None
+        last = None
+        for r in shown[:RECIPES_SHOWN]:
+            if r.prof_lv != last:
+                last = r.prof_lv
+                self._rec_lay.addWidget(self._level_caption(r.prof_lv, level, scope == "all"))
+            self._rec_lay.addWidget(self._recipe_card(r, worth(r), r is best, r.prof_lv > level))
+        if len(shown) > RECIPES_SHOWN:
+            more = f"{t('cp_more', n=len(shown) - RECIPES_SHOWN)} · {t('cp_rec_more')}"
+            self._rec_lay.addWidget(_label(bidi.plain(more, rtl), "Note", wrap=True))
+
+    def _scope_chip(self, value, words: str, name: str) -> QPushButton:
+        """A chip that picks what the recipes show: lit while it is the one picked."""
+        chip = QPushButton(_button_words(words, self.t.rtl), objectName=name)
+        chip.setCheckable(True)
+        chip.setChecked(value == self._scope)
+        chip.setCursor(Qt.PointingHandCursor)
+        chip.setFocusPolicy(Qt.NoFocus)
+        chip.clicked.connect(lambda _=False, v=value: self._scope_set(v))
+        return chip
+
+    def _caption(self, text: str) -> QLabel:
+        """A section's small heading over its cards: capitals in English, Hebrew has none."""
+        rtl = self.t.rtl
+        return _label(bidi.plain(text if rtl else text.upper(), rtl), "Caption")
+
+    def _level_caption(self, lv: int, level: int, marks: bool) -> QLabel:
+        """A level's heading over its recipes ("LEVEL 4 · NEXT"); marks: the one past the character's level says so,
+        the ones after it that they are locked (every recipe shows)."""
+        words = self._lv_words("craft_level_group", lv)
+        if marks and lv == level + 1:
+            words += f" · {self.t('cp_lv_next')}"
+        elif marks and lv > level + 1:
+            words += f" · {self.t('cp_lv_locked')}"
+        return self._caption(words)
+
+    @staticmethod
+    def _card(lit: bool = False) -> tuple[QFrame, QVBoxLayout]:
+        """A card on the glass and the column inside it; lit: in the accent (the best pick)."""
+        card = QFrame(objectName="Card")
+        if lit:
+            card.setProperty("lit", True)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
+        return card, v
+
+    def _chips(self, chips: list[tuple[str, str, str]]) -> QWidget:
+        """A row of chips, each (its words, its name: Chip, ChipOn, ChipExp, ChipWarn, its tip), wrapping rather than
+        widening the card; it runs from the right in Hebrew."""
+        box = QWidget()
+        flow = FlowLayout(box, spacing=4, line_spacing=4)
+        for words, name, tip in chips:
+            chip = _label(bidi.plain(words, self.t.rtl), name)
+            if tip:
+                chip.setToolTip(tip)
+            flow.addWidget(chip)
+        return box
+
+    def _links(self, acts: list) -> QWidget:
+        """A card's links in a row (wrapping when narrow), each (its words, what a click does)."""
+        box = QWidget()
+        flow = FlowLayout(box, spacing=14, line_spacing=2)
+        for words, then in acts:
+            b = QPushButton(_button_words(words, self.t.rtl), objectName="Link")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.clicked.connect(lambda _=False, then=then: then())
+            flow.addWidget(b)
+        return box
+
+    def _recipe_card(self, r: craftplan.Recipe, worth: crafting.Recipe | None, best: bool, locked: bool) -> QFrame:
+        """One recipe: the product's picture and name (what one craft makes muted beside it), its chips — the best
+        value, the level (orange while locked), the EXP, the fee — then a row an ingredient, and at the foot what a
+        craft gains or burns at NPC prices (NiaMeowDB's numbers, when it has them) and Ask in chat."""
+        t, rtl = self.t, self.t.rtl
+        card, v = self._card(lit=best)
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        top.addWidget(self._pics.label(r.key or self._key_of(r.product), RECIPE_PIC, caption=r.product), 0, Qt.AlignTop)
+        col = QVBoxLayout()
+        col.setSpacing(5)
+        # "Screw (makes 10)": one label, the aside muted in it (two labels side by side wrapped the name early)
+        name = escape(bidi.ltr_name(r.product, rtl))
+        if r.makes > 1:
+            aside = escape(bidi.plain(f"({t('cp_makes', n=r.makes)})", rtl))
+            name += f' <span style="color:{palette().muted}; font-size:12px; font-weight:400">{aside}</span>'
+        title = _label(name, "CardTitle", wrap=True)
+        title.setTextFormat(Qt.RichText)
+        col.addWidget(title)
+        chips = [
+            (self._lv_words("craft_lv_tag", r.prof_lv), "ChipWarn" if locked else "Chip", ""),
+            (f"+{r.exp:,} EXP", "ChipExp", ""),
+            (t("cp_fee", n=_mesos(r.fee)), "Chip", ""),
+        ]
+        if best:
+            chips.insert(0, (t("craft_best"), "ChipOn", t("cp_best_tip")))
+        col.addWidget(self._chips(chips))
+        for ing in r.ingredients:
+            col.addWidget(self._ing_row(ing))
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 2, 0, 0)
+        foot.setSpacing(12)
+        if worth is not None:
+            net = t("cp_net_gain", n=_mesos(worth.net)) if worth.net >= 0 else t("cp_net_loss", n=_mesos(-worth.net))
+            line = _label(bidi.paragraph_html(net, "rtl" if rtl else "ltr", style="margin:0;"), "Muted", wrap=True)
+            line.setTextFormat(Qt.RichText)
+            foot.addWidget(line, 1)
+        else:
+            foot.addStretch(1)
+        foot.addWidget(self._links([(t("ask_short"), lambda: NAV.ask_requested.emit(t("craft_ask_recipe", item=r.product)))]),
+                       0, Qt.AlignTop)
+        col.addLayout(foot)
+        top.addLayout(col, 1)
+        v.addLayout(top)
+        return card
+
+    def _ing_row(self, ing: craftplan.Ingredient) -> QFrame:
+        """One ingredient: its picture, how many of what, where it comes from at the end (the profession that makes
+        it, the monster that drops it, or an NPC's price; every source on hover); a click opens its item page."""
+        t, rtl = self.t, self.t.rtl
+        key = ing.key or self._key_of(ing.name)
+        row = _LinkRow(bool(key))
+        h = QHBoxLayout(row)
+        h.setContentsMargins(4, 3, 6, 3)
+        h.setSpacing(8)
+        h.addWidget(self._pics.label(key, ING_PIC), 0, Qt.AlignVCenter)
+        h.addWidget(_label(bidi.ltr_name(f"{ing.qty}× {ing.name}", rtl), "IngName", wrap=True), 1)
+        if ing.optional:
+            h.addWidget(_label(bidi.plain(t("cp_optional"), rtl), "Chip"), 0, Qt.AlignVCenter)
+        icon, short, tip = self._where(ing.name, key)
+        if short:
+            h.addWidget(self._glyph(icon), 0, Qt.AlignVCenter)
+            h.addWidget(_label(bidi.plain(short, rtl), "IngWhere"), 0, Qt.AlignVCenter)
+        if key:
+            h.addWidget(_label("\u2039" if rtl else "\u203a", "Chevron"), 0, Qt.AlignVCenter)
+            row.clicked.connect(lambda k=key: NAV.item_requested.emit(k))
+        row.setToolTip("\n".join(x for x in (tip, t("cp_ing_tip") if key else "") if x))
+        return row
+
+    def _where(self, name: str, key: str) -> tuple[str, str, str]:
+        """Where an ingredient comes from, as (its line icon, a short word for the row's end, every source for its tip):
+        the end names the profession that makes it (its lowest-level recipe), else the monster that drops it (the
+        players' first, and how many more), else an NPC's price; the tip lists them all. ("", "", "") when the KB knows
+        none."""
+        t = self.t
+        variants = craftplan.recipes(self._kb).get(name.casefold(), ())
+        mobs = list(self._kb.droppers.get(key, [])) if key else []
+        sells = craftplan.sources(self._kb).sellers.get(name.casefold(), ())
+        tips = []
+        if variants:
+            made = sorted({(v.prof_lv, v.discipline) for v in variants})
+            tips.append(t("cp_ing_crafted", list=", ".join(f"{d} {lv}" for lv, d in made)))
+        if mobs:
+            named = []
+            for m in mobs[: craftplan.DROPPERS_SHOWN]:
+                e = self._kb.get(m) or {}
+                lv = (e.get("props") or {}).get("Level")
+                named.append(f"{e.get('name', m)} ({t('lv_short', n=lv)})" if lv else str(e.get("name", m)))
+            if len(mobs) > craftplan.DROPPERS_SHOWN:
+                named.append(t("cp_more", n=len(mobs) - craftplan.DROPPERS_SHOWN))
+            tips.append(t("cp_drops_from", list=", ".join(named)))
+        if sells:
+            npc, place, price = sells[0]
+            tips.append(t("cp_buy_at", who=" · ".join(x for x in (npc, place, t("cp_mesos", n=_mesos(price))) if x)))
+        tip = "\n".join(tips)
+        if variants:
+            low = min(variants, key=lambda v: (v.prof_lv, v.num))
+            return PROF_ICONS.get(DISCIPLINE_KEY.get(low.discipline, ""), "hammer"), f"{low.discipline} {low.prof_lv}", tip
+        if mobs:
+            first = str((self._kb.get(mobs[0]) or {}).get("name", ""))
+            return "ghost", first + (f" +{len(mobs) - 1}" if len(mobs) > 1 else ""), tip
+        if sells:
+            return "coins", t("cp_mesos", n=_mesos(sells[0][2])), tip
+        return "", "", ""
+
+    # ------------------------------------------------------------ the professions: the teacher and its quests
+
+    def _fill_teacher(self) -> None:
+        """The Teacher side: the teacher's card, then the profession's first and master quests (Done when the
+        character marked them)."""
+        _clear(self._teach_lay)
+        c = self._c
+        if c is None:
+            return
+        t, prof = self.t, self._prof
+        if prof not in self._infos:
+            self._infos[prof] = crafting.info(self._kb, prof)
+        i = self._infos[prof]
+        self._teach_lay.addWidget(self._caption(t("craft_teacher_head")))
+        self._teach_lay.addWidget(self._teacher_card(prof, i))
+        for name, lv, head in ((i.start_quest, i.start_level, "craft_start"), (i.master_quest, i.master_level, "craft_master")):
+            q = self._quest_named(name)
+            if q is None:
+                continue
+            self._teach_lay.addWidget(self._caption(t(head, lv=lv or q.opens_at())))
+            self._teach_lay.addWidget(self._quest_card(q, q.key in (c.quests_done or ())))
+
+    def _teacher_card(self, prof: str, i: crafting.Info) -> QFrame:
+        """Who teaches the profession: their picture, name and town, what the profession makes, from what level they
+        teach it, what a craft costs, where to craft it; the way to them, their NPC page, Ask in chat."""
+        t, rtl = self.t, self.t.rtl
+        name = crafting.NAMES[prof]
+        card, v = self._card()
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        if i.teacher_key:
+            top.addWidget(self._pics.label(i.teacher_key, NPC_PIC[0], NPC_PIC[1], caption=i.teacher), 0, Qt.AlignTop)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        col.addWidget(_label(bidi.ltr_name(i.teacher or name, rtl), "CardTitle", wrap=True))
+        sub = t("cp_teacher_sub", prof=name, town=i.teacher_town or "?") if i.teacher else t("cp_no_teacher")
+        col.addWidget(_label(bidi.plain(sub, rtl), "CardSub", wrap=True))
+        col.addWidget(_label(bidi.plain(t(f"craft_makes_{prof}"), rtl), "Text", wrap=True))
+        facts = []
+        if i.teacher and i.start_level:
+            facts.append(t("cp_learn_from", n=i.start_level))
+        fees = [r.fee for r in craftplan.profession_recipes(self._kb, prof)]
+        if fees and max(fees) > 0:
+            facts.append(t("cp_fees", lo=_mesos(min(fees)), hi=_mesos(max(fees))))
+        if i.station_towns:
+            towns = (" וב-" if rtl else ", ").join(i.station_towns)
+            facts.append(t("craft_station", station=i.station, towns=towns))
+        for fact in facts:
+            line = _label(bidi.paragraph_html(fact, "rtl" if rtl else "ltr", style="margin:0;"), "Muted", wrap=True)
+            line.setTextFormat(Qt.RichText)
+            col.addWidget(line)
+        acts = []
+        where = self._npc_map(i.teacher_key) if i.teacher_key else ""
+        if where:
+            acts.append((t("craft_go_teacher"), lambda: NAV.map_requested.emit(where)))
+        if i.teacher_key:
+            acts.append((t("cp_teacher_info"), lambda: NAV.npc_requested.emit(i.teacher_key)))
+        acts.append((t("ask_short"), lambda: NAV.ask_requested.emit(t("craft_ask", prof=name))))
+        col.addSpacing(2)
+        col.addWidget(self._links(acts))
+        top.addLayout(col, 1)
+        v.addLayout(top)
+        return card
+
+    def _quest_card(self, q: quests.Quest, done: bool) -> QFrame:
+        """A profession's quest: its name; its level, EXP and Done chips; who gives it and what must come first (a
+        quest, a fee); what it needs, a row each (the monster's or the item's page a click away); what it pays; and
+        Open in Quests, where the whole quest card is."""
+        t, rtl = self.t, self.t.rtl
+        card, v = self._card()
+        v.addWidget(_label(bidi.ltr_name(q.name, rtl), "CardTitle", wrap=True))
+        c = self._c
+        lv = q.opens_at()
+        chips = [(self._lv_words("craft_lv_tag", lv), "ChipWarn" if c is not None and c.level < lv else "Chip", "")]
+        if q.profession:
+            disc, plv = q.profession
+            short = c is not None and int((c.crafts or {}).get(disc.lower(), 0) or 0) < plv
+            chips.append((f"{disc} {plv}", "ChipWarn" if short else "Chip", t("cp_quest_prof_tip", prof=disc, lv=plv)))
+        if q.exp:
+            chips.append((f"+{q.exp:,} EXP", "ChipExp", ""))
+        if q.cycle in ("daily", "weekly"):
+            chips.append((t(f"q_{q.cycle}"), "Chip", t(f"q_{q.cycle}_tip")))
+        if done:
+            chips.append((t("cp_quest_done"), "ChipOn", ""))
+        v.addWidget(self._chips(chips))
+        lines = [t("q_from_npc", npc=bidi.ltr_block(q.npc, rtl))] if q.npc else []
+        if q.afters:
+            lines.append(t("q_after", name=", ".join(bidi.ltr_block(a, rtl) for a in q.afters)))
+        lines += q.prereq_hints(t)
+        for line in lines:
+            v.addWidget(_label(bidi.plain(line, rtl), "Muted", wrap=True))
+        needs = self._needs_of(q)
+        if needs:
+            v.addWidget(_label(bidi.plain(t("q_needs_head"), rtl), "NeedHead"))
+            for kind, target, count, key in needs:
+                v.addWidget(self._need_row(kind, target, count, key))
+        pays = ([t("cp_mesos", n=_mesos(q.mesos))] if q.mesos else []) + list(q.rewards)
+        if pays:
+            v.addWidget(_label(bidi.plain(f"{t('q_gets_head')} {_pieces(pays, rtl, ' · ')}", rtl), "Muted", wrap=True))
+        v.addWidget(self._links([(t("cp_open_quest"), lambda: NAV.tool_requested.emit("quest_tool", q.key))]))
+        return card
+
+    def _need_row(self, kind: str, target: str, count: int, key: str) -> QFrame:
+        """One thing a quest needs: its picture, how many of what, "defeat" or "collect" at the end; a monster's or an
+        item's page a click away."""
+        t, rtl = self.t, self.t.rtl
+        page = key.partition("/")[0]
+        row = _LinkRow(page in ("monster", "item"))
+        h = QHBoxLayout(row)
+        h.setContentsMargins(4, 3, 6, 3)
+        h.setSpacing(8)
+        h.addWidget(self._pics.label(key, ING_PIC, caption=target), 0, Qt.AlignVCenter)
+        h.addWidget(_label(bidi.ltr_name(f"{count}× {target}" if count else target, rtl), "IngName", wrap=True), 1)
+        does = {"defeat": ("swords", "cp_need_defeat"), "collect": ("backpack", "cp_need_collect")}.get(kind)
+        if does:
+            h.addWidget(self._glyph(does[0]), 0, Qt.AlignVCenter)
+            h.addWidget(_label(bidi.plain(t(does[1]), rtl), "IngWhere"), 0, Qt.AlignVCenter)
+        if page in ("monster", "item"):
+            h.addWidget(_label("\u2039" if rtl else "\u203a", "Chevron"), 0, Qt.AlignVCenter)
+            signal = NAV.monster_requested if page == "monster" else NAV.item_requested
+            row.clicked.connect(lambda k=key, s=signal: s.emit(k))
+        return row
+
+    def _quest_named(self, name: str) -> quests.Quest | None:
+        """A quest of the KB by its name ("A Blacksmith in My Own Right!": case and a closing "!" aside)."""
+        if self._quest_keys is None:
+            self._quest_keys = {}
+            for k, e in self._kb.entities.items():
+                if e.get("category") == "quest":
+                    self._quest_keys.setdefault(str(e.get("name") or "").rstrip("!").strip().lower(), k)
+        key = self._quest_keys.get((name or "").rstrip("!").strip().lower())
+        return quests.quest(self._kb, key) if key else None
+
+    def _needs_of(self, q: quests.Quest) -> list[tuple[str, str, int, str]]:
+        """What a quest needs, each (its kind: "defeat", "collect" or another, its name, how many, its KB key): the
+        quest_reqs table's rows (the keys resolved there), else the quest page's own lines."""
+        if self._quest_needs is None:
+            self._quest_needs = {}
+            for r in tables.rows(self._kb, "quest_reqs"):
+                self._quest_needs.setdefault(str(r.get("quest_key") or ""), []).append(r)
+        rows = self._quest_needs.get(q.key)
+        if rows:
+            return [
+                (str(r.get("kind") or ""), str(r.get("target") or ""), int(r.get("count") or 0), str(r.get("target_key") or ""))
+                for r in rows
+            ]
+        out = []
+        for need in q.needs:
+            m = re.match(r"(Defeat |Collect )?(.+?) x ([\d,]+)$", need)
+            if m is None:
+                out.append(("", need, 0, ""))
+                continue
+            defeat, target, count = bool(m.group(1) == "Defeat "), m.group(2).strip(), int(m.group(3).replace(",", ""))
+            mob = self._kb.monster_keys(target) if defeat else []
+            key = mob[0] if mob else ("" if defeat else self._key_of(target))
+            out.append(("defeat" if defeat else "collect", target, count, key))
+        return out
+
+    def _npc_map(self, npc_key: str) -> str:
+        """The map an NPC stands on (the npcs table), "" when the KB doesn't say."""
+        if self._npc_maps is None:
+            self._npc_maps = {}
+            for r in tables.rows(self._kb, "npcs"):
+                if r.get("key") and r.get("map_key"):
+                    self._npc_maps.setdefault(str(r["key"]), str(r["map_key"]))
+        return self._npc_maps.get(npc_key, "")
+
     # ------------------------------------------------------------ the professions' EXP table
 
     def _fill_exp(self) -> None:
-        """One row per crafting level: the EXP to the next (a box — the player's measured value replaces the KB's)
-        and whose number it is, saved to settings["craft_exp_table"]."""
+        """One row per crafting level below the cap, at the foot of the profession's card: the EXP to the next (a box
+        — the player's measured value replaces the KB's; empty where neither says, to be typed) and whose number it
+        is, saved to settings["craft_exp_table"]; the picked profession's level lit."""
         t, rtl = self.t, self.t.rtl
         _clear(self._exp_lay)
         self._exp_boxes = {}
         self._exp_marks = {}
+        self._exp_words = {}
         self._exp_lay.addWidget(_label(bidi.plain(t("cp_exp_hint"), rtl), "Note", wrap=True))
         arrow = "\u2190" if rtl else "\u2192"  # the way the levels read: right to left in Hebrew
-        for e in craftplan.exp_needs(self._kb, self._settings["craft_exp_table"]):
-            if e.level >= craftplan.LEVEL_CAP or e.exp is None:
-                continue
+        exps = {e.level: e.exp for e in craftplan.exp_needs(self._kb, self._settings["craft_exp_table"])}
+        for lv in range(1, craftplan.top_level(self._kb)):
             row = QWidget()
             h = QHBoxLayout(row)
-            h.setContentsMargins(ROW_PAD, 2, ROW_PAD, 2)
+            h.setContentsMargins(0, 2, 0, 2)
             h.setSpacing(8)
-            words = f"{t('lv_short', n=e.level)} {arrow} {t('lv_short', n=e.level + 1)}"
-            h.addWidget(_label(bidi.plain(words, rtl), "Cell"), 1)
+            words = _label(bidi.plain(f"{t('lv_short', n=lv)} {arrow} {t('lv_short', n=lv + 1)}", rtl), "Cell")
+            self._exp_words[lv] = words
+            h.addWidget(words, 1)
             box = _SearchBox(objectName="Num", maxLength=6)
             box.setFixedWidth(72)
             box.setAlignment(Qt.AlignCenter)
-            box.setText(str(e.exp))
+            box.setText(str(exps[lv]) if exps.get(lv) else "")
+            box.setPlaceholderText("?")
             box.setToolTip(t("cp_exp_tip"))
             box.setAccessibleName(t("cp_exp_tip"))
             box.textChanged.connect(lambda _t: self._edit.start())
             mark = _label("", "Note")
-            self._exp_boxes[e.level] = box
-            self._exp_marks[e.level] = mark
+            self._exp_boxes[lv] = box
+            self._exp_marks[lv] = mark
             h.addWidget(box)
             h.addWidget(mark)
             self._exp_lay.addWidget(row)
@@ -1204,16 +2117,19 @@ class CraftAdvisor(EdgeResize, QWidget):
         self._mark_exp()
 
     def _mark_exp(self) -> None:
-        """Each EXP row's mark: the player's own number (in the accent) or the KB's."""
+        """Each EXP row's mark: the player's own number (in the accent), the KB's, or none where neither has one; the
+        row of the picked profession's level lit."""
         t, rtl = self.t, self.t.rtl
-        mine = {e.level for e in craftplan.exp_needs(self._kb, self._settings["craft_exp_table"]) if e.measured}
+        rows = craftplan.exp_needs(self._kb, self._settings["craft_exp_table"])
+        mine = {e.level for e in rows if e.measured}
+        known = {e.level for e in rows if e.exp}
         for lv, mark in self._exp_marks.items():
-            name = "Mine" if lv in mine else "Note"
-            mark.setText(bidi.plain(t("cp_exp_yours" if lv in mine else "cp_exp_kb"), rtl))
-            if mark.objectName() != name:
-                mark.setObjectName(name)
-                mark.style().unpolish(mark)
-                mark.style().polish(mark)
+            word = "cp_exp_yours" if lv in mine else "cp_exp_kb" if lv in known else ""
+            mark.setText(bidi.plain(t(word), rtl) if word else "")
+            _rename(mark, "Mine" if lv in mine else "Note")
+        now = craftplan.progress(self._kb, self._c, self._prof).level if self._c is not None else None
+        for lv, words in self._exp_words.items():
+            _rename(words, "CellOn" if lv == now else "Cell")
 
     def _fold_exp(self) -> None:
         self._exp_folded = not self._exp_folded
@@ -1223,25 +2139,20 @@ class CraftAdvisor(EdgeResize, QWidget):
     # ------------------------------------------------------------ the player's own numbers
 
     def _edits_saved(self) -> None:
-        """The pause held: the level box, the profession boxes, the bag counts and the EXP boxes saved (an empty box
-        unsets), then the plan made again. Nothing is rebuilt under the box being typed in."""
+        """The pause held: the character level box, the picked profession's bar % box, the bag counts and the EXP
+        boxes saved (an empty box unsets), then what follows them on the profession's card and the plan made again.
+        Nothing is rebuilt under the box being typed in."""
         c = self._profiles.active
         if c is None:
             return
         v = self._lv_box.text().strip()
         if v.isdigit() and 0 < int(v) <= 250:
             c.level = int(v)
-        for disc, (_name, _lw, lv, _bw, pct) in self._prof_boxes.items():
-            key = DISCIPLINE_KEY[disc]
-            a, b = lv.text().strip(), pct.text().strip()
-            if a.isdigit() and 0 < int(a) <= craftplan.LEVEL_CAP:
-                c.crafts[key] = int(a)
-            elif key in c.crafts:
-                c.crafts.pop(key, None)
-            if b.isdigit() and 0 <= int(b) <= 100:
-                c.craft_pct[key] = int(b)
-            elif key in c.craft_pct:
-                c.craft_pct.pop(key, None)
+        key, b = self._prof, self._pct_box.text().strip()
+        if b.isdigit() and 0 <= int(b) <= 100:
+            c.craft_pct[key] = int(b)
+        elif key in c.craft_pct:
+            c.craft_pct.pop(key, None)
         for key, box in self._bag_boxes.items():
             n = box.text().strip()
             if n.isdigit() and int(n) > 0:
@@ -1258,7 +2169,9 @@ class CraftAdvisor(EdgeResize, QWidget):
                 table.pop(str(lv), None)
         self._settings["craft_exp_table"] = table or None
         self._profiles.save()
-        self._mark_exp()
+        self._refresh_prof()
+        if self._prof_mode == "teacher":
+            self._fill_teacher()  # its quests' level chips follow the character level
         self._replan()
 
     # ------------------------------------------------------------ closing
@@ -1270,7 +2183,7 @@ class CraftAdvisor(EdgeResize, QWidget):
         self.closed.emit()
 
     def hideEvent(self, e) -> None:
-        for timer in (self._typing, self._bag_typing, self._edit):  # nothing fires once hidden
+        for timer in (self._typing, self._bag_typing, self._rec_typing, self._edit):  # nothing fires once hidden
             timer.stop()
         if self.plan_window is not None:
             self.plan_window.hide()  # the plan goes with it (not the player's ✕: it opens again with it)

@@ -3,8 +3,9 @@ down to a row. Each row is the thing's picture, its name in bold with its tag ch
 an equip's or a map's levels) and a muted line under it (HP and EXP, the NPC's role and map, the item's type, the
 street), an item's NPC price on the end. A click opens the thing's own page in the detail window docked beside the
 search, the row lit in the accent while it shows: a header card with a larger picture, the name and its chips, then
-titled blocks — an NPC: where it stands and the way there; a monster: where it lives; an item: who drops and who
-sells it; a map: the way there and its monsters — with a way back through what was opened. Every search lists its
+titled blocks — an NPC: where it stands and the way there; a monster: where it lives and the active character's Hit &
+damage on it (hit chance, ACC, damage, hits and kills; combat.matchup); an item: who drops and who sells it; a map:
+the way there and its monsters — with a way back through what was opened. Every search lists its
 first rows before anything is typed (the monsters by level, then the NPCs; the maps and items by name); Safe to sell?
 lists the items, the ones a current quest or recipe still needs first (NiaMeowDB's list,
 sitedata.sell_list, sorted as its page sorts: the most needed first), each with its why-keep chips (quests,
@@ -19,13 +20,13 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QPixmap
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+                               QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from .. import availability, bidi, combat, gamelookup, itemterms, market, routes, sitedata, tables
 from ..i18n import I18n
 from ..kb import KnowledgeBase, memo
-from ..store import Settings
+from ..store import Profiles, Settings
 from . import mapview, theme
 from .controls import FlowLayout, Segmented
 from .glass import SHADOW, EdgeResize
@@ -33,7 +34,7 @@ from .location import LOCATION
 from .npcoverlay import (BOTTOM, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE, TOP, Palette, _Header, _flags,
                          _paint_glass, accent_of, direction, dock_beside, ink, palette, set_capturable)
 from .npcoverlay import keep_over_game
-from .widgets import fit_picture, zoom_on_hover
+from .widgets import MARKET_REQUESTS, fit_picture, zoom_on_hover
 
 # the searches the toolbar offers: monsters and NPCs together (each row opens its own page), the maps, the items, and
 # "sell" (the items again, safe to sell?); each lists its first LIMIT rows before anything is typed
@@ -141,6 +142,16 @@ QFrame#Block {{ background: {rim(0.05, p)}; border: none; border-radius: 12px; }
 #BlockTitle {{ color: {p.text}; font-size: 12px; font-weight: 700; padding: 0 4px 2px 4px; }}
 #BlockNote {{ color: {p.muted}; padding: 0 4px; }}
 QLabel#Verdict {{ border-radius: 10px; padding: 5px 14px; font-size: 15px; font-weight: 700; }}
+QFrame#Fig {{ background: {p.fill1}; border: none; border-radius: 10px; }}
+#FigLabel {{ color: {p.muted}; font-size: 11px; font-weight: 600; }}
+#FigValue {{ color: {p.text}; font-size: 19px; font-weight: 700; }}
+#FigValue[tone="good"] {{ color: {ink(TONES["safe"])}; }}
+#FigValue[tone="none"] {{ color: {p.muted}; font-weight: 400; }}
+#FigValue[tone="warn"] {{ color: {ink(TONES["keep"])}; }}
+#FigSub {{ color: {p.muted}; font-size: 11px; }}
+QPushButton#Link {{ background: transparent; color: {ink(fill)}; border: none; border-radius: 0; min-height: 0;
+                    padding: 2px 4px; font-size: 12px; font-weight: 700; text-align: left; }}
+QPushButton#Link:hover {{ background: transparent; text-decoration: underline; }}
 #Segmented {{ background: {p.fill1}; border: none; border-radius: 10px; }}
 QPushButton#Segment {{ background: transparent; color: {p.muted}; border: none; border-radius: 8px; min-height: 26px;
                        max-height: 26px; padding: 0 10px; font-size: 12px; font-weight: 600; text-align: center; }}
@@ -177,9 +188,8 @@ def monster_line(m: combat.Monster) -> str:
 
 
 def _monster_hits(kb) -> list[Hit]:
-    """Every monster in the game once per name — the training picker's own rule (tools.monster_rows): only what
-    the KB confirms is in the game, none of the tutorial, event and job-test versions — the version that spawns
-    on the most maps standing for all of them."""
+    """Every monster in the game once per name: only what the KB confirms is in the game, none of the tutorial, event
+    and job-test versions — the version that spawns on the most maps standing for all of them."""
     best: dict[str, combat.Monster] = {}
     open_ = availability.of(kb)
     for m in combat.monsters(kb):
@@ -233,8 +243,8 @@ def equip_level(e: dict) -> int | None:
 
 
 def _item_hits(kb) -> list[Hit]:
-    """Every item the item picker lists (tools.item_rows' rule, the Cash Shop's own pets aside), the muted line its
-    type, an equip with its required level."""
+    """Every item once per name (the wishlist's search box's rule, wishlist.item_rows: the Cash Shop's own pets
+    aside), the muted line its type, an equip with its required level."""
     out: dict[str, Hit] = {}
     for k, e in kb.entities.items():
         name = str(e.get("name") or "").strip()
@@ -743,6 +753,9 @@ class DetailWindow(EdgeResize, QWidget):
         self._stack: list[tuple[str, str]] = []     # each view pushed, the last one shown
         self._guided: tuple | None = None           # the guide this window set, None while it set none
         self._rows: list[QWidget] = []
+        self.hit_figures: list[QFrame] = []         # a monster page's Hit & damage figures (_hit_damage)
+        self.stats_link: QPushButton | None = None  # ... and its "Type your stats", while stats are missing
+        self.market_link: QPushButton | None = None  # an item page's "Free Market prices", for a tradeable item
         col = QVBoxLayout(self)
         col.setContentsMargins(SIDE, TOP, SIDE, BOTTOM)
         col.setSpacing(8)
@@ -847,7 +860,7 @@ class DetailWindow(EdgeResize, QWidget):
 
     def _monster_body(self, key: str) -> None:
         """The monster's page: its level and HP and EXP in the header, then every map it lives on (a click: that
-        map's page), each with how many spawn there."""
+        map's page), each with how many spawn there, then the active character's Hit & damage on it."""
         o = self._owner
         t, kb, rtl = o.t, o._kb, o.t.rtl
         name = self._name(key)
@@ -865,6 +878,137 @@ class DetailWindow(EdgeResize, QWidget):
             row.clicked.connect(lambda _=False, k=map_key: self.push("map", k))
             block.add(row)
         self._add(block)
+        if m is not None:            # (a monster the KB has no level, HP and EXP for: nothing to work out)
+            self._add(self._hit_damage(m))
+
+    def _hit_damage(self, m: combat.Monster) -> _Block:
+        """Hit & damage, worked out for the active character as the old Play tools page did (combat.matchup): its
+        hit chance and the ACC to never miss (what is missing, in DEX or a Magician's INT), its damage on the monster
+        after its P.DEF and the basic hits that kill it, the EXP a kill gives and the kills to the next level, and
+        the mesos players reported. No character: one line. Stats not typed: the figures that need none, which stats
+        are missing and a link to Grind spots, whose stats editor they are typed in."""
+        o = self._owner
+        t, kb, rtl = o.t, o._kb, o.t.rtl
+        block = _Block(bidi.plain(t("tool_calc"), rtl))
+        c = o._profiles.active
+        if c is None:
+            block.add(self._note(t("md_no_char")))
+            return block
+        mu = combat.matchup(kb, m, c.level, c.base_class, c.exp_pct, c.stats)
+        # "Kiwi · Assassin · Lv. 32", the Grind spots window's own line: the name and job one left-to-right block
+        # (in Hebrew a comma between them threw the job before the name)
+        who = f"{bidi.ltr_block(f'{c.name} · {c.job or c.base_class}', rtl)} · {t('lv_short', n=c.level)}"
+        block.add(self._note(t("md_for", who=who)))
+
+        def num(v: str) -> str:
+            return bidi.ltr_block(v, rtl)          # a figure: one left-to-right block, in Hebrew too
+
+        def span(lo: int, hi: int) -> str:
+            return num(f"{lo:,}" if lo == hi else f"{lo:,}–{hi:,}")
+
+        figs: list[QFrame] = []
+        if mu.hit is not None:
+            more = t("calc_more_acc", n=mu.acc_short, pts=mu.stat_points, stat=mu.stat) if mu.acc_short else ""
+            figs.append(self._fig(t("calc_hit"), num(f"{round(mu.hit * 100)}%"), more,
+                                  "good" if mu.hit >= 0.999 else "warn"))
+        figs.append(self._fig(t("md_acc"), num(f"{mu.acc_needed:,}"),
+                              t("calc_acc_need90", n=f"{mu.acc_needed90:,}") if m.avoid > 0 else t("md_never_dodges")))
+        if mu.landed and mu.damage and mu.hits is not None:
+            figs.append(self._fig(t("md_damage"), span(*mu.landed),
+                                  t("md_damage_sub", range=span(*mu.damage), n=f"{m.pdef:,}")))
+            avg = mu.avg_hits or mu.hits
+            figs.append(self._fig(t("md_hits"), num(f"{mu.hits:,}"),
+                                  t("md_avg", n=f"{avg:.1f}") if avg < mu.hits - 0.05 else ""))
+        figs.append(self._fig(t("md_exp"), num(f"{mu.exp:,}")))
+        if mu.kills is not None:
+            figs.append(self._fig(t("md_kills", n=c.level + 1), num(f"{mu.kills:,}"),
+                                  t("md_kills_from0") if c.exp_pct is None else ""))
+        mesos = kb.community_mesos(m.key)
+        if mesos:
+            avg = kb.mesos_per_kill(m.key)
+            figs.append(self._fig(t("calc_mesos"), span(mesos[0], mesos[1]),
+                                  t("md_avg", n=f"{avg:,.0f}") if avg else ""))
+        else:
+            figs.append(self._fig(t("calc_mesos"), NO_NUM, t("mesos_none"), "none"))
+        grid_box = QWidget()
+        grid = QGridLayout(grid_box)
+        grid.setContentsMargins(0, 4, 0, 2)
+        grid.setSpacing(6)
+        for i, f in enumerate(figs):
+            grid.addWidget(f, i // 2, i % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        self.hit_figures = figs
+        block.add(grid_box)
+        if mu.landed:
+            # the stat window's range is a basic attack: for a Magician the staff swing, not a spell
+            block.add(self._note(t("calc_hits_mage" if c.base_class == combat.MAGE else "calc_hits_basic")))
+        missing = "md_need_both" if mu.hit is None and not mu.damage else "md_need_acc" if mu.hit is None \
+            else "md_need_dmg" if not mu.damage else ""
+        if missing:
+            block.add(self._note(t(missing), muted=False))
+            box, self.stats_link = self._link(t("md_type_stats"), self._type_stats)
+            block.add(box)
+        return block
+
+    def _fig(self, label: str, value: str, sub: str = "", tone: str = "") -> QFrame:
+        """One figure of Hit & damage: its name small over the big number (left-to-right in Hebrew too), what it
+        means under it. tone: "good" (never misses) green, "warn" (misses) amber, "none" (nothing known) muted."""
+        rtl = self._owner.t.rtl
+        f = QFrame(objectName="Fig")
+        col = QVBoxLayout(f)
+        col.setContentsMargins(10, 7, 10, 8)
+        col.setSpacing(1)
+        name = QLabel(bidi.plain(label, rtl), objectName="FigLabel", wordWrap=True)
+        big = QLabel(bidi.plain(value, rtl), objectName="FigValue")     # at the reading start, as its name is
+        if tone:
+            big.setProperty("tone", tone)
+        col.addWidget(name)
+        col.addWidget(big)
+        if sub:
+            col.addWidget(QLabel(bidi.plain(sub, rtl), objectName="FigSub", wordWrap=True))
+        col.addStretch(1)
+        f.figure = (label, value, sub)          # what it says, for the tests
+        return f
+
+    def _link(self, text: str, then) -> tuple[QWidget, QPushButton]:
+        """A link at the reading start with its arrow ("Type your stats ›"): a click runs then(); it never takes the
+        keyboard. Returned in its row (what the page adds) with the button itself."""
+        rtl = self._owner.t.rtl
+        # one right-to-left isolate in Hebrew (bidi.button): "מחירים ב-Free Market" read "Free Market ‹-מחירים ב"
+        link = QPushButton(bidi.button(f"{text} {'‹' if rtl else '›'}", rtl), objectName="Link")
+        link.setCursor(Qt.PointingHandCursor)
+        link.setFocusPolicy(Qt.NoFocus)
+        link.clicked.connect(lambda _=False: then())
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 2)
+        row.addWidget(link, 0)
+        row.addStretch(1)
+        return box, link
+
+    def _market(self, key: str) -> None:
+        """'Free Market prices ›' (the Free Market details window: MesoWatch's sales, where to buy) for an item
+        players can trade; an untradeable one (a pet, a quest item) gets none."""
+        if sitedata.untradeable(self._owner._kb, key):
+            return
+        box, self.market_link = self._link(self._owner.t("md_market"), lambda: MARKET_REQUESTS.requested.emit(key))
+        self._add(box)
+
+    def _type_stats(self) -> None:
+        """'Type your stats': the Grind spots window, whose stats editor the figures are read from (toolwindow
+        builds on this module, so it is imported when used)."""
+        from .toolwindow import NAV
+        NAV.tool_requested.emit("grind_spots", "")
+
+    def character_changed(self) -> None:
+        """Another character, or the active one's level, EXP or stats changed: a monster's page is drawn again (its
+        Hit & damage is the character's), the scroll kept."""
+        if self._stack and self._stack[-1][0] == "monster":
+            bar = self._scroll.verticalScrollBar()
+            at = bar.value()
+            self._draw()
+            bar.setValue(at)
 
     def _item_body(self, key: str) -> None:
         """The item's page: its type and level chips and what an NPC pays in the header, then the monsters that
@@ -874,6 +1018,7 @@ class DetailWindow(EdgeResize, QWidget):
         price = market.npc_prices(kb, key).sell_back
         self._set_head(key, self._name(key), self._item_chips(key),
                        bidi.plain(t("sell_npc_pays", n=f"{price:,}") if price else t("sell_no_npc_price"), rtl))
+        self._market(key)                  # its player prices, under what an NPC pays
         drop, sell = gamelookup.item_sources(kb, key)
         if not drop and not sell:
             self._line(t("lk_no_sources"), muted=True)
@@ -943,6 +1088,7 @@ class DetailWindow(EdgeResize, QWidget):
             price = sell_price(kb, key)
             self._add(_Row(bidi.plain(t("sell_npc_price_label"), rtl), "", clickable=False,
                            end=_price_end(t, price), end_tip="" if price else t("sell_no_npc_price"), rtl=rtl))
+        self._market(key)                  # what players pay, under what an NPC pays
         if need and need.shops:
             block = _Block(bidi.plain(t("sell_shops_heading"), rtl))
             block.add(_Row(bidi.ltr_name(", ".join(need.shops), rtl), bidi.plain(t("sell_rebuy"), rtl),
@@ -1125,6 +1271,7 @@ class DetailWindow(EdgeResize, QWidget):
                             # and the window folded to its header after the first view, offscreen render)
 
     def _clear_body(self) -> None:
+        self.hit_figures, self.stats_link, self.market_link = [], None, None
         while self._rows:
             w = self._rows.pop()
             self._rows_lay.removeWidget(w)
@@ -1243,7 +1390,7 @@ class GameSearch(EdgeResize, QWidget):
 
     mode_changed = Signal(str)          # the mode it shows, "" once hidden
 
-    def __init__(self, kb: KnowledgeBase, settings: Settings, t: I18n):
+    def __init__(self, kb: KnowledgeBase, settings: Settings, profiles: Profiles, t: I18n):
         # not the NPCs window's _flags(): this one takes the keyboard, so no WindowDoesNotAcceptFocus
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -1254,6 +1401,7 @@ class GameSearch(EdgeResize, QWidget):
         self._kb = kb
         self._pics = _Pictures(kb)
         self._settings = settings
+        self._profiles = profiles            # the active character: a monster page's Hit & damage is its
         self.t = t
         self.setLayoutDirection(Qt.RightToLeft if t.rtl else Qt.LeftToRight)
         self._kind = KINDS[0]
@@ -1405,6 +1553,11 @@ class GameSearch(EdgeResize, QWidget):
     def rides_changed(self) -> None:
         """The toolbar's Cabs & Teleports switch flipped: the way on the page shown is found again."""
         self._detail.redraw()
+
+    def character_changed(self) -> None:
+        """Another character, or the active one's level, EXP or stats changed: a monster's page shown is drawn
+        again (its Hit & damage is the character's)."""
+        self._detail.character_changed()
 
     def apply_language(self, t: I18n) -> None:
         self.t = t

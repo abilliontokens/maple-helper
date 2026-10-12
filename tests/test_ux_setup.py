@@ -207,7 +207,7 @@ def test_connect_step_explains_and_offers_a_way_on_without_an_ai(env):
     dlg = Onboarding(s, profiles, kb, lambda *_: "")
     dlg._go_next()
     assert dlg.stack.currentIndex() == 1 and not dlg.next.isEnabled()
-    assert not dlg.no_ai_note.isHidden() and "Play tools" in dlg.no_ai_note.text()
+    assert not dlg.no_ai_note.isHidden() and "toolbar" in dlg.no_ai_note.text()
     assert not dlg.skip_ai_btn.isHidden()
     tips = {b.property("value"): b.toolTip() for b in dlg.provider_pick.group.buttons()}
     assert "Claude Code" in tips["claude"] and "free" in tips["grok"]

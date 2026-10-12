@@ -167,7 +167,7 @@ def items(refresh: bool = True, timeout: float = TIMEOUT) -> list[Item] | None:
 
 
 def version() -> int:
-    """Changes when a different Cash Shop list came in (the Shop page redraws)."""
+    """Changes when a different Cash Shop list came in (the Cash shop window redraws)."""
     return _version
 
 

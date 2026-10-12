@@ -136,27 +136,6 @@ def test_a_success_starts_the_retries_over(qapp, monkeypatch):
     assert shots == [5 * 60 * 1000, 10 * 60 * 1000, 5 * 60 * 1000]
 
 
-def test_a_deleted_picker_never_fits_its_list(qapp, monkeypatch):
-    """An uncaught 'Internal C++ object (EntityPicker) already deleted' from a timer that outlived the picker."""
-    import sys
-
-    import shiboken6
-    from PySide6.QtCore import QCoreApplication, QEvent
-
-    from maplehelper.ui.tools import EntityPicker
-    errors = []
-    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a))
-    p = EntityPicker([("Fire Boar", "Fire Boar", None)], "Monster")
-    p.setText("Fire")
-    p.completer().complete()                 # the list shows: _fit_popup waits for the next turn of the loop
-    p.completer().popup().show()
-    shiboken6.delete(p)                      # the tools window closed meanwhile
-    for _ in range(3):
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
-        QCoreApplication.processEvents()
-    assert errors == []
-
-
 def test_an_open_app_checks_every_hour_and_retries_within_it(qapp, monkeypatch):
     assert app.KB_CHECK_MS == 60 * 60 * 1000
     fake, shots = _fake_app(qapp, monkeypatch)
@@ -206,7 +185,7 @@ def test_a_run_from_source_never_rewrites_the_windows_run_value(monkeypatch):
 
 
 def test_a_kb_update_reopens_the_open_kb_windows_but_not_the_one_in_use(qapp, monkeypatch):
-    # LIF-13: Tools/Guides/... kept the old KnowledgeBase after an update, listing pages the swap removed
+    # LIF-13: Guides, the wishlist... kept the old KnowledgeBase after an update, listing pages the swap removed
     from maplehelper import inventory
     monkeypatch.setattr(app, "load_kb", lambda: "new kb")
     monkeypatch.setattr(app.tables, "ensure_async", lambda kb: None)
@@ -226,15 +205,15 @@ def test_a_kb_update_reopens_the_open_kb_windows_but_not_the_one_in_use(qapp, mo
 
         def close(self):
             self.closed = True
-    tools, guides, settings = Win(), Win(active=True), Win()
+    wish, guides, settings = Win(), Win(active=True), Win()
     reopened = []
-    fake = SimpleNamespace(brain=SimpleNamespace(), grind=SimpleNamespace(),
+    fake = SimpleNamespace(brain=SimpleNamespace(),
                            overlay=SimpleNamespace(show_scope=lambda: None, show_news=lambda: None, focus_keys=[],
                                                    set_tags=lambda keys: None),
-                           _windows={"tools": tools, "guides": guides, "settings": settings},
+                           _windows={"wishlist:c1": wish, "guides": guides, "settings": settings},
                            _reopen_call=lambda kind, dlg: lambda: reopened.append(kind), _ensure_routes=lambda: None)
     app.MapleHelperApp.reload_kb(fake)
-    assert fake.overlay.kb == "new kb" and tools.closed and not guides.closed and not settings.closed
+    assert fake.overlay.kb == "new kb" and wish.closed and not guides.closed and not settings.closed
     for fn in shots:
         fn()
-    assert reopened == ["tools"]
+    assert reopened == ["wishlist:c1"]

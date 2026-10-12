@@ -347,40 +347,27 @@ def test_wishlist_dropper_rows_show_votes(ckb, app):
     d.close()
 
 
-def test_tools_show_mesos(ckb, app, tmp_path, monkeypatch):
-    from maplehelper import store
-    from maplehelper.ui.tools import ToolsDialog
-    monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
-    monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
-    p = store.Profiles()
-    p.add("Kiwi", "Thief", "Thief", 3)
-    d = ToolsDialog(ckb, p, store.Settings(), "en", "", {}, "calc")
-    d.calc_input.setText("Snail")
-    d._fill_calc()
-    texts = [bidi_free(x) for x in _texts(d)]
-    assert "18–23" in texts and any("About 12 mesos per kill" in x for x in texts)
-    d.calc_input.setText("Red Snail")
-    d._fill_calc()
-    assert any("No community data" in x for x in [bidi_free(x) for x in _texts(d)])
-    d.close()
-
-
-def test_training_spots_label_the_most_mesos(ckb, app, tmp_path, monkeypatch):
-    from maplehelper import combat, store
-    from maplehelper.ui.tools import ToolsDialog
-    monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
-    monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
-    p = store.Profiles()
+def test_grind_spots_show_the_reported_mesos_and_mark_the_most(ckb, app, isolated_store):
+    """The Grind spots window: a spot's card says the mesos players reported, and the most of them is marked."""
+    from maplehelper import combat
+    from maplehelper.ui.grindspots import GrindSpots
+    p = isolated_store.Profiles()
     p.add("Kiwi", "Thief", "Thief", 2)
-    d = ToolsDialog(ckb, p, store.Settings(), "en", "", {}, "train")
     rows = combat.spots(ckb, 2, n=6)
     if len([s for s in rows if ckb.community_mesos(s.monster.key)]) < 2:
         pytest.skip("the fixture's spots don't have two monsters with mesos")
-    d._fill_train()
-    texts = [bidi_free(x) for x in _texts(d)]
-    assert "Most mesos" in texts and "18–23 mesos (Community)" in texts
-    assert d._most_mesos(rows).monster.key == SNAIL
-    d.close()
+    s = isolated_store.Settings()
+    s["grind_spots"] = True
+    w = GrindSpots(ckb, s, p, I18n("en"))
+    try:
+        w.refresh()
+        texts = [bidi_free(x) for x in _texts(w)]
+        assert "Most mesos" in texts and "18–23 mesos (Community)" in texts
+        assert w._most_mesos(rows).monster.key == SNAIL
+    finally:
+        w._saving.stop()
+        w._geom.stop()
+        w.close()
 
 
 # ---------------------------------------------------------------- the real knowledge base

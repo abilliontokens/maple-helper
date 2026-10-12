@@ -33,7 +33,7 @@ def _windows(kb, s, profiles):
     t = I18n("en")
     bar = GameToolbar(s, t)
     npc = NpcOverlay(kb, s, t)
-    search = GameSearch(kb, s, t)
+    search = GameSearch(kb, s, profiles, t)
     craft = CraftAdvisor(kb, s, profiles, t)
     scanner = LootScanner(kb, profiles, s)
     made = {"bar": bar, "bar settings": _SettingsPanel(bar), "NPCs here": npc, "guide": GuideWindow(npc),

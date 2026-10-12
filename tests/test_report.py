@@ -50,9 +50,10 @@ def test_report_leaves_out_the_stats_id_and_every_unlisted_setting(tmp_path, mon
     assert "install_id" not in saved and "some_new_secret" not in saved and saved["language"] == "en"
     # every setting is either reported or private on purpose: a new one makes this test ask which
     private = {"window", "map_window_pos", "item_window_pos", "pins", "last_session", "wishlist", "farm_target", "microphone",
-               "minimap_region", "npc_overlay_geom", "game_toolbar_pos", "game_search_geom", "game_detail_size",
-               "loot_region", "loot_overlay_pos", "grind_bar_geom", "grind_window_geom", "grind_goals",
-               "scroll_planner_geom", "gear_advisor_geom",
+               "npc_overlay_geom", "game_toolbar_pos", "game_search_geom", "game_detail_size",
+               "loot_overlay_pos", "grind_bar_geom", "grind_window_geom", "grind_goals",
+               "scroll_planner_geom", "gear_advisor_geom", "grind_spots_geom", "farm_tool_geom", "quest_tool_geom",
+               "citizenship_geom", "build_tool_geom", "cash_shop_geom",
                "craft_advisor_geom", "craft_plan_size", "craft_exp_table", "game_toolbar_width", "game_toolbar_height",
                "tips_dismissed", "usage_warned", "install_id", "news_read", "presence_sent"}
     assert set(DEFAULT_SETTINGS) - set(report.REPORT_SETTINGS) == private

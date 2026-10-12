@@ -1,5 +1,6 @@
 """The owner-approved look fixes (ux/look): dark-mode warning / good chips, a disabled look, sharp pictures on HiDPI,
-readable minimaps, padded text rows, unindented Hebrew titles, even picture sizes, and the tools' wording fixes."""
+readable minimaps, padded text rows, unindented Hebrew titles, even picture sizes, the "Updated" chip on combat cards
+only for changed numbers, and one dismiss ✕."""
 import os
 import re
 import sys
@@ -286,78 +287,17 @@ def test_the_updated_chip_on_combat_cards_needs_a_change_to_their_numbers(app, m
     assert updated_tag(t, kb, "monster/3") is None
 
 
-REAL_KB = __import__("pathlib").Path(__file__).resolve().parent.parent / "data" / "kb"
+def test_a_small_picture_shows_large_on_hover(app):
+    """At 30-56 px a sprite hid what it shows (the owner): its hover shows it large, with its name under it."""
+    from pathlib import Path
 
-
-@pytest.fixture(scope="module")
-def real_kb():
-    if not (REAL_KB / "index.json").exists():
-        pytest.skip("no real knowledge base")
-    from maplehelper.kb import KnowledgeBase
-    return KnowledgeBase(REAL_KB)
-
-
-@pytest.fixture
-def tools(app, isolated_store, real_kb):
-    from maplehelper.ui.tools import ToolsDialog
-    made = []
-
-    def make(base, job, level, page, lang="he"):
-        p = isolated_store.Profiles()
-        c = p.add("Kiwi", base, job, level)
-        d = ToolsDialog(real_kb, p, isolated_store.Settings(), lang, "", {}, page)
-        made.append(d)
-        return d, c
-    yield make
-    for d in made:
-        d.close()
-
-
-def _texts(layout) -> list[str]:
     from PySide6.QtWidgets import QLabel
-    out = []
-    for i in range(layout.count()):
-        w = layout.itemAt(i).widget()
-        if w is not None:
-            out += [lb.text() for lb in [w, *w.findChildren(QLabel)] if isinstance(lb, QLabel)]
-    return out
 
+    from maplehelper.ui.widgets import zoom_on_hover
+    lb = QLabel()
+    zoom_on_hover(lb, Path(__file__), "Snail")
+    assert "<img" in lb.toolTip() and "<br>Snail" in lb.toolTip()
 
-def test_citizenship_under_level_12_says_only_that_it_opens_at_12(tools):
-    """TL2-12: "0 Henesys quests you can do now, best first" stood above "Citizenship opens at Lv. 12."."""
-    d, c = tools("Beginner", "Beginner", 1, "town")
-    d._fill_town()
-    assert d.town_head.isHidden() and d.town_search.isHidden()
-    # TOOL-18: one card says it, with the levels to go; no town to pick yet and no second "opens at 12" below
-    assert _texts(d.town_list) == []
-    assert d.town_pick_row.isHidden() and d.town_advice.isHidden()
-    assert "12" in d.town_basics.text() and "11" in d.town_basics.text()
-    d.c.level = 20
-    d._fill_town()
-    assert not d.town_head.isHidden() and not d.town_search.isHidden()
-    assert not d.town_pick_row.isHidden() and not d.town_advice.isHidden()
-
-
-def test_the_recipe_level_chip_keeps_a_visible_gap_in_hebrew(tools):
-    """TL2-16: the digit 1's ink sits against the Hebrew word: with a plain space the chip read "רמה1"."""
-    from PySide6.QtWidgets import QLabel
-    d, c = tools("Warrior", "Fighter", 35, "crafting")
-    d.craft_mode.set_value("recipes")
-    d._fill_crafting()
-    chips = [lb.text() for lb in d.pages["crafting"].widget().findChildren(QLabel)
-             if lb.objectName() == "Tag" and "רמה" in lb.text()]
-    one = [x for x in chips if "‪1‬" in x]           # the level-1 recipes' chips
-    assert one and all("רמה  " in x for x in one), one[:3]
-
-
-def test_the_session_age_uses_the_time_cells_format_from_an_hour(tools):
-    """TL2-18: "Started 62 min ago" stood beside the time cell's "1:01 h"."""
-    import time
-    from types import SimpleNamespace
-    d, c = tools("Warrior", "Fighter", 35, "exp", "en")
-    assert d._started_ago(SimpleNamespace(start=time.time() - 3700)) == "Started 1:01 h ago"
-    assert d._started_ago(SimpleNamespace(start=time.time() - 12 * 60 - 40)) == "Started 12 min ago"
-    assert d._started_ago(SimpleNamespace(start=time.time() - 20)) == "Started 1 min ago"      # never "0 min"
 
 
 def test_every_dismiss_x_is_one_glyph_at_one_size(app):

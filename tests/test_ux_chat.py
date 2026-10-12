@@ -455,7 +455,7 @@ def test_the_tour_shows_the_news_button_and_walks_the_header_in_reading_order(ov
     overlay.t = I18n(lang)
     overlay.apply_language()
     pump(overlay.app, 50)
-    header = ("history_btn", "news_btn", "guides_btn", "wish_btn", "tools_btn", "settings_btn", "min_btn",
+    header = ("history_btn", "news_btn", "guides_btn", "wish_btn", "toolbar_btn", "settings_btn", "min_btn",
               "close_btn")
     steps = [p for p, _ in tour.STEPS if p in header]
     assert steps == list(header) and ("news_btn", "tour_news") in tour.STEPS

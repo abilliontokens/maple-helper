@@ -130,23 +130,3 @@ if what in ("all", "settings"):
     d.show()
     grab(d, f"settings-{MODE}{SUF}.png")
     d.close()
-
-if what in ("all", "tools"):
-    # the play tools: a Lv. 34 Assassin with stats from the Stat window, on the busiest pages
-    c = p.active
-    c.stats = {"acc": 78, "dmg_min": 160, "dmg_max": 340}
-    c.crafts = {"woodcrafting": 3}
-    p.save()
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    d = ToolsDialog(kb, p, s, LANG, css, {})
-    d.resize(500, 760)
-    d.show()
-    for page in ("train", "calc", "crafting", "quests", "build", "farm", "town", "pets", "more"):
-        d.show_page(PAGES.index(page))
-        if page == "crafting":
-            d.craft_pick.button(3).click()          # Woodcrafting: Vicious in Henesys Market
-        if page == "quests":
-            d.q_mode.group.buttons()[1].click()     # the ones not done yet: a full list (the level's tab can be empty)
-            pump(1.0)
-        grab(d, f"tools-{page}-{MODE}{SUF}.png")
-    d.close()

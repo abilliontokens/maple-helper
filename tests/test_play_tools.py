@@ -1,10 +1,11 @@
-"""Play tools: combat math (checked against NiaMeowDB's own numbers), quests, build tables, grind tracker."""
+"""The modules behind the tool windows: combat math (checked against NiaMeowDB's own numbers), training spots, build
+tables, stats read from a screenshot, the crafting pages, NPC and market prices, the guides for you."""
 import re
 from pathlib import Path
 
 import pytest
 
-from maplehelper import availability, buildplan, combat, plan, quests
+from maplehelper import availability, buildplan, combat, plan
 
 REAL_KB = Path(__file__).resolve().parent.parent / "data" / "kb"
 needs_kb = pytest.mark.skipif(not (REAL_KB / "index.json").exists(), reason="no real knowledge base")
@@ -62,32 +63,6 @@ def test_training_spots_are_reachable_and_ranked():
 
 
 @needs_kb
-def test_exp_rate_across_a_level_up():
-    from maplehelper.kb import KnowledgeBase
-    kb = KnowledgeBase(REAL_KB)
-    same = plan.exp_rate(kb, (0, 30, 40.0), (1800, 30, 55.0))
-    assert same["pct_hour"] == 30.0 and same["minutes"] == 30.0
-    up = plan.exp_rate(kb, (0, 30, 90.0), (1800, 31, 5.0))
-    assert up and up["per_hour"] > 0
-    assert plan.exp_rate(kb, (0, 30, 50.0), (60, 30, 50.0)) is None
-
-
-@needs_kb
-def test_quests_for_a_level():
-    from maplehelper.kb import KnowledgeBase
-    kb = KnowledgeBase(REAL_KB)
-    r = quests.for_level(kb, 22, "Warrior", "Warrior", [])
-    assert r["now"] and all(q.level <= 22 for q in r["now"]) and all(q.area != "Citizenship" for q in r["now"])
-    assert r["now"] == sorted(r["now"], key=lambda q: (-q.exp, q.level))
-    first = r["now"][0].key
-    assert first not in [q.key for q in quests.for_level(kb, 22, "Warrior", "Warrior", [first])["now"]]
-    mai = next(quests.quest(kb, k) for k, e in kb.entities.items() if e["name"] == "Mai's Training")
-    # its level is the page's own, a Beginner's quest, asking "<monster or item> x N"
-    assert mai.level == kb.get(mai.key)["props"].get("Minimum Level", 1) and "Beginner" in mai.job
-    assert mai.needs and all(re.search(r" x \d+$", n) for n in mai.needs)
-
-
-@needs_kb
 def test_build_tables_follow_the_level():
     from maplehelper.kb import KnowledgeBase
     kb = KnowledgeBase(REAL_KB)
@@ -111,31 +86,6 @@ def test_stats_from_a_screenshot_read(tmp_path, monkeypatch):
     assert p.apply_update({"stats": {"acc": 78}}) == []                         # nothing new
 
 
-@needs_kb
-def test_tools_window_builds_every_page(tmp_path, monkeypatch):
-    import sys
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication(sys.argv)
-    from maplehelper import store
-    from maplehelper.kb import KnowledgeBase
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
-    monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
-    p = store.Profiles()
-    c = p.add("Kiwi", "Thief", "Assassin", 34)
-    c.stats = {"acc": 80, "dmg_min": 150, "dmg_max": 320}
-    s = store.Settings()
-    d = ToolsDialog(KnowledgeBase(REAL_KB), p, s, "he", "", {})
-    for i in range(len(PAGES)):
-        d.show_page(i)
-        app.processEvents()
-    d.calc_input.setText("Zombie Mushroom")
-    d._fill_calc()
-    d._quest_done(quests.for_level(d.kb, 34, "Thief", "Assassin", [])["now"][0].key)
-    assert len(c.quests_done) == 1
-    d.close()
-
-
 def test_crafting_page_rows_read_exactly():
     from maplehelper import crafting
     crafting._levels.cache_clear()
@@ -144,8 +94,8 @@ def test_crafting_page_rows_read_exactly():
     assert (juno.level, juno.exp, juno.catalyst, juno.net, juno.exp_per_meso, juno.mats) == \
         (2, 40, 1200, -226, 0.177, "Farm only")
     assert juno.ingredients == [(2, "Iron Ingot"), (2, "Processed Leather"), (6, "Screw")]
-    assert (lv2.needs_exp, lv2.char_level, len(lv2.recipes)) == (115, 10, 2)
-    assert (lv3.level, lv3.needs_exp, lv3.char_level) == (3, 199, 15)
+    assert (lv2.level, len(lv2.recipes)) == (2, 2)
+    assert (lv3.level, [r.name for r in lv3.recipes]) == (3, ["Steel Fingerless Gloves"])
     crafting._levels.cache_clear()
 
 
@@ -157,33 +107,7 @@ def test_crafting_recipes_by_profession_level():
     smithing = crafting.levels(kb, "smithing")
     total = re.search(r"(\d+) recipes", kb.page("crafting/efficiency__smithing"))
     assert sum(len(lv.recipes) for lv in smithing) == int(total.group(1))      # the page's own "68 recipes"
-    now, nxt = crafting.for_level(kb, "smithing", 2)
-    assert now.level == 2 and now.recipes and all(r.exp > 0 and r.catalyst >= 0 and r.ingredients for r in now.recipes)
-    assert now.recipes == sorted(now.recipes, key=lambda r: (-r.exp_per_meso, -r.exp))
-    assert nxt.level == 3 and nxt.needs_exp and nxt.needs_exp > (now.needs_exp or 0)
     assert all(crafting.levels(kb, p) for p in crafting.PROFESSIONS)
-    # the EXP to the next level is the current level's (pages/formula/leveling.md "1 | 50 | 0 | 10"), and
-    # Smithing 8 still has a next level though the efficiency page has no "Lv. 9" block (audit GAM-1)
-    assert crafting.next_level(kb, "smithing", 1) == (2, 50, 10)
-    # the cap is the KB's ("Crafting currently caps at level 8" since 2026-10-11; 10 before): the last level has no next
-    table = crafting.exp_table(kb)
-    top = max(table)
-    assert crafting.next_level(kb, "smithing", top - 1) == (top, table[top - 1][0], table[top][1])
-    assert crafting.next_level(kb, "smithing", top) is None
-
-
-@needs_kb
-def test_citizenship_town_and_quests():
-    from maplehelper.kb import KnowledgeBase
-    kb = KnowledgeBase(REAL_KB)
-    # the town each class guide advises (Henesys for a Warrior, Kerning City for a Thief tonight): a citizenship
-    # town, named in that guide
-    for base, job in (("Warrior", "Fighter"), ("Thief", "Assassin")):
-        town = buildplan.citizenship_advice(kb, base, job, "en")[0]
-        assert town in quests.TOWNS and town in kb.page(plan.class_guide(kb, base, base))
-    rows = quests.citizenship(kb, "Henesys", 30)
-    assert rows and all(quests.town_of(kb, q) == "Henesys" and q.level <= 30 for q in rows)
-    assert quests.citizenship(kb, "Henesys", 11) == [] or all(q.level <= 11 for q in quests.citizenship(kb, "Henesys", 11))
 
 
 @needs_kb
@@ -226,32 +150,6 @@ def test_damage_range_typed_by_hand():
     assert combat.damage_range(200, 10) == (10, 200)          # min above max: swapped
     assert combat.damage_range(50, 0) == (50, 50)             # no max: the min
     assert combat.damage_range(0, 100) is None and combat.damage_range(None, None) is None
-
-
-def test_quest_item_names_with_a_lowercase_x():
-    found = quests._ITEM.findall("Defeat Dark Axe Stump x 100 Defeat Drake x 50 Moon Rock x 1")
-    assert found == [("Defeat Dark Axe Stump", "100"), ("Defeat Drake", "50"), ("Moon Rock", "1")]
-    assert quests._ITEM.findall("Dexterity Potion x 5 Blue Potion x 30") == [("Dexterity Potion", "5"),
-                                                                             ("Blue Potion", "30")]
-    assert quests._ITEM.findall("Elixir x 15 Bottomwear HP Scroll: Greater x 1")[1] == ("Bottomwear HP Scroll: Greater", "1")
-
-
-@needs_kb
-def test_class_specific_rewards_follow_the_class():
-    from maplehelper.kb import KnowledgeBase
-    kb = KnowledgeBase(REAL_KB)
-    # every quest with class-specific choices (Welcome to the Hollow's scrolls): a class gets its own set and the
-    # "Any Class" ones, never another class's, and the choices aren't also promised as sure rewards
-    picky = [q for q in (quests.quest(kb, k) for k, e in kb.entities.items() if e["category"] == "quest")
-             if q and q.class_rewards]
-    assert picky
-    for q in picky:
-        for cls in ("Warrior", "Magician", "Bowman", "Thief", "Beginner"):
-            assert q.rewards_pick(cls) == q._for_class(q.class_rewards, cls), q.key
-            others = {x for c, xs in q.class_rewards.items() if c not in (cls, "Any Class") for x in xs}
-            own = set(q.class_rewards.get(cls, [])) | set(q.class_rewards.get("Any Class", []))
-            assert not (set(q.rewards_pick(cls)) & (others - own)), (q.key, cls)
-        assert not set(q.rewards) & {x for xs in q.class_rewards.values() for x in xs}, q.key
 
 
 @needs_kb
@@ -310,56 +208,6 @@ def test_a_closed_hollow_is_not_picked_for_you(monkeypatch):
 
 
 @needs_kb
-def test_tools_enter_quest_undo_and_empty_states(tmp_path, monkeypatch):
-    import sys
-    from PySide6.QtCore import Qt
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication(sys.argv)
-    from maplehelper import store
-    from maplehelper.kb import KnowledgeBase
-    from maplehelper.ui.tools import PAGES, ToolsDialog
-    monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
-    monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
-    from maplehelper import grind
-    monkeypatch.setattr(grind.Store, "path", tmp_path / "grind.json")
-    p = store.Profiles()
-    c = p.add("Kiwi", "Magician", "Cleric", 30)
-    c.stats = {"acc": 70, "dmg_min": 40, "dmg_max": 15}
-    d = ToolsDialog(KnowledgeBase(REAL_KB), p, store.Settings(), "en", "", {}, "prices")
-    assert d._stats()[1] == (15, 40)
-    QTest.keyClicks(d.price_input, "Red Potion")
-    QTest.keyClick(d.price_input, Qt.Key_Return)          # runs this tab's search, doesn't jump to "Where to train"
-    assert d.stack.currentIndex() == PAGES.index("prices") and d.price_box.count() == 1
-    d.show_page(PAGES.index("calc"))
-    d.calc_input.setText("")
-    monkeypatch.setattr(d, "_calc_monster", lambda: None)
-    d._fill_calc()
-    assert "Pick a monster" in d.calc_box.itemAt(0).widget().text()
-    monkeypatch.undo()
-    d.show_page(PAGES.index("quests"))
-    first = quests.for_level(d.kb, 30, "Magician", "Cleric", [])["now"][0].key
-    d._quest_done(first)
-    assert first in c.quests_done and not d.q_done_toggle.isHidden()
-    d.q_done_toggle.setChecked(True)
-    # a small header, the one done quest's card, and the spacing under them (tools._add_done)
-    from PySide6.QtWidgets import QFrame
-    assert [type(d.q_done.itemAt(i).widget()) for i in range(d.q_done.count())].count(QFrame) == 1
-    d._quest_undo(first)
-    assert first not in c.quests_done and d.q_done_toggle.isHidden()
-    d.show_page(PAGES.index("exp"))
-    from maplehelper import plan
-    from maplehelper.grind import Reading
-    top = max(plan.exp_table(d.kb))                    # Lv. 99 tonight: the KB's EXP table's last level
-    d.grind.start(c.id, Reading(0, top, 90.0))
-    d.grind.add(c.id, Reading(600, top + 1, 1.0))      # across its last level: past the KB's EXP table
-    d._fill_exp()
-    assert f"past level {top}" in d.grind_cells["exp"][0].toolTip()
-    d.close()
-    app.processEvents()
-
-
-@needs_kb
 def test_profession_info_names_teacher_town_and_quests():
     from maplehelper import crafting
     from maplehelper.kb import KnowledgeBase
@@ -376,53 +224,6 @@ def test_profession_info_names_teacher_town_and_quests():
     assert crafting.info(KB, "leatherworking").start_quest       # no "in Need of an Apprentice": the first one
 
 
-@needs_kb
-def test_quest_search_filters_the_list_for_the_level(tmp_path, monkeypatch):
-    """The quests page had no search: finding a quest meant scrolling. The search keeps to the list shown
-    (the quests for the character's level), by name, NPC, area, what it asks and what it gives."""
-    import sys
-    from PySide6.QtWidgets import QApplication
-    QApplication.instance() or QApplication(sys.argv)
-    from maplehelper import quests, store
-    from maplehelper.kb import KnowledgeBase
-    from maplehelper.ui.tools import ToolsDialog
-    monkeypatch.setattr(store.Profiles, "path", tmp_path / "profiles.json")
-    monkeypatch.setattr(store.Settings, "path", tmp_path / "settings.json")
-    kb = KnowledgeBase(REAL_KB)
-    p = store.Profiles()
-    c = p.add("Kiwi", "Thief", "Assassin", 32)
-    d = ToolsDialog(kb, p, store.Settings(), "en", "", {}, "quests")
-    d.q_mode.group.buttons()[1].click()          # the quests skipped from earlier levels: a long list
-    level_list = quests.for_level(kb, c.level, c.base_class, c.job, c.quests_done)["missed"]
-    assert len(level_list) > 1
-
-    def cards():                                 # quest cards only, not the headings over them
-        return sum(1 for i in range(d.q_list.count()) if (w := d.q_list.itemAt(i).widget()) is not None
-                   and w.objectName() == "Card")
-    d._fill_quests()
-    everything = cards()
-    target = level_list[1]
-    d.q_search.setText(target.name)
-    d._fill_quests()
-    assert 1 <= cards() < everything
-    assert cards() == sum(1 for q in level_list if q.matches(target.name))     # only from the level's list
-    d.q_search.setText("zzzz-no-such-quest")
-    d._fill_quests()
-    assert cards() == 0 and any("No quest like that" in (w.text() if hasattr(w, "text") else "")
-                                for i in range(d.q_list.count()) if (w := d.q_list.itemAt(i).widget()))
-    d.q_search.clear()
-    d._fill_quests()
-    assert cards() == everything
-
-
-def test_quest_matches_name_npc_and_what_it_asks():
-    from maplehelper.quests import Quest
-    q = Quest(key="quest/1", name="Pio's Collecting Recycled Goods", level=10, npc="Pio", area="Lith Harbor",
-              needs=["Green Mushroom Cap x 20"], rewards=["Red Potion x 20"])
-    assert q.matches("pio") and q.matches("mushroom cap") and q.matches("red potion") and q.matches("LITH")
-    assert not q.matches("mushroom snail")
-
-
 def test_the_calculators_hp_hint_explains_the_monsters_hp():
     """The "?" beside a monster's HP explained the player's HP / MP and levels (the owner's report)."""
     from maplehelper import glossary
@@ -430,19 +231,3 @@ def test_the_calculators_hp_hint_explains_the_monsters_hp():
     tip = terms.tip_html("Monster HP", "he")
     assert "להרוג את המפלצת" in tip and "<b style" in tip and ">HP<" in tip
     assert "MP" not in glossary.explain("Monster HP", "he")
-
-
-def test_maple_island_quests_leave_once_a_job_is_taken(kb):
-    """Maple Island is behind a one-way boat: its quests show for a Beginner, not for a Lv. 31 Assassin."""
-    from maplehelper import quests
-    q = quests.Quest(key="quest/x", name="Bringing a Mirror to Heena", level=1, area="Maple Island")
-    assert quests.job_fits(q, "Beginner", "Beginner") and not quests.job_fits(q, "Thief", "Assassin")
-    assert quests.job_fits(quests.Quest(key="quest/y", name="Y", level=1, area="Victoria Island"), "Thief", "Assassin")
-
-
-def test_the_later_tab_says_which_areas_are_not_open_yet(kb):
-    """Quests in an area the KB doesn't confirm are hidden: the "later" tab names those areas, and the note goes
-    once every area is open (the owner)."""
-    from maplehelper import quests
-    areas = quests.closed_areas(kb)
-    assert all("event" not in a.lower() for a in areas)

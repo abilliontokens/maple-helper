@@ -1,10 +1,10 @@
 """The game's bottom bar, read on this computer: level, job, name, HP, MP and EXP, with no AI call.
 
-The grind tracker sent a screenshot to the player's AI every minute only to read these numbers (seconds per read,
-from the player's usage quota, and a misread name now and then). RapidOCR reads the bar's strip in ~0.5 s. The
-level's digits are the game's stylized orange ones, which it misreads ("10" as "00"), so the level is worked out
-from the EXP instead: the points and the percentage give the EXP the level needs, and the KB's EXP table has one
-level that needs that much. The read digits only count where they agree with it. No Qt: runs on a worker thread.
+An AI read of these numbers off a screenshot took seconds, came out of the player's usage quota and misread a name
+now and then; RapidOCR reads the bar's strip in ~0.5 s. The level's digits are the game's stylized orange ones,
+which it misreads ("10" as "00"), so the level is worked out from the EXP instead: the points and the percentage
+give the EXP the level needs, and the KB's EXP table has one level that needs that much. The read digits only count
+where they agree with it. No Qt: runs on a worker thread.
 """
 from __future__ import annotations
 
@@ -42,19 +42,6 @@ class Hud:
     hp: tuple[int, int] | None = None
     mp: tuple[int, int] | None = None
 
-    def profile_update(self) -> dict:
-        """The read as the AI's META profile_update says it: only what was read."""
-        out: dict = {}
-        if self.name:
-            out["name"] = self.name
-        if self.level:
-            out["level"] = self.level
-        if self.job:
-            out["job"] = self.job
-        if self.exp_pct is not None:
-            out["exp_percent"] = self.exp_pct
-        return out
-
 
 def _ocr():
     global _engine, _engine_failed
@@ -66,7 +53,7 @@ def _ocr():
 
                     from .minimap import _OCR_PARAMS
                     _engine = RapidOCR(params=_OCR_PARAMS)
-                except Exception as e:  # noqa: BLE001 - no reader: the caller falls back to the AI
+                except Exception as e:  # noqa: BLE001 - no reader: nothing is read
                     _engine_failed = True
                     log.warning("HUD OCR unavailable: %s", e)
     return _engine
@@ -143,6 +130,6 @@ def read_strip(img: Image.Image, table: dict[int, int]) -> Hud | None:
         return None
     try:
         return parse(_rows(np.asarray(img.convert("RGB"))), table)
-    except Exception:  # noqa: BLE001 - a bad read is no read; the caller falls back to the AI
+    except Exception:  # noqa: BLE001 - a bad read is no read
         log.debug("HUD read failed", exc_info=True)
         return None

@@ -28,8 +28,8 @@ TREND_DAYS = 30             # the price-history window the trend is read over (t
 LISTINGS_SHOWN = 3
 _cache: dict[str, tuple[float, dict | None]] = {}
 _item_cache: dict[int, tuple[float, "ItemMarket | None"]] = {}
-# the price card's and the sell check's threads both use the cache: an insert while the other picked the oldest
-# raised "dictionary changed size during iteration" (TL2-10). Held for the cache only, never over a request
+# the gear advisor's and the scroll planner's lookup threads share the cache: an insert while another picked the
+# oldest raised "dictionary changed size during iteration" (TL2-10). Held for the cache only, never over a request
 _cache_lock = threading.Lock()
 
 
