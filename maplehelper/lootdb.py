@@ -1,8 +1,8 @@
 """Every loot log, kept for good in a SQLite database (loot.sqlite in the app's data folder): each log, and each EXP,
-mesos and item pickup it counted, with the time it came, what an NPC paid for the item then, the map it came on, the
-player's level then and, for EXP, the monster it was a kill of. loot.json keeps only the running log and a short list
-of finished ones; this keeps everything, to look back at any day ("how much did I make on Saturday?": `day`, `days`),
-and for the grind's history, drop rates and best spots (`events`, `logs`: grindlive.py).
+mesos and item pickup it counted, with the time it came, what an NPC paid for the item then, the map it came on and
+the player's level then. loot.json keeps only the running log and a short list of finished ones; this keeps
+everything, to look back at any day ("how much did I make on Saturday?": `day`, `days`), and for the grind's history,
+drop rates and best spots (`events`, `logs`: grindlive.py).
 
 Writes come from the loot scanner on the GUI thread, a few rows every few seconds; each call opens its own
 connection (sqlite3 connections don't cross threads), so a reader on another thread is fine too. No Qt."""
@@ -12,7 +12,7 @@ import datetime as dt
 import logging
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import closing
 from dataclasses import dataclass, field
 from typing import NamedTuple
@@ -22,7 +22,7 @@ from .store import DATA_DIR
 log = logging.getLogger("maplehelper")
 
 PATH = DATA_DIR / "loot.sqlite"
-VERSION = 2
+VERSION = 3
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY,
@@ -45,13 +45,15 @@ CREATE INDEX IF NOT EXISTS events_t ON events(t);
 CREATE INDEX IF NOT EXISTS events_log ON events(log_id);
 CREATE INDEX IF NOT EXISTS logs_character ON logs(character_id, started);
 """
-# what each version added to the tables above (version 1's), in place: an older database's rows keep the defaults.
+# what each version changed in the tables above (version 1's), in place: an older database's rows keep the defaults.
 # 2: each pickup's map (a bare id, "102000000"; '' when unknown), an EXP gain's kill (the KB monster's key; '' when
 # none matched) and the player's level then (NULL when unknown)
+# 3: the kills go (a pickup message never says what was killed, so EXP matched to monsters was a guess)
 _UPGRADES = {
     2: ("ALTER TABLE events ADD COLUMN map_key TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE events ADD COLUMN monster_key TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE events ADD COLUMN level INTEGER"),
+    3: ("ALTER TABLE events DROP COLUMN monster_key",),
 }
 
 
@@ -95,8 +97,8 @@ def end_log(log_id: int, ended: float) -> None:
 
 
 def add_events(log_id: int, events: Iterable, kb) -> None:
-    """The log's pickups (lootlog.Event), each with what an NPC pays for its item now, its map, the player's level
-    and an EXP gain's kill."""
+    """The log's pickups (lootlog.Event), each with what an NPC pays for its item now, its map and the player's
+    level."""
     from . import farm
     rows = []
     for e in events:
@@ -105,11 +107,35 @@ def add_events(log_id: int, events: Iterable, kb) -> None:
             v = farm.value(kb, e.key)
             price = v.price if v else None
         rows.append((log_id, e.t, e.kind, e.amount, e.name if e.kind == "item" else "",
-                     e.key if e.kind == "item" else "", price, e.map, e.monster, e.level))
+                     e.key if e.kind == "item" else "", price, e.map, e.level))
     if rows:
         with closing(_connect()) as con, con:
             con.executemany("INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price, map_key, "
-                            "monster_key, level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                            "level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def repair_items(resolve: Callable[[str], tuple[str, str]], bad_keys: set[str],
+                 price: Callable[[str], int | None] | None = None) -> int:
+    """Pickups kept as an item no pickup message names (`bad_keys`: lootlog.unpickable_keys, a Cash item a cut-off
+    read was matched to) named again: (item, item_key) = resolve(item) when that gives an item not in bad_keys (and
+    its NPC price, `price(key)`, when given). The rows fixed; 0 with no database."""
+    if not PATH.exists() or not bad_keys:
+        return 0
+    fixed = 0
+    with closing(_connect()) as con, con:
+        found = con.execute("SELECT DISTINCT item, item_key FROM events WHERE kind = 'item' AND item_key != ''")
+        for item, key in [r for r in found.fetchall() if r[1] in bad_keys]:
+            name, new = resolve(item)
+            if not new or new in bad_keys:
+                continue
+            if price is None:
+                cur = con.execute("UPDATE events SET item = ?, item_key = ? WHERE kind = 'item' AND item = ? "
+                                  "AND item_key = ?", (name, new, item, key))
+            else:
+                cur = con.execute("UPDATE events SET item = ?, item_key = ?, npc_price = ? WHERE kind = 'item' "
+                                  "AND item = ? AND item_key = ?", (name, new, price(new), item, key))
+            fixed += cur.rowcount
+    return fixed
 
 
 def forget(character_id: str) -> None:
@@ -195,7 +221,6 @@ class Row(NamedTuple):
     item_key: str
     npc_price: int | None
     map_key: str
-    monster_key: str
     level: int | None
 
 
@@ -205,7 +230,7 @@ def events(character_id: str, since: float | None = None) -> list[Row]:
     if not PATH.exists():
         return []
     sql = ("SELECT e.log_id, l.started, l.ended, e.t, e.kind, e.amount, e.item, e.item_key, e.npc_price, e.map_key, "
-           "e.monster_key, e.level FROM events e JOIN logs l ON l.id = e.log_id WHERE l.character_id = ?")
+           "e.level FROM events e JOIN logs l ON l.id = e.log_id WHERE l.character_id = ?")
     args: list = [character_id]
     if since is not None:
         sql += " AND e.t >= ?"

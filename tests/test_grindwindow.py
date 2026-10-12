@@ -77,32 +77,29 @@ HAVE = {("level", 35): (31, False, 4 * 3600), ("item", 5): (2, False, 600), ("me
 
 
 def run_now(goals, **changes):
-    """A run on Henesys Hunting Ground I as grindlive.live says it: two monsters killed, a death warned of, a better
-    map for the level, each goal at HAVE's progress."""
+    """A run on Henesys Hunting Ground I as grindlive.live says it: a death warned of, a better map for the level,
+    each goal at HAVE's progress."""
     progress = [grindlive.GoalProgress(goal=g, have=HAVE.get((g.kind, g.target), (0, False, None))[0],
                                        done=HAVE.get((g.kind, g.target), (0, False, None))[1],
                                        eta_s=HAVE.get((g.kind, g.target), (0, False, None))[2]) for g in goals]
     live = dict(running=True, state="running", map_id=HG1, map_name="Henesys Hunting Ground I", wall_s=2520,
-                session=grindlive.Rates(exp_h=52_340, kills_h=486, mesos_h=8_120, loot_h=3_460, potions_h=1_240,
-                                        profit_h=10_340, active_s=2280),
-                recent=grindlive.Rates(exp_h=61_020, kills_h=552, mesos_h=9_400, loot_h=4_100, potions_h=1_100,
-                                       profit_h=12_400, active_s=300),
-                level=31, exp_pct=42.51, to_level_s=3900,
-                kills=[grindlive.Kill(monster_key=SNAIL, name="Snail", count=208),
-                       grindlive.Kill(monster_key=BLUE, name="Blue Snail", count=141)],
-                last_drop=None, capacity_h=684, kill_share=0.71, warnings=[("gl_warn_died", {"n": 2})], deaths=2,
-                potions=42, potion_cost=6_300, level_ups=[(NOON, 31)], goals=progress,
+                session=grindlive.Rates(exp_h=52_340, mesos_h=8_120, loot_h=3_460, potions_h=1_240, profit_h=10_340,
+                                        active_s=2280),
+                recent=grindlive.Rates(exp_h=61_020, mesos_h=9_400, loot_h=4_100, potions_h=1_100, profit_h=12_400,
+                                       active_s=300),
+                level=31, exp_pct=42.51, to_level_s=3900, last_drop=None, warnings=[("gl_warn_died", {"n": 2})],
+                deaths=2, potions=42, potion_cost=6_300, level_ups=[(NOON, 31)], goals=progress,
                 move_on=grindlive.Spot(map_id=HG2, map_name="Henesys Hunting Ground II", active_s=5400, exp_h=79_500,
-                                       profit_h=12_100, kills_h=640, sessions=3))
+                                       profit_h=12_100, sessions=3))
     return grindlive.Live(**{**live, **changes})
 
 
 RUN = grindlive.Summary(log_id=12, start=NOON, end=NOON + 4500, active_s=4200, exp=312_400, mesos=48_200, loot=41_300,
-                        potion_cost=5_200, profit=84_300, kills=1240, levels=(30, 31), deaths=1,
+                        potion_cost=5_200, profit=84_300, levels=(30, 31), deaths=1,
                         maps=[(HG1, "Henesys Hunting Ground I", 2880), (HG2, "Henesys Hunting Ground II", 1320)],
                         top_drops=[(POTION, "Red Potion", 84)], exp_h=267_771, profit_h=72_257)
 OLDER = grindlive.Summary(log_id=11, start=YESTERDAY, end=YESTERDAY + 2400, active_s=2200, exp=151_000, mesos=22_000,
-                          loot=18_400, potion_cost=3_100, profit=37_300, kills=1, levels=(30, 30), deaths=0,
+                          loot=18_400, potion_cost=3_100, profit=37_300, levels=(30, 30), deaths=0,
                           maps=[(HG2, "Henesys Hunting Ground II", 2200)], top_drops=[], exp_h=247_090, profit_h=61_036)
 
 
@@ -187,31 +184,24 @@ def test_the_now_tab_draws_the_live_run(qapp, win, settings, grind):
     assert spaced(win._state.text()) == "\u25cf Grinding" and win._state.property("state") == "running"
     tiles = {k: (spaced(t.name.text()), spaced(t.value.text()), spaced(t.sub.text())) for k, t in win._tiles.items()}
     assert tiles == {"exp": ("EXP / hour", "52,340", "Last 5 min: 61,020"),
-                     "kills": ("Kills / hour", "486", "Last 5 min: 552"),
                      "profit": ("Profit / hour", "10,340", "Last 5 min: 12,400")}
+    assert win._tiles["exp"].width() == win._tiles["profit"].width()      # the two share the row
     assert spaced(win._profit_line.text()) == "Per hour: 8,120 mesos + 3,460 loot \u2212 1,240 potions"
     assert spaced(win._level_text.text()) == "Lv. 31 · 42.51%" and win._level_bar.frac() == pytest.approx(0.4251)
     assert spaced(win._to_level.text()) == "Next level in about 1:05 h"
     assert spaced(win._level_up.text()) == "\u25b2 Lv. 31"
-    rows = [r for r in win._kill_rows if r.isVisibleTo(win)]
-    assert [(spaced(r.name.text()), spaced(r.count.text())) for r in rows] == [("Snail", "208"), ("Blue Snail", "141")]
-    assert rows[0].bar.frac() == 1.0 and rows[1].bar.frac() == pytest.approx(141 / 208)
-    assert spaced(win._kills_head.text()) == "KILLS · 349"
-    assert spaced(win._fit_text.text()) == "You kill 71% of what spawns here (about 684 / hr at most)."
-    assert texts(win._fit_card, "Warn") == [EN("gl_warn_died", n=2)]         # grindlive's warning, in words
+    assert texts(win._warn_card, "Caption") == ["THIS MAP"]
+    assert texts(win._warn_card, "Warn") == [EN("gl_warn_died", n=2)]        # grindlive's warning, in words
     assert spaced(win._toll.text()) == "Died 2 times · 42 potions (6,300 mesos)"
     # the better map is weighed against the last minutes here, as grindlive picks it
     assert spaced(win._move_text.text()) == ("Henesys Hunting Ground II fits your level and gave you +30% EXP/hr "
                                              "(79,500/h).")
     # a pickup: the numbers again at once
-    grind.run = lambda goals: run_now(goals, session=grindlive.Rates(exp_h=60_000, active_s=2400),
-                                      warnings=[("gl_warn_share", {"pct": 29, "cap": "684"})], kill_share=0.29)
+    grind.run = lambda goals: run_now(goals, session=grindlive.Rates(exp_h=60_000, active_s=2400), warnings=[])
     win._scanner.changed.emit()
     assert spaced(win._tiles["exp"].value.text()) == "60,000"
     assert not win._profit_line.isVisibleTo(win)            # no profit rate yet: nothing to spell out
-    # a low share's own warning says the share: the plain line steps aside
-    assert not win._fit_text.isVisibleTo(win)
-    assert texts(win._fit_card, "Warn") == [EN("gl_warn_share", pct=29, cap="684")]
+    assert not win._warn_card.isVisibleTo(win)              # no warning: no map card
 
 
 def test_a_paused_or_ended_run_says_so(qapp, win, grind):
@@ -249,9 +239,9 @@ def test_show_the_way_asks_for_the_map(qapp, win, grind):
     win._move_btn.click()
     assert asked == [HG2]
     grind.spots = [grindlive.Spot(map_id=HG2, map_name="Henesys Hunting Ground II", active_s=5400, exp_h=79_500,
-                                  profit_h=12_100, kills_h=640, sessions=3),
+                                  profit_h=12_100, sessions=3),
                    grindlive.Spot(map_id=HG1, map_name="Henesys Hunting Ground I", active_s=2700, exp_h=52_340,
-                                  profit_h=10_340, kills_h=486, sessions=1)]
+                                  profit_h=10_340, sessions=1)]
     win.open_tab("spots")
     cards = shown(win._pages["spots"], QFrame, "Line")
     shown(cards[1], QPushButton, "Act")[0].click()
@@ -261,19 +251,25 @@ def test_show_the_way_asks_for_the_map(qapp, win, grind):
 # ---------------------------------------------------------------- the lists
 
 def test_the_drops_tab_lists_the_rates_and_says_what_to_do_without_any(qapp, win, grind):
-    grind.drops = [grindlive.DropRate(item_key=POTION, item="Red Potion", count=84, kills=1012, one_in=12,
+    grind.drops = [grindlive.DropRate(item_key=POTION, item="Red Potion", count=84, active_s=16_200, per_h=18.67,
                                       monsters=[SNAIL]),
-                   grindlive.DropRate(item_key="item/9", item="Snail Shell", count=1, kills=40, one_in=None,
+                   grindlive.DropRate(item_key="item/8", item="Blue Snail Shell", count=3, active_s=2_571, per_h=4.2,
+                                      monsters=[BLUE]),
+                   grindlive.DropRate(item_key="item/9", item="Snail Shell", count=1, active_s=420, per_h=None,
                                       monsters=[SNAIL, BLUE, "monster/130101", "monster/1210100"])]
     win.open_tab("now")
     win._tabs.group.buttons()[1].click()                  # the Drops tab
     assert win._tab == "drops" and win._pages["drops"].isVisibleTo(win) and not win._pages["now"].isVisibleTo(win)
-    first, second = shown(win._pages["drops"], QFrame, "Line")
-    assert texts(first, "Name") == ["Red Potion"] and texts(first, "Odds") == ["1 in 12"]
-    assert texts(first, "Sub") == ["84 picked up in 1,012 kills", "from Snail"]
-    assert texts(second, "OddsNone") == ["Not enough kills yet"] and not texts(second, "Odds")
-    assert texts(second, "Sub") == ["1 picked up in 40 kills",
-                                    f"from Snail, Blue Snail, Red Snail {EN('lk_more', n=1)}"]
+    assert texts(win._pages["drops"], "Note") == [("How many of each item you pick up an hour, from all of this "
+                                                   "character's runs.")]
+    first, second, third = shown(win._pages["drops"], QFrame, "Line")
+    assert texts(first, "Name") == ["Red Potion"] and texts(first, "Rate") == ["19 per hour"]     # whole above 10
+    assert shown(first, QLabel, "Rate")[0].toolTip() == EN("gw_drop_per_h_tip")
+    assert texts(first, "Sub") == ["84 picked up in 4:30 h", "from Snail"]
+    assert texts(second, "Rate") == ["4.2 per hour"] and texts(second, "Sub") == ["3 picked up in 42 min",
+                                                                                   "from Blue Snail"]
+    assert texts(third, "RateNone") == ["Not enough time yet"] and not texts(third, "Rate")
+    assert texts(third, "Sub") == ["1 picked up in 7 min", f"from Snail, Blue Snail, Red Snail {EN('lk_more', n=1)}"]
     grind.drops = []
     win.open_tab("drops")                                   # read again: none now
     assert not shown(win._pages["drops"], QFrame, "Line")
@@ -283,16 +279,16 @@ def test_the_drops_tab_lists_the_rates_and_says_what_to_do_without_any(qapp, win
 
 def test_the_best_spots_tab_lights_the_best_and_says_what_to_do_without_any(qapp, win, grind):
     grind.spots = [grindlive.Spot(map_id=HG2, map_name="Henesys Hunting Ground II", active_s=5400, exp_h=79_500,
-                                  profit_h=12_100, kills_h=640, sessions=3),
+                                  profit_h=12_100, sessions=3),
                    grindlive.Spot(map_id=HG1, map_name="Henesys Hunting Ground I", active_s=2700, exp_h=52_340,
-                                  profit_h=10_340, kills_h=486, sessions=1)]
+                                  profit_h=10_340, sessions=1)]
     win.open_tab("spots")
     best, other = shown(win._pages["spots"], QFrame, "Line")
     assert best.property("best") is True and other.property("best") is False
     assert texts(best, "LitCaption") == ["BEST FOR YOU"] and not texts(other, "LitCaption")
     assert texts(best, "Name") == ["Henesys Hunting Ground II"]
-    assert (texts(best, "Num_exp"), texts(best, "Num_profit"), texts(best, "Num_kills")) == (["79,500"], ["12,100"],
-                                                                                              ["640"])
+    assert (texts(best, "Num_exp"), texts(best, "Num_profit")) == (["79,500"], ["12,100"])
+    assert texts(best, "Unit") == ["EXP / hr", "Profit / hr"]
     assert texts(best, "Sub") == ["1:30 h over 3 runs"] and texts(other, "Sub") == ["45 min in 1 run"]
     grind.spots = []
     win.open_tab("spots")
@@ -308,9 +304,9 @@ def test_a_history_row_opens_its_summary_and_back_returns(qapp, win, grind):
                                                    f"Yesterday · {clock(YESTERDAY)}\u2013{clock(YESTERDAY + 2400)}"]
     assert texts(rows[0], "Count") == ["1:10 h"]
     assert texts(rows[0], "Sub") == ["Henesys Hunting Ground I, Henesys Hunting Ground II"]
-    chips = [texts(rows[0], n) for n in ("Chip_exp", "Chip_profit", "Chip_kills", "Chip")]
-    assert chips == [["312.4K EXP"], ["84,300 profit"], ["1,240 kills"], ["Lv. 30 \u2192 31"]]
-    assert texts(rows[1], "Chip_kills") == ["1 kill"] and texts(rows[1], "Chip") == ["Lv. 30"]
+    chips = [texts(rows[0], n) for n in ("Chip_exp", "Chip_profit", "Chip")]
+    assert chips == [["312.4K EXP"], ["84,300 profit"], ["Lv. 30 \u2192 31"]]
+    assert texts(rows[1], "Chip") == ["Lv. 30"]
     QTest.mouseClick(rows[0], Qt.LeftButton)
     settle()
     assert win._sum_page.isVisibleTo(win) and not win._pages["history"].isVisibleTo(win)
@@ -333,8 +329,9 @@ def test_show_summary_opens_the_window_on_the_runs_card(qapp, win, settings):
     assert win.isVisible() and settings["grind_window"] is True and page.isVisibleTo(win)
     assert texts(page, "Caption") == ["RUN SUMMARY"]
     assert texts(page, "Sub")[0] == "1:10 h active · Lv. 30 \u2192 31 · Died once"
-    assert texts(page, "TileValue") == ["312.4K", "1,240", "84,300"]
-    assert texts(page, "TileSub") == ["267.8K/h", "1,063/h", "72,257/h"]
+    assert texts(page, "TileName_exp") + texts(page, "TileName_profit") == ["EXP", "Profit"]
+    assert texts(page, "TileValue") == ["312.4K", "84,300"]
+    assert texts(page, "TileSub") == ["267.8K/h", "72,257/h"]
     assert texts(page, "Sub")[1] == "48,200 mesos + 41,300 loot \u2212 5,200 potions"
     lines = shown(page, QFrame, "Line")
     assert [(texts(r, "Name"), texts(r, "Count")) for r in lines] == [
@@ -422,7 +419,7 @@ def test_it_follows_its_setting_and_its_x_turns_it_off(qapp, win, settings):
     assert set(settings["grind_window_geom"]) == {"x", "y", "w", "h"}        # its place kept as it hid
 
 
-def test_hebrew_mirrors_the_window(qapp, win):
+def test_hebrew_mirrors_the_window(qapp, win, grind):
     win.open_tab("now")
     settle()
     assert win._tiles["exp"].x() < win._tiles["profit"].x()
@@ -436,8 +433,16 @@ def test_hebrew_mirrors_the_window(qapp, win):
     assert [spaced(b.text()) for b in tabs] == [STRINGS[f"gw_tab_{k}"]["he"] for k in ("now", "drops", "spots",
                                                                                      "history")]
     assert tabs[0].x() > tabs[3].x()
-    kill = win._kill_rows[0]
-    assert kill.pic.x() > kill.count.x()                                  # the picture on the right, the count left
+    assert win._tiles["exp"].width() == win._tiles["profit"].width()
+    grind.drops = [grindlive.DropRate(item_key=POTION, item="Red Potion", count=84, active_s=16_200, per_h=4.2,
+                                      monsters=[SNAIL])]
+    win.open_tab("drops")
+    line = shown(win._pages["drops"], QFrame, "Line")[0]
+    rate = shown(line, QLabel, "Rate")[0]
+    assert spaced(rate.text()) == "4.2 לשעה" and "\u20664.2\u2069" in rate.text()   # its figure one LTR block
+    assert rate.x() < shown(line, QLabel, "Pic")[0].x()                 # the picture on the right, the rate left
+    assert texts(line, "RateNone") == []
+    win.open_tab("now")
     assert "Henesys Hunting Ground I" in spaced(win._map_name.text())    # the KB's English name, whole
 
 
@@ -463,32 +468,28 @@ def test_the_white_glass_takes_the_light_palette_and_back(qapp, win, settings):
 
 @needs_kb
 def test_the_rows_show_the_kbs_own_pictures(qapp, settings, profiles, grind):
-    """Ant Tunnel I in the real KB: the run's minimap, each monster's sprite, each drop's, a spot's minimap, and the
-    summary's maps and drops — each the KB's own picture (shown large on hover)."""
+    """Ant Tunnel I in the real KB: the run's minimap, each drop's picture, a spot's minimap, and the summary's maps
+    and drops — each the KB's own picture (shown large on hover)."""
     from maplehelper.kb import KnowledgeBase
     from maplehelper.ui.grindwindow import GrindWindow
     real = KnowledgeBase(REAL_KB)
-    tunnel, horny, zombie, cap = "010005060", "monster/19", "monster/21", "item/366"
+    tunnel, horny, cap = "010005060", "monster/19", "item/366"
     uri = lambda key: real.image_path(key).resolve().as_uri()      # the file a picture's hover shows
-    grind.run = lambda goals: run_now(goals, map_id=tunnel, map_name="Ant Tunnel I", move_on=None,
-                                      kills=[grindlive.Kill(monster_key=horny, name="Horny Mushroom", count=208),
-                                             grindlive.Kill(monster_key=zombie, name="Zombie Mushroom", count=141)])
-    grind.drops = [grindlive.DropRate(item_key=cap, item="Horny Mushroom Cap", count=84, kills=1012, one_in=12,
+    grind.run = lambda goals: run_now(goals, map_id=tunnel, map_name="Ant Tunnel I", move_on=None)
+    grind.drops = [grindlive.DropRate(item_key=cap, item="Horny Mushroom Cap", count=84, active_s=16_200, per_h=18.67,
                                       monsters=[horny])]
     grind.spots = [grindlive.Spot(map_id=tunnel, map_name="Ant Tunnel I", active_s=5400, exp_h=52_340,
-                                  profit_h=10_340, kills_h=486, sessions=3)]
+                                  profit_h=10_340, sessions=3)]
     w = GrindWindow(real, settings, profiles, Scanner(lootlog.Log(start=time.time() - 600)), I18n("en"))
     try:
         w.open_tab("now")
         assert uri(f"map/{tunnel}") in w._map_pic.toolTip() and not w._map_pic.pixmap().isNull()
-        assert [uri(horny) in r.pic.toolTip() for r in w._kill_rows] == [True, False]
-        assert uri(zombie) in w._kill_rows[1].pic.toolTip()
         w.open_tab("drops")
         assert uri(cap) in shown(w._pages["drops"], QLabel, "Pic")[0].toolTip()
         w.open_tab("spots")
         assert uri(f"map/{tunnel}") in shown(w._pages["spots"], QLabel, "MapPic")[0].toolTip()
         w.show_summary(grindlive.Summary(log_id=1, start=NOON, end=NOON + 900, active_s=900, exp=40_000, mesos=6_000,
-                                         loot=2_000, potion_cost=500, profit=7_500, kills=150, levels=(31, 31),
+                                         loot=2_000, potion_cost=500, profit=7_500, levels=(31, 31),
                                          deaths=0, maps=[(tunnel, "Ant Tunnel I", 900)],
                                          top_drops=[(cap, "Horny Mushroom Cap", 12)], exp_h=160_000, profit_h=30_000))
         tips = [p.toolTip() for p in shown(w._sum_page, QLabel, "MapPic") + shown(w._sum_page, QLabel, "Pic")]

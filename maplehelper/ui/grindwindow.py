@@ -2,20 +2,19 @@
 opens it, ui/grindbar.py; the run is the Loot Log's own, ui/lootscan.py). Four tabs and a run's summary, each read top
 to bottom:
 
-- Now: the run's map and state; its EXP, kills and profit per hour big (the whole run's rate, the last 5 minutes'
-  under each), the profit spelled out (mesos + loot − potions); the level's progress and the time to the next; the
-  kills per monster with their pictures; how much of what spawns on the map the player kills, and grindlive's
-  warnings; deaths and potions; a map the player's own runs say pays more for their level (Show the way); then the
-  goals, each with its progress bar and when it is reached, a ✕ to drop it, and a card to add one (a level, an item
-  searched among the KB's, or an amount of mesos).
-- Drops: every item this character picked up, how often it drops for them ("1 in 120", or not enough kills yet), how
-  many and from which monsters.
-- Best spots: the maps that paid this character best for their level (EXP, profit and kills per hour, the time spent
-  there, in how many runs), each with Show the way.
+- Now: the run's map and state; its EXP and profit per hour big (the whole run's rate, the last 5 minutes' under
+  each), the profit spelled out (mesos + loot − potions); the level's progress and the time to the next; grindlive's
+  warnings about the map; deaths and potions; a map the player's own runs say pays more for their level (Show the
+  way); then the goals, each with its progress bar and when it is reached, a ✕ to drop it, and a card to add one (a
+  level, an item searched among the KB's, or an amount of mesos).
+- Drops: every item this character picked up, how many come an hour ("4.2 per hour", or not enough time yet), how
+  many in how long, and from which monsters.
+- Best spots: the maps that paid this character best for their level (EXP and profit per hour, the time spent there,
+  in how many runs), each with Show the way.
 - History: the runs this character made, newest first; a click opens one's summary.
-- A run's summary (show_summary: the bar opens it when a run ends): its time, levels, EXP, kills, mesos, loot,
-  potions, profit, the per-hour figures, deaths, the maps with their time and the top drops with their pictures;
-  Back returns to the tabs.
+- A run's summary (show_summary: the bar opens it when a run ends): its time, levels, EXP, mesos, loot, potions,
+  profit, the per-hour figures, deaths, the maps with their time and the top drops with their pictures; Back returns
+  to the tabs.
 
 Every number is grindlive's, worked out from what this computer read (the pickup messages, the HUD) and the KB's
 tables: nothing is guessed here, and a tab with nothing to show yet says what to do. Built like the other windows over
@@ -33,7 +32,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QRe
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
                                QToolButton, QVBoxLayout, QWidget)
 
-from .. import bidi, dates, grindlive, lootlog, plan
+from .. import bidi, dates, grindlive, plan
 from ..i18n import NBSP, I18n
 from ..kb import KnowledgeBase
 from ..store import Profiles, Settings
@@ -42,6 +41,7 @@ from .controls import FlowLayout, Segmented
 from .gamesearch import glass_qss, rim
 from .gamesearch import search as find_items
 from .glass import SHADOW, EdgeResize
+from .grindbar import per_hour
 from .lookpick import line_icon
 from .lootoverlay import DOT, SQUARE, STAT_COLORS, _elapsed, _Fit, _glyph
 from .npcoverlay import (BOTTOM, GEOM_DEBOUNCE_MS, KEYS_CHECK_MS, OPACITY_DEFAULT, OPACITY_MAX, OPACITY_MIN, SIDE,
@@ -62,21 +62,21 @@ TYPE_DEBOUNCE_MS = 150              # a pause in the item search's typing before
 GUTTER = 4                          # between the cards and the scrollbar
 PICK_ROWS = 6                       # items the new goal's item search lists
 MONSTERS_SHOWN = 3                  # a drop's monsters named before "and N more"
+RATE_NONE_W = 72                    # "Not enough time yet" on a drop's end: two short lines, the monsters keep the room
 MAPS_SHOWN = 3                      # a history row's maps named before "and N more"
 MAP_PIC = (52, 38)                  # a map's minimap (most are wider than tall): the run's card, a spot's
 ROW_MAP = (40, 30)                  # ... a history row's, a summary's maps
-ROW_PIC, KILL_PIC, PICK_PIC = 30, 26, 24   # an item's or a monster's picture: a drop's, a kill's, a search row's
+ROW_PIC, PICK_PIC = 30, 24          # an item's picture: a drop's, a search row's
 GOAL_PIC, GLYPH = 24, 18            # a goal's icon: its item's picture, or the EXP's sparkle (a level), the mesos' coin
 VALUE_PX, VALUE_MIN_PX = 20, 12     # a tile's big number, stepped down to fit its tile
 LEVEL_MAX = 200                     # the highest level a goal can name
-# each figure in a colour of its own, in its tile, a spot's numbers and a run's chips: the Loot Log's EXP blue, kills
-# a monster's amber, profit a gain's green — readable on every dark glass tint, darkened by ink() on the white one
-COLORS = {"exp": STAT_COLORS["exp"], "kills": "#FFB066", "profit": "#4CD07D"}
+# each figure in a colour of its own, in its tile, a spot's numbers and a run's chips: the Loot Log's EXP blue, profit
+# a gain's green — readable on every dark glass tint, darkened by ink() on the white one
+COLORS = {"exp": STAT_COLORS["exp"], "profit": "#4CD07D"}
 GAIN, LOSS, WARN = "#4CD07D", "#FF8A80", "#FFB066"
 STATES = ("running", "paused", "dead", "stopped")
 STATE_COLORS = {"paused": WARN, "dead": LOSS}       # running lights in the accent, stopped is muted
 WARN_MARK, UP = "\u26a0\ufe0e", "\u25b2"
-SHARE_WARNING = "gl_warn_share"     # grindlive's warning for a low share of the map's spawns (it says the share too)
 # what an empty tab's card shows in its circle (U+FE0E: the plain glyph, not the colour emoji)
 EMPTY_ICONS = {"now": "\u2694\ufe0e", "drops": "\U0001F48E\ufe0e", "spots": "\U0001F5FA\ufe0e",
                "history": "\u231b\ufe0e"}
@@ -140,8 +140,8 @@ QFrame#Empty {{ background: {p.fill1}; border-radius: 12px; }}
 #WarnMark {{ color: {ink(WARN)}; font-family: "{SYMBOL_FONT}"; font-size: 12px; }}
 #Count {{ color: {p.text}; font-size: 13px; font-weight: 700; }}
 #Unit {{ color: {p.muted}; font-size: 10px; font-weight: 600; }}
-#Odds {{ color: {p.text}; font-size: 14px; font-weight: 700; }}
-#OddsNone {{ color: {p.muted}; font-size: 11px; }}
+#Rate {{ color: {p.text}; font-size: 14px; font-weight: 700; }}
+#RateNone {{ color: {p.muted}; font-size: 11px; }}
 #Up {{ color: {lit}; background: {_rgba(fill, 0.16)}; {chip} }}
 #Slot, #MapPic {{ background: {rim(0.06, p)}; border-radius: 6px; }}
 {figures}#TileValue {{ color: {p.text}; font-size: {VALUE_PX}px; font-weight: 700; }}
@@ -314,8 +314,8 @@ class _Bar(QWidget):
 
 
 class _Tile(QFrame):
-    """One big figure in its own colour (COLORS): its name, the number big (stepped down to fit its tile: three share
-    the width), the line under it."""
+    """One big figure in its own colour (COLORS): its name, the number big (stepped down to fit its tile: the tiles
+    share the width), the line under it."""
 
     def __init__(self, key: str):
         super().__init__(objectName=f"Tile_{key}")
@@ -354,39 +354,6 @@ class _Empty(QFrame):
         self.icon.setText(icon)
         self.title.setText(bidi.plain(title, rtl))
         self.hint.setText(bidi.plain(hint, rtl))
-
-
-class _KillRow(QWidget):
-    """One monster killed this run: its picture in a slot, its name over a bar of its share of the kills, and how
-    many on the end. Filled again in place every second; its picture only when another monster comes to the row."""
-
-    def __init__(self):
-        super().__init__()
-        h = QHBoxLayout(self)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(8)
-        self.pic = QLabel(objectName="Slot", alignment=Qt.AlignCenter)
-        self.pic.setFixedSize(KILL_PIC + 6, KILL_PIC + 6)
-        mid = QVBoxLayout()
-        mid.setContentsMargins(0, 0, 0, 0)
-        mid.setSpacing(4)
-        self.name = QLabel(objectName="Name")
-        self.bar = _Bar(4)
-        mid.addWidget(self.name)
-        mid.addWidget(self.bar)
-        self.count = QLabel(objectName="Count", alignment=Qt.AlignRight | Qt.AlignVCenter)
-        h.addWidget(self.pic)
-        h.addLayout(mid, 1)
-        h.addWidget(self.count)
-        self.key: str | None = None             # the monster whose picture the slot shows
-
-    def fill(self, kill, most: int, pics: _Pictures, rtl: bool) -> None:
-        if kill.monster_key != self.key:
-            self.key = kill.monster_key
-            pics.show(self.pic, kill.monster_key, KILL_PIC, KILL_PIC, kill.name)
-        self.name.setText(bidi.ltr_name(kill.name, rtl))
-        self.count.setText(bidi.ltr_name(f"{kill.count:,}", rtl))
-        self.bar.set(kill.count / most if most else 0.0, ink(COLORS["kills"]))
 
 
 class _WarnRow(QWidget):
@@ -511,7 +478,6 @@ class GrindWindow(EdgeResize, QWidget):
         self._lists: dict[str, list] = {}     # each list tab's rows as drawn: drawn again only when they change
         self._map_key: str | None = None      # the map whose picture the run's card shows
         self._exp_needs: dict[int, int] | None = None    # the KB's EXP to the next level (plan.exp_table), read once
-        self._kill_rows: list[_KillRow] = []
         self._warn_rows: list[_WarnRow] = []
         self._goal_rows: list[_GoalRow] = []
         self._goals_drawn: list | None = None   # the goals the rows were made for (made again when they change)
@@ -617,7 +583,7 @@ class GrindWindow(EdgeResize, QWidget):
         self._state = QLabel(objectName="State")
         h.addWidget(self._state, 0, Qt.AlignTop)
         r.addWidget(card)
-        # the three big figures, then the profit spelled out
+        # the two big figures, then the profit spelled out
         tiles = QWidget()
         trow = QHBoxLayout(tiles)
         trow.setContentsMargins(0, 0, 0, 0)
@@ -645,34 +611,18 @@ class GrindWindow(EdgeResize, QWidget):
         self._to_level = _label("", "Sub", wrap=True)
         lv.addWidget(self._to_level)
         r.addWidget(level)
-        # the kills, a row per monster (made as needed, kept: _fill_kills)
-        kills = QWidget()
-        k = QVBoxLayout(kills)
-        k.setContentsMargins(0, 0, 0, 0)
-        k.setSpacing(6)
-        self._kills_head = _label("", "Head")
-        k.addWidget(self._kills_head)
-        self._kill_lay = QVBoxLayout()
-        self._kill_lay.setContentsMargins(0, 0, 0, 0)
-        self._kill_lay.setSpacing(6)
-        k.addLayout(self._kill_lay)
-        self._kills_none = _label("", "Note", wrap=True)
-        k.addWidget(self._kills_none)
-        r.addWidget(kills)
-        # the map: how much of what spawns the player kills, and the warnings
-        self._fit_card = QFrame(objectName="Card")
-        f = QVBoxLayout(self._fit_card)
+        # the map: grindlive's warnings about it (shown only with one)
+        self._warn_card = QFrame(objectName="Card")
+        f = QVBoxLayout(self._warn_card)
         f.setContentsMargins(12, 9, 12, 10)
         f.setSpacing(5)
-        self._fit_head = _label("", "Caption")
-        self._fit_text = _label("", "Text", wrap=True)
-        f.addWidget(self._fit_head)
-        f.addWidget(self._fit_text)
+        self._warn_head = _label("", "Caption")
+        f.addWidget(self._warn_head)
         self._warn_lay = QVBoxLayout()
         self._warn_lay.setContentsMargins(0, 0, 0, 0)
         self._warn_lay.setSpacing(4)
         f.addLayout(self._warn_lay)
-        r.addWidget(self._fit_card)
+        r.addWidget(self._warn_card)
         # deaths and potions
         self._toll = _label("", "Sub", wrap=True)
         r.addWidget(self._toll)
@@ -820,15 +770,13 @@ class GrindWindow(EdgeResize, QWidget):
         self._goals_drawn = None
         self._map_key = None
         self._exp_needs = None
-        for row in self._kill_rows:
-            row.key = None
         self._fill_summary()
         self._fill()
 
     # ------------------------------------------------------------ words (all of them, for apply_language)
 
     def _caption(self, key: str) -> str:
-        """A section's small heading ("KILLS", "GOALS"): capitals in English, Hebrew has none."""
+        """A section's small heading ("THIS MAP", "GOALS"): capitals in English, Hebrew has none."""
         text = self.t(key)
         return text if self.t.rtl else text.upper()
 
@@ -842,13 +790,11 @@ class GrindWindow(EdgeResize, QWidget):
         self._make_tabs()
         self._make_kinds()
         self._retext_add()
-        self._fit_head.setText(bidi.plain(self._caption("gw_map_head"), rtl))
-        self._fit_text.setToolTip(t("gw_fit_tip"))
+        self._warn_head.setText(bidi.plain(self._caption("gw_map_head"), rtl))
         self._profit_line.setToolTip(t("gw_profit_tip"))
         self._move_head.setText(bidi.plain(self._caption("gw_move_on_head"), rtl))
         self._move_btn.setText(bidi.plain(t("gw_show_way"), rtl))
         self._move_btn.setToolTip(t("gw_show_way_tip"))
-        self._kills_none.setText(bidi.plain(t("gw_kills_none"), rtl))
         self._goals_head.setText(bidi.plain(self._caption("gw_goals_head"), rtl))
         self._goals_none.setText(bidi.plain(t("gw_goals_none"), rtl))
         # the cards keep a little room on the scrollbar's side (right, or left in Hebrew, where Qt moves it)
@@ -965,8 +911,7 @@ class GrindWindow(EdgeResize, QWidget):
             self._fill_run(live)
             self._fill_tiles(live)
             self._fill_level(live)
-            self._fill_kills(live)
-            self._fill_fit(live)
+            self._fill_warnings(live)
             self._fill_toll(live)
             self._fill_move_on(live)
         self._fill_goals(live.goals)
@@ -1000,13 +945,12 @@ class GrindWindow(EdgeResize, QWidget):
         self._state.setToolTip(tip)
 
     def _fill_tiles(self, live) -> None:
-        """EXP, kills and profit per hour: the whole run's rate big, the last minutes' under it; then what the profit
-        is made of."""
+        """EXP and profit per hour: the whole run's rate big, the last minutes' under it; then what the profit is made
+        of."""
         t, rtl = self.t, self.t.rtl
         s, recent = live.session, live.recent
         minutes = grindlive.RECENT_S // 60
-        for key, now, last in (("exp", s.exp_h, recent.exp_h), ("kills", s.kills_h, recent.kills_h),
-                               ("profit", s.profit_h, recent.profit_h)):
+        for key, now, last in (("exp", s.exp_h, recent.exp_h), ("profit", s.profit_h, recent.profit_h)):
             tile = self._tiles[key]
             tile.name.setText(bidi.plain(t(f"gw_tile_{key}"), rtl))
             tile.value.setText(bidi.ltr_name(_short(now), rtl))
@@ -1042,36 +986,9 @@ class GrindWindow(EdgeResize, QWidget):
             self._level_up.setToolTip(t("gw_level_ups_tip", list="\n".join(
                 f"{t('lv_short', n=lvl)} · {_clock(at)}" for at, lvl in ups)))
 
-    def _fill_kills(self, live) -> None:
-        """A row per monster killed, most first, each with its picture and its share of the kills; the rows kept
-        and filled in place."""
-        rtl = self.t.rtl
-        kills = live.kills
-        head = self._caption("gw_kills_head")
-        total = sum(k.count for k in kills)
-        self._kills_head.setText(bidi.plain(f"{head} · {total:,}" if kills else head, rtl))
-        while len(self._kill_rows) < len(kills):
-            row = _KillRow()
-            self._kill_lay.addWidget(row)
-            self._kill_rows.append(row)
-        most = max((k.count for k in kills), default=0)
-        for i, row in enumerate(self._kill_rows):
-            if i < len(kills):
-                row.fill(kills[i], most, self._pics, rtl)
-            row.setVisible(i < len(kills))
-        self._kills_none.setVisible(not kills)
-
-    def _fill_fit(self, live) -> None:
-        """The map's card: how much of what spawns the player kills (when the KB's spawns tell the most there is),
-        and grindlive's warnings in the player's language — a low share's own warning says the share, and what to do
-        about it, instead of the plain line."""
+    def _fill_warnings(self, live) -> None:
+        """The map's card: grindlive's warnings in the player's language, each with its ⚠; hidden with none."""
         t, rtl = self.t, self.t.rtl
-        fit = (live.capacity_h is not None and live.kill_share is not None
-               and all(key != SHARE_WARNING for key, _params in live.warnings))
-        if fit:
-            self._fit_text.setText(bidi.plain(t("gw_fit", pct=round(live.kill_share * 100),
-                                                cap=_block(f"{live.capacity_h:,}", rtl)), rtl))
-        self._fit_text.setVisible(fit)
         lines = [bidi.plain(t(key, **params), rtl) for key, params in live.warnings]
         while len(self._warn_rows) < len(lines):
             row = _WarnRow()
@@ -1080,7 +997,7 @@ class GrindWindow(EdgeResize, QWidget):
         for i, row in enumerate(self._warn_rows):
             row.text.setText(lines[i] if i < len(lines) else "")
             row.setVisible(i < len(lines))
-        self._fit_card.setVisible(fit or bool(lines))
+        self._warn_card.setVisible(bool(lines))
 
     def _fill_toll(self, live) -> None:
         """What the run cost: deaths, and the potions drunk with what they cost."""
@@ -1383,8 +1300,8 @@ class GrindWindow(EdgeResize, QWidget):
         return text
 
     def _drop_row(self, d, _i: int = 0) -> QFrame:
-        """One item: its picture, its name, how many in how many kills and from which monsters, and on the end how
-        often it drops ("1 in 120"), or that the kills are too few to say yet."""
+        """One item: its picture, its name, how many were picked up in how long and from which monsters, and on the
+        end how many come an hour ("4.2 per hour"), or that the time is too short to say yet."""
         t, rtl = self.t, self.t.rtl
         card = QFrame(objectName="Line")
         h = QHBoxLayout(card)
@@ -1394,8 +1311,8 @@ class GrindWindow(EdgeResize, QWidget):
         v = QVBoxLayout()
         v.setSpacing(2)
         v.addWidget(_label(bidi.ltr_name(d.item, rtl), "Name", wrap=True))
-        v.addWidget(_label(bidi.plain(t("gw_drop_sub", n=f"{d.count:,}", kills=_block(f"{d.kills:,}", rtl)), rtl),
-                           "Sub", wrap=True))
+        v.addWidget(_label(bidi.plain(t("gw_drop_sub", n=f"{d.count:,}", time=_elapsed(t, d.active_s)), rtl), "Sub",
+                           wrap=True))
         names = []
         for m in d.monsters:
             name = str((self._kb.get(m) or {}).get("name") or m)
@@ -1405,19 +1322,19 @@ class GrindWindow(EdgeResize, QWidget):
             v.addWidget(_label(bidi.plain(t("gw_drop_from", list=self._names(names, MONSTERS_SHOWN)), rtl), "Sub",
                                wrap=True))
         h.addLayout(v, 1)
-        if d.one_in:
-            odds = _label(bidi.plain(t("gw_one_in", n=_block(f"{d.one_in:,}", rtl)), rtl), "Odds")
-            odds.setToolTip(t("gw_one_in_tip", n=f"{d.one_in:,}"))
+        if d.per_h is not None:
+            rate = _label(bidi.plain(t("gw_drop_per_h", n=_block(per_hour(d.per_h), rtl)), rtl), "Rate")
+            rate.setToolTip(t("gw_drop_per_h_tip"))
         else:
-            odds = _label(bidi.plain(t("gw_not_enough"), rtl), "OddsNone", wrap=True)
-            odds.setMaximumWidth(96)
-            odds.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        h.addWidget(odds, 0, Qt.AlignRight | Qt.AlignTop)
+            rate = _label(bidi.plain(t("gw_not_enough"), rtl), "RateNone", wrap=True)
+            rate.setFixedWidth(RATE_NONE_W)
+            rate.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        h.addWidget(rate, 0, Qt.AlignRight | Qt.AlignTop)
         return card
 
     def _spot_row(self, sp, i: int = 0) -> QFrame:
         """One map: its minimap, its name and the time spent there, Show the way, and what it paid per hour (EXP,
-        profit, kills) in the tiles' colours. The best first, lit in the accent."""
+        profit) in the tiles' colours. The best first, lit in the accent."""
         t, rtl = self.t, self.t.rtl
         card = QFrame(objectName="Line")
         card.setProperty("best", i == 0)
@@ -1440,7 +1357,7 @@ class GrindWindow(EdgeResize, QWidget):
         v.addLayout(top)
         nums = QHBoxLayout()
         nums.setSpacing(6)
-        for key, value in (("exp", sp.exp_h), ("profit", sp.profit_h), ("kills", sp.kills_h)):
+        for key, value in (("exp", sp.exp_h), ("profit", sp.profit_h)):
             cell = QVBoxLayout()
             cell.setSpacing(0)
             cell.addWidget(_label(bidi.ltr_name(_short(value), rtl), f"Num_{key}"))
@@ -1479,8 +1396,8 @@ class GrindWindow(EdgeResize, QWidget):
         return self.t("lv_short", n=lv) if lv is not None else ""
 
     def _history_row(self, s, _i: int = 0) -> _Press:
-        """One run: its first map's minimap; when it was and how long it counted; its maps; its EXP, profit, kills
-        and levels as chips. A click opens its summary."""
+        """One run: its first map's minimap; when it was and how long it counted; its maps; its EXP, profit and
+        levels as chips. A click opens its summary."""
         t, rtl = self.t, self.t.rtl
         row = _Press("Row")
         row.setToolTip(t("gw_row_tip"))
@@ -1503,8 +1420,7 @@ class GrindWindow(EdgeResize, QWidget):
         if names:
             v.addWidget(_label(bidi.plain(self._names(names, MAPS_SHOWN), rtl), "Sub", wrap=True))
         chips = [(t("gw_chip_exp", n=_block(_short(s.exp), rtl)), "Chip_exp"),
-                 (t("gw_chip_profit", n=_block(_short(s.profit), rtl)), "Chip_profit"),
-                 (t("gw_chip_kills", n=f"{s.kills:,}"), "Chip_kills")]
+                 (t("gw_chip_profit", n=_block(_short(s.profit), rtl)), "Chip_profit")]
         levels = self._levels(s.levels)
         if levels:
             chips.append((levels, "Chip"))
@@ -1516,9 +1432,9 @@ class GrindWindow(EdgeResize, QWidget):
     # ------------------------------------------------------------ a run's summary
 
     def _fill_summary(self) -> None:
-        """The summary's card: when the run was, its active time, levels and deaths; its EXP, kills and profit big
-        with their per-hour rates; the mesos, loot and potions behind the profit; the maps with their time; the top
-        drops with their pictures."""
+        """The summary's card: when the run was, its active time, levels and deaths; its EXP and profit big with their
+        per-hour rates; the mesos, loot and potions behind the profit; the maps with their time; the top drops with
+        their pictures."""
         s = self._summary
         if s is None:
             return
@@ -1542,8 +1458,7 @@ class GrindWindow(EdgeResize, QWidget):
         trow = QHBoxLayout(tiles)
         trow.setContentsMargins(0, 0, 0, 0)
         trow.setSpacing(6)
-        for key, total, per in (("exp", s.exp, s.exp_h), ("kills", s.kills, lootlog.per_hour(s.kills, s.active_s)),
-                                ("profit", s.profit, s.profit_h)):
+        for key, total, per in (("exp", s.exp, s.exp_h), ("profit", s.profit, s.profit_h)):
             tile = _Tile(key)
             tile.name.setText(bidi.plain(t(f"gw_sum_{key}"), rtl))
             tile.value.setText(bidi.ltr_name(_short(total), rtl))

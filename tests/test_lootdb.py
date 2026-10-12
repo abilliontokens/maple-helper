@@ -81,7 +81,7 @@ def test_deleting_a_character_deletes_its_logs_and_pickups(isolated_store, kb):
     assert _rows("SELECT amount FROM events") == [(7,)]
 
 
-# the database as the first version made it (before each pickup's map, kill and level), as players have it
+# the database as the first version made it (before each pickup's map and level), as players have it
 V1_SCHEMA = """
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY,
@@ -105,6 +105,17 @@ CREATE INDEX IF NOT EXISTS events_log ON events(log_id);
 CREATE INDEX IF NOT EXISTS logs_character ON logs(character_id, started);
 PRAGMA user_version = 1;
 """
+# version 2's: the first one's tables with each pickup's map, an EXP gain's kill (dropped in 3) and the level
+V2_SCHEMA = V1_SCHEMA.replace("PRAGMA user_version = 1;", """
+ALTER TABLE events ADD COLUMN map_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN monster_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN level INTEGER;
+PRAGMA user_version = 2;
+""")
+
+
+def _columns() -> list[str]:
+    return [r[1] for r in _rows("PRAGMA table_info(events)")]
 
 
 def test_a_version_1_database_gets_the_new_columns_in_place_and_keeps_its_rows(isolated_store, kb):
@@ -112,14 +123,53 @@ def test_a_version_1_database_gets_the_new_columns_in_place_and_keeps_its_rows(i
         con.executescript(V1_SCHEMA + "INSERT INTO logs VALUES (1, 'c1', 'Kiwi', 1000.0, 1100.0);"
                           "INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price) VALUES "
                           f"(1, 1010.0, 'exp', 21, '', '', NULL), (1, 1020.0, 'item', 2, 'Leaf', '{LEAF}', 5);")
-    assert lootdb.events("c1") == [lootdb.Row(1, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "", "", None),
-                                   lootdb.Row(1, 1000.0, 1100.0, 1020.0, "item", 2, "Leaf", LEAF, 5, "", "", None)]
-    assert _rows("PRAGMA user_version") == [(lootdb.VERSION,)] == [(2,)]
+    assert lootdb.events("c1") == [lootdb.Row(1, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "", None),
+                                   lootdb.Row(1, 1000.0, 1100.0, 1020.0, "item", 2, "Leaf", LEAF, 5, "", None)]
+    assert _rows("PRAGMA user_version") == [(lootdb.VERSION,)] == [(3,)]
+    assert "monster_key" not in _columns() and {"map_key", "level"} <= set(_columns())
     b = lootdb.open_log("c1", "Kiwi", 2000.0)
-    lootdb.add_events(b, [lootlog.Event(2010.0, "exp", 32, map="102000000", monster="monster/axe-stump", level=12)], kb)
-    assert lootdb.events("c1")[-1] == lootdb.Row(b, 2000.0, None, 2010.0, "exp", 32, "", "", None, "102000000",
-                                                 "monster/axe-stump", 12)
+    lootdb.add_events(b, [lootlog.Event(2010.0, "exp", 32, map="102000000", level=12)], kb)
+    assert lootdb.events("c1")[-1] == lootdb.Row(b, 2000.0, None, 2010.0, "exp", 32, "", "", None, "102000000", 12)
     assert _rows("SELECT COUNT(*) FROM events") == [(3,)]
+
+
+def test_a_version_2_database_loses_the_kills_and_keeps_its_rows(isolated_store, kb):
+    """Version 2 kept an EXP gain's kill, matched from its EXP: a pickup message never says what was killed."""
+    with closing(sqlite3.connect(lootdb.PATH)) as con:
+        con.executescript(V2_SCHEMA + "INSERT INTO logs VALUES (1, 'c1', 'Kiwi', 1000.0, 1100.0);"
+                          "INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price, map_key, "
+                          "monster_key, level) VALUES "
+                          "(1, 1010.0, 'exp', 21, '', '', NULL, '102000000', 'monster/dark-stump', 12), "
+                          f"(1, 1020.0, 'item', 2, 'Leaf', '{LEAF}', 5, '102000000', '', 12);")
+    assert "monster_key" in _columns()
+    assert lootdb.events("c1") == [
+        lootdb.Row(1, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "102000000", 12),
+        lootdb.Row(1, 1000.0, 1100.0, 1020.0, "item", 2, "Leaf", LEAF, 5, "102000000", 12)]
+    assert _rows("PRAGMA user_version") == [(3,)] and "monster_key" not in _columns()
+    lootdb.add_events(lootdb.open_log("c1", "Kiwi", 2000.0), [lootlog.Event(2010.0, "mesos", 9)], kb)
+    assert _rows("SELECT COUNT(*) FROM events") == [(3,)]
+
+
+def test_items_logged_as_one_no_pickup_names_are_named_again(isolated_store):
+    """59 Green Mushroom Caps were kept as the Green Mushroom Hat (item/3551, a Cash Hat): the cap's, and its price."""
+    tr = lootlog.Tracker({"green mushroom cap": "item/360", "\0green mushroom cap": "Green Mushroom Cap",
+                          "leaf": LEAF, "\0leaf": "Leaf"}, {"item/360"})
+    bad = {"item/3551", "item/3285"}
+    assert lootdb.repair_items(tr.resolve, bad) == 0 and not lootdb.PATH.exists()     # (no database: none made)
+    a = lootdb.open_log("c1", "Kiwi", 1000.0)
+    with closing(sqlite3.connect(lootdb.PATH)) as con, con:
+        con.executemany("INSERT INTO events (log_id, t, kind, amount, item, item_key, npc_price) VALUES "
+                        "(?, ?, 'item', 1, ?, ?, NULL)",
+                        [(a, 1001.0, "Green Mushroom Hat", "item/3551"), (a, 1002.0, "Green Mushroom Hat", "item/3551"),
+                         (a, 1003.0, "Leaf", LEAF), (a, 1004.0, "Blue Mushroom Hat", "item/3285"),
+                         (a, 1005.0, "Green Mushroom", "")])
+        con.execute("INSERT INTO events (log_id, t, kind, amount) VALUES (?, 1006.0, 'exp', 21)", (a,))
+    assert lootdb.repair_items(tr.resolve, bad, price={"item/360": 14}.get) == 2
+    assert _rows("SELECT item, item_key, npc_price FROM events ORDER BY t") == [
+        ("Green Mushroom Cap", "item/360", 14), ("Green Mushroom Cap", "item/360", 14), ("Leaf", LEAF, None),
+        ("Blue Mushroom Hat", "item/3285", None),       # (no item it reads as: kept as it was)
+        ("Green Mushroom", "", None), ("", "", None)]
+    assert lootdb.repair_items(tr.resolve, bad) == 0
 
 
 def test_events_come_back_oldest_first_and_logs_newest_first(isolated_store, kb):
@@ -127,7 +177,7 @@ def test_events_come_back_oldest_first_and_logs_newest_first(isolated_store, kb)
     assert lootdb.events("c1") == [] and lootdb.logs("c1") == [] and not lootdb.PATH.exists()     # (none made)
     a = lootdb.open_log("c1", "Kiwi", 1000.0)
     lootdb.add_events(a, [lootlog.Event(1020.0, "mesos", 27, map="102000000", level=12),
-                          lootlog.Event(1010.0, "exp", 21, map="102000000", monster="monster/dark-stump", level=12)], kb)
+                          lootlog.Event(1010.0, "exp", 21, map="102000000", level=12)], kb)
     lootdb.end_log(a, 1100.0)
     other = lootdb.open_log("c2", "Other", 1500.0)
     lootdb.add_events(other, [lootlog.Event(1510.0, "exp", 99)], kb)
@@ -135,9 +185,9 @@ def test_events_come_back_oldest_first_and_logs_newest_first(isolated_store, kb)
     b = lootdb.open_log("c1", "Kiwi", 2000.0)
     lootdb.add_events(b, [lootlog.Event(2010.0, "item", 1, "Leaf", LEAF, map="100000000", level=13)], kb)
     assert lootdb.events("c1") == [
-        lootdb.Row(a, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "102000000", "monster/dark-stump", 12),
-        lootdb.Row(a, 1000.0, 1100.0, 1020.0, "mesos", 27, "", "", None, "102000000", "", 12),
-        lootdb.Row(b, 2000.0, None, 2010.0, "item", 1, "Leaf", LEAF, farm.value(kb, LEAF).price, "100000000", "", 13)]
+        lootdb.Row(a, 1000.0, 1100.0, 1010.0, "exp", 21, "", "", None, "102000000", 12),
+        lootdb.Row(a, 1000.0, 1100.0, 1020.0, "mesos", 27, "", "", None, "102000000", 12),
+        lootdb.Row(b, 2000.0, None, 2010.0, "item", 1, "Leaf", LEAF, farm.value(kb, LEAF).price, "100000000", 13)]
     assert [r.t for r in lootdb.events("c1", since=1020.0)] == [1020.0, 2010.0] and lootdb.events("c3") == []
     assert lootdb.logs("c1") == [(b, 2000.0, None), (a, 1000.0, 1100.0)]
     assert lootdb.logs("c1", limit=1) == [(b, 2000.0, None)] and lootdb.logs("c2") == [(other, 1500.0, 1600.0)]

@@ -1,6 +1,8 @@
-"""The live grind numbers (grindlive.py): EXP lines matched to kills, rates over active time, deaths, level-ups and
-potions from the HUD reads, time to level, spawn capacity, warnings, alerts, goals, and from the loot database the
-player's own drop rates, best spots and past runs."""
+"""The live grind numbers (grindlive.py): rates over active time, deaths, level-ups and potions from the HUD reads,
+time to level, warnings, alerts, goals, the last drop's rate this run, and from the loot database the player's own
+drop rates (per active hour on the maps where they were picked up), best spots and past runs. No kills anywhere: a
+pickup message never says which monster gave it."""
+import dataclasses
 import json
 from pathlib import Path
 
@@ -49,77 +51,25 @@ def rocky(kb) -> str:
     return _map_with(kb, "Snail", "Red Snail", "Dark Stump", "Axe Stump", "Dark Axe Stump")
 
 
-def _exp(t0: int, t1: int, step: int, amount: int, mid: str, monster: str = "", level: int | None = None) -> list:
-    return [Event(float(t), "exp", amount, map=mid, monster=monster, level=level) for t in range(t0, t1 + 1, step)]
+def _exp(t0: int, t1: int, step: int, amount: int, mid: str, level: int | None = None) -> list:
+    return [Event(float(t), "exp", amount, map=mid, level=level) for t in range(t0, t1 + 1, step)]
 
 
 def _read(t, mid, level=10, exp=1000, hp=500, hp_max=500, mp=100, mp_max=100, pct=None) -> HudSample:
     return HudSample(float(t), mid, level, exp, pct, hp, hp_max, mp, mp_max)
 
 
-# ---------------------------------------------------------------- matching kills
+def _spawning(kb, mid: str) -> set[str]:
+    """The keys of the monsters that spawn on a map."""
+    return {k for k, *_ in gamelookup.map_monsters(kb, mid)}
+
+
+# ---------------------------------------------------------------- a live replay
 
 @needs_kb
-def test_an_exp_line_is_the_monster_with_exactly_that_exp_on_the_map(kb, rocky):
-    axe, dark = _mob(kb, "Axe Stump"), _mob(kb, "Dark Axe Stump")
-    m = grindlive.Matcher(kb)
-    assert m.monster(rocky, axe["exp"]) == axe["key"]
-    assert m.monster("map/" + rocky, dark["exp"]) == dark["key"]          # a KB map key works too
-    on = _on_maps(kb)
-    elsewhere = next(mid for mid in sorted(on) if "Axe Stump" not in on[mid])
-    assert m.monster(elsewhere, axe["exp"]) == ""                          # no Axe Stump spawns there
-    assert m.monster("", axe["exp"]) == "" and m.monster(rocky, 0) == ""
-    assert m.exact == 2
-
-
-@needs_kb
-def test_a_tie_goes_to_the_monster_that_spawns_most(kb, monkeypatch):
-    """Jr. Boogie 1 and 2 give the same EXP: on a map with more of one, it is that one; where both spawn alike,
-    always the same one (by name)."""
-    b1, b2 = _mob(kb, "Jr. Boogie 1"), _mob(kb, "Jr. Boogie 2")
-    assert b1["exp"] == b2["exp"]
-    both = _map_with(kb, "Jr. Boogie 1", "Jr. Boogie 2")
-    assert grindlive.Matcher(kb).monster(both, b1["exp"]) == b1["key"]
-    real = gamelookup.map_monsters
-    monkeypatch.setattr(gamelookup, "map_monsters", lambda k, mid: [(b1["key"], b1["monster"], 21, 2),
-                                                                     (b2["key"], b2["monster"], 21, 7)]
-                        if mid == "999000001" else real(k, mid))
-    assert grindlive.Matcher(kb).monster("999000001", b1["exp"]) == b2["key"]
-
-
-@needs_kb
-def test_a_bonus_ratio_is_learned_after_five_exact_matches(kb, rocky):
-    """A 20% bonus on three monsters (25, 38, 52: no monster's own EXP): once five lines matched exactly, three lines
-    that agree on one ratio from different monsters teach it, and lines that fit it are those monsters' kills."""
-    ds, ax, dax = (_mob(kb, n) for n in ("Dark Stump", "Axe Stump", "Dark Axe Stump"))
-    bonus = [round(r["exp"] * 1.2) for r in (ds, ax, dax)]
-    early = grindlive.Matcher(kb)
-    assert early.monster(rocky, ds["exp"]) and early.monster(rocky, ax["exp"])
-    assert [early.monster(rocky, v) for v in bonus * 3] == [""] * 9       # two exact matches: nothing learned
-    m = grindlive.Matcher(kb)
-    for r in (ds, ax, dax, ds, ax):
-        assert m.monster(rocky, r["exp"]) == r["key"]
-    assert [m.monster(rocky, v) for v in bonus] == ["", "", dax["key"]]
-    assert m.ratio == pytest.approx(1.2, abs=0.02)
-    assert [m.monster(rocky, v) for v in bonus] == [ds["key"], ax["key"], dax["key"]]
-
-
-@needs_kb
-def test_an_exp_line_that_matches_no_monster_is_no_kill(kb, rocky):
-    """The live check's 18, 30 and 1 match no monster there; one value seen again and again teaches no ratio (it would
-    fit one to every monster)."""
-    m = grindlive.Matcher(kb)
-    for name in ("Dark Stump", "Axe Stump", "Snail", "Red Snail", "Dark Axe Stump", "Dark Stump"):
-        assert m.monster(rocky, _mob(kb, name)["exp"])
-    assert [m.monster(rocky, v) for v in (18, 30, 1, 18, 18, 18)] == [""] * 6
-    assert m.ratio is None
-
-
-@needs_kb
-def test_a_live_session_counts_its_stump_lines_as_kills(kb, rocky):
-    """The 5 minutes of live reads (test_lootlog's) on a map whose spawns hold those monsters: each line with a
-    monster's exact EXP is its kill (Axe Stump 32, Dark Stump 21, Dark Axe Stump 43, Red Snail 8, Snail 2), the 18s,
-    30 and 1 are EXP but no kill. Tagged as the scanner does, or matched afterwards in a run that has no tags."""
+def test_a_live_session_replayed_gives_its_exp_mesos_and_last_drop_per_active_hour(kb, rocky):
+    """The 5 minutes of live reads (test_lootlog's) on Rocky Road II: every EXP line counts (20 lines, 358 EXP), the
+    rates are the totals over the active time, and the last drop's rate is its count this run per active hour."""
     raw = json.loads((FIX / "loot_reads_live.json").read_text(encoding="utf-8"))
     tr = lootlog.Tracker(lootlog.item_names(kb))
     lg = lootlog.Log(start=0.0)
@@ -129,26 +79,61 @@ def test_a_live_session_counts_its_stump_lines_as_kills(kb, rocky):
         e.map = rocky
     lines = [e.amount for e in lg.events if e.kind == "exp"]
     assert (len(lines), sum(lines)) == (20, 358)
-    untagged = grindlive.live(kb, lg, None, [], now=300.0)
-    want = {"Dark Stump": 5, "Snail": 5, "Axe Stump": 2, "Dark Axe Stump": 2, "Red Snail": 1}
-    assert {k.name: k.count for k in untagged.kills} == want
-    assert [k.name for k in untagged.kills][:2] == ["Dark Stump", "Snail"]          # most first
-    m = grindlive.Matcher(kb)
-    for e in lg.events:
-        if e.kind == "exp":
-            e.monster = m.monster(e.map, e.amount)
-    tagged = grindlive.live(kb, lg, None, [], now=300.0)
-    assert tagged.kills == untagged.kills
-    assert tagged.session.kills_h == round(15 * 3600 / tagged.session.active_s)
-    assert tagged.map_name == "Rocky Road II" and tagged.state == "running"
-    assert tagged.last_drop[:2] == ("Red Snail Shell", RED_SNAIL_SHELL)
+    mesos = sum(e.amount for e in lg.events if e.kind == "mesos")
+    shells = sum(e.amount for e in lg.events if e.key == RED_SNAIL_SHELL)
+    assert mesos > 0 and shells > 0
+    lv = grindlive.live(kb, lg, None, [], now=300.0)
+    active = lv.session.active_s
+    assert grindlive.MIN_RATE_S <= active <= 300
+    assert lv.session.exp_h == round(358 * 3600 / active) and lv.session.mesos_h == round(mesos * 3600 / active)
+    assert lv.map_name == "Rocky Road II" and lv.state == "running"
+    assert lv.last_drop == ("Red Snail Shell", RED_SNAIL_SHELL, pytest.approx(shells * 3600 / active))
+    assert grindlive.summary(kb, lg, None).exp == 358
+
+
+@needs_kb
+def test_the_last_drop_is_its_count_this_run_per_active_hour(kb, rocky):
+    """Leaves, 1 then 2 at a time, and a Firewood between: the last drop is the Leaf, 4 of them over 10 minutes of
+    active time (24 an hour); a pickup with no KB item counts by its name; under a minute of active time, no rate."""
+    lg = lootlog.Log(start=0.0)
+    lg.add(_exp(0, 600, 10, 30, rocky))
+    lg.add([Event(100.0, "item", 1, "Leaf", LEAF, map=rocky), Event(200.0, "item", 1, "Firewood", FIREWOOD, map=rocky),
+            Event(300.0, "item", 1, "Leaf", LEAF, map=rocky), Event(400.0, "item", 2, "Leaf", LEAF, map=rocky)])
+    lv = grindlive.live(kb, lg, None, [], now=600.0)
+    assert lv.session.active_s == pytest.approx(600)
+    assert lv.last_drop == ("Leaf", LEAF, pytest.approx(4 * 3600 / 600))
+    lg.add([Event(500.0, "item", 1, "Glowing Pebble", ""), Event(550.0, "item", 1, "Glowing Pebble", "")])
+    assert grindlive.live(kb, lg, None, [], now=600.0).last_drop == ("Glowing Pebble", "", pytest.approx(2 * 3600 / 600))
+    early = lootlog.Log(start=0.0)
+    early.add(_exp(0, 50, 10, 30, rocky) + [Event(40.0, "item", 1, "Leaf", LEAF, map=rocky)])
+    assert grindlive.live(kb, early, None, [], now=50.0).last_drop == ("Leaf", LEAF, None)
+
+
+def test_live_carries_no_kill_fields():
+    """A Live, a Rates, a Spot and a Summary are made of the contract's fields alone: nothing counts kills."""
+    rates = Rates(exp_h=18_000, mesos_h=9_000, loot_h=6_000, potions_h=1_000, profit_h=14_000, active_s=600.0)
+    spot = grindlive.Spot(map_id="104040000", map_name="Henesys Hunting Ground I", active_s=900.0, exp_h=20_000,
+                          profit_h=12_000, sessions=2)
+    lv = grindlive.Live(running=True, state="running", map_id="104040000", map_name="Henesys Hunting Ground I",
+                        wall_s=700.0, session=rates, recent=rates, level=20, exp_pct=12.5, to_level_s=1800.0,
+                        last_drop=("Leaf", LEAF, 24.0), warnings=[], deaths=0, potions=3, potion_cost=150,
+                        level_ups=[], goals=[], move_on=spot)
+    sm = grindlive.Summary(log_id=1, start=0.0, end=700.0, active_s=600.0, exp=3000, mesos=1500, loot=1000,
+                           potion_cost=150, profit=2350, levels=(20, 20), deaths=0, maps=[], top_drops=[],
+                           exp_h=18_000, profit_h=14_100)
+    fields = {c: {f.name for f in dataclasses.fields(c)} for c in (grindlive.Live, Rates, grindlive.Spot,
+                                                                     grindlive.Summary, grindlive.DropRate)}
+    for names in fields.values():
+        assert not {n for n in names if "kill" in n or n in ("capacity_h", "one_in")}
+    assert (lv.last_drop[2], lv.move_on.exp_h, sm.exp_h) == (24.0, 20_000, 18_000)
+    assert not hasattr(grindlive, "Matcher") and not hasattr(grindlive, "Kill")
 
 
 # ---------------------------------------------------------------- rates and state
 
 @needs_kb
 def test_rates_count_active_time_only(kb, rocky):
-    """Ten minutes of kills, ten idle, ten more: each gap counts up to IDLE_S; the recent rates are the last five
+    """Ten minutes of EXP lines, ten idle, ten more: each gap counts up to IDLE_S; the recent rates are the last five
     minutes of active time."""
     lg = lootlog.Log(start=0.0)
     lg.add(_exp(0, 600, 10, 30, rocky) + _exp(1200, 1800, 10, 30, rocky))
@@ -196,9 +181,9 @@ def test_a_long_runs_rates_are_over_the_pickups_its_log_still_holds(kb, rocky, m
 def test_no_run_is_stopped_with_zeros(kb):
     c = Character("c1", "Kiwi", "Warrior", "Fighter", 30, exp_pct=40.0)
     lv = grindlive.live(kb, None, c, [Goal("level", 31), Goal("mesos", 100)])
-    assert (lv.running, lv.state, lv.session, lv.recent, lv.kills, lv.deaths, lv.potions) == (
-        False, "stopped", Rates(), Rates(), [], 0, 0)
-    assert (lv.level, lv.exp_pct, lv.last_drop, lv.capacity_h, lv.move_on) == (30, 40.0, None, None, None)
+    assert (lv.running, lv.state, lv.session, lv.recent, lv.deaths, lv.potions) == (
+        False, "stopped", Rates(), Rates(), 0, 0)
+    assert (lv.level, lv.exp_pct, lv.last_drop, lv.move_on) == (30, 40.0, None, None)
     assert [(g.have, g.done, g.eta_s) for g in lv.goals] == [(30, False, None), (0, False, None)]
     assert grindlive.alerts(kb, None, c, [], [], 0.3, 0.0) == []
 
@@ -255,23 +240,12 @@ def test_time_to_level_at_the_recent_rate(kb, rocky, exp, pct):
 # ---------------------------------------------------------------- the map
 
 @needs_kb
-def test_capacity_from_the_maps_spawn_rows(kb, rocky):
-    """Each spawns row's count x mob rate (1 when none) every respawn seconds, summed; the share is this map's kills
-    an hour of it."""
-    rows = [r for r in tables.rows(kb, "spawns") if r["map_key"] == f"map/{rocky}" and r["respawn"]]
-    want = round(sum(r["count"] * (r["mob_rate"] or 1) * 3600 / r["respawn"] for r in rows))
-    lg = lootlog.Log(start=0.0)
-    lg.add(_exp(0, 600, 3, 21, rocky, _mob(kb, "Dark Stump")["key"]))
-    lv = grindlive.live(kb, lg, None, [], now=600.0)
-    assert lv.capacity_h == want
-    assert lv.kill_share == pytest.approx(lv.session.kills_h / want)
-
-
-@needs_kb
 def test_warnings_from_the_players_acc_and_what_was_seen(kb, rocky):
+    """Only what is seen or known is warned of: the ACC the player typed, a death or low HP here; never a share of
+    the map's spawns (kills can't be counted)."""
     ds = _mob(kb, "Dark Stump")
     lg = lootlog.Log(start=0.0)
-    lg.add(_exp(0, 660, 3, ds["exp"], rocky, ds["key"]))       # 11 minutes here, far under the spawns' capacity
+    lg.add(_exp(0, 660, 3, ds["exp"], rocky))                    # 11 minutes here
     for t, hp in ((600, 100), (602, 120), (604, 130), (606, 400)):
         lg.add_sample(_read(t, rocky, level=20, exp=1000 + t, hp=hp))
     keys = {k for k, *_ in gamelookup.map_monsters(kb, rocky)}
@@ -283,8 +257,7 @@ def test_warnings_from_the_players_acc_and_what_was_seen(kb, rocky):
     warn = dict(lv.warnings)
     assert warn["gl_warn_acc"]["need"] == top and needs[warn["gl_warn_acc"]["name"]] == top
     assert warn["gl_warn_acc"]["acc"] == top - 1
-    assert warn["gl_warn_low_hp"] == {"pct": 30} and "gl_warn_died" not in warn
-    assert warn["gl_warn_share"] == {"pct": round(lv.kill_share * 100), "cap": f"{lv.capacity_h:,}"}
+    assert warn["gl_warn_low_hp"] == {"pct": 30} and set(warn) == {"gl_warn_acc", "gl_warn_low_hp"}
     c.stats = {"acc": top}
     assert "gl_warn_acc" not in dict(grindlive.live(kb, lg, c, [], now=660.0).warnings)
     # a death on this map: it hits hard (said once, not with the low HP)
@@ -380,39 +353,43 @@ def _logged(kb, start: float, end: float, events: list, cid: str = "c1") -> int:
 
 
 @needs_kb
-def test_drop_rates_count_the_droppers_kills_where_it_drops(kb, rocky, isolated_store):
-    """Leaf: 4 picked up where Dark Stumps spawn, 40 Dark Stump kills: 1 in 10 (a Leaf on a map with no Dark Stump
-    isn't counted, nor are the other monsters' kills). Firewood: Axe Stump and Dark Axe Stump drop it."""
-    ds, ax, dax, rs = (_mob(kb, n)["key"] for n in ("Dark Stump", "Axe Stump", "Dark Axe Stump", "Red Snail"))
+def test_drop_rates_are_per_active_hour_on_the_maps_where_it_was_picked_up(kb, rocky, isolated_store):
+    """Three runs: 15 minutes on Rocky Road II, 10 on a map where nothing that drops a Leaf spawns, 5 on a third.
+    Leaf: 4 on the first (one pickup of 2) and 2 on the second, 6 over their 25 minutes: 14.4 an hour, from the Dark
+    Stumps of the first (a Leaf with no map isn't counted). Firewood: 3 over 15 minutes, from the droppers spawning
+    there, the most spawned first. Red Snail Shell: 5 minutes of active time on its map is too few for a rate."""
+    ds, ax, dax = (_mob(kb, n)["key"] for n in ("Dark Stump", "Axe Stump", "Dark Axe Stump"))
     on = _on_maps(kb)
-    no_stumps = next(m for m in sorted(on) if "Dark Stump" not in on[m])
-    evs = [Event(float(i), "exp", 21, map=rocky, monster=ds) for i in range(40)]
-    evs += [Event(100.0 + i, "exp", 32, map=rocky, monster=ax) for i in range(20)]
-    evs += [Event(200.0 + i, "exp", 43, map=rocky, monster=dax) for i in range(10)]
-    evs += [Event(250.0, "exp", 8, map=rocky, monster=rs)]
-    evs += [Event(300.0 + i, "item", 1, "Leaf", LEAF, map=rocky) for i in range(4)]
-    evs += [Event(310.0 + i, "item", 1, "Firewood", FIREWOOD, map=rocky) for i in range(3)]
-    evs += [Event(320.0 + i, "item", 1, "Red Snail Shell", RED_SNAIL_SHELL, map=rocky) for i in range(2)]
-    evs += [Event(330.0, "item", 1, "Leaf", LEAF, map=no_stumps), Event(331.0, "item", 1, "Leaf", LEAF)]
-    _logged(kb, 0.0, 400.0, evs)
+    no_leaf = next(m for m in sorted(on) if m != rocky and not _spawning(kb, m) & set(kb.droppers[LEAF]))
+    third = next(m for m in sorted(on) if m not in (rocky, no_leaf))
+
+    def run(start: float, mid: str, minutes: int, items: list) -> None:
+        n = minutes * 12                         # an EXP line every 5 s: `minutes` of active time
+        _logged(kb, start, start + n * 5, [Event(start + i * 5, "exp", 20, map=mid) for i in range(n)] + items)
+
+    run(0.0, rocky, 15, [Event(10.0, "item", 1, "Leaf", LEAF, map=rocky), Event(20.0, "item", 1, "Leaf", LEAF, map=rocky),
+                         Event(30.0, "item", 2, "Leaf", LEAF, map=rocky), Event(40.0, "item", 1, "Leaf", LEAF)]
+        + [Event(50.0 + i, "item", 1, "Firewood", FIREWOOD, map=rocky) for i in range(3)])
+    run(10_000.0, no_leaf, 10, [Event(10_010.0 + i, "item", 1, "Leaf", LEAF, map=no_leaf) for i in range(2)])
+    run(20_000.0, third, 5, [Event(20_010.0 + i, "item", 1, "Red Snail Shell", RED_SNAIL_SHELL, map=third)
+                             for i in range(2)])
     got = grindlive.drop_rates(kb, "c1")
     assert [d.item_key for d in got] == [LEAF, FIREWOOD, RED_SNAIL_SHELL]          # the most picked up first
-    rates = {d.item_key: d for d in got}
-    assert (rates[LEAF].item, rates[LEAF].count, rates[LEAF].kills, rates[LEAF].one_in, rates[LEAF].monsters) == (
-        "Leaf", 4, 40, 10, [ds])
-    assert (rates[FIREWOOD].count, rates[FIREWOOD].kills, rates[FIREWOOD].one_in, rates[FIREWOOD].monsters) == (
-        3, 30, 10, [ax, dax])
-    assert (rates[RED_SNAIL_SHELL].kills, rates[RED_SNAIL_SHELL].one_in) == (1, None)   # fewer kills than drops
+    leaf, wood, shell = got
+    assert (leaf.item, leaf.count, leaf.active_s, leaf.monsters) == ("Leaf", 6, pytest.approx(1500), [ds])
+    assert leaf.per_h == pytest.approx(6 * 3600 / 1500)
+    spawns = {k: n for k, _name, _level, n in gamelookup.map_monsters(kb, rocky)}
+    assert (wood.count, wood.active_s, wood.per_h) == (3, pytest.approx(900), pytest.approx(12.0))
+    assert set(wood.monsters) == {ax, dax} and [spawns[k] for k in wood.monsters] == sorted(
+        (spawns[k] for k in wood.monsters), reverse=True)
+    assert (shell.count, shell.active_s, shell.per_h) == (2, pytest.approx(300), None)
+    assert set(shell.monsters) == set(kb.droppers[RED_SNAIL_SHELL]) & _spawning(kb, third)
     assert grindlive.drop_rates(kb, "someone else") == []
-    # the running log's last drop: its rate from every run, this one's newest pickups from memory
-    lg = lootlog.Log(start=1000.0)
-    lg.add(_exp(1000, 1019, 1, 21, rocky, ds) + [Event(1020.0, "item", 1, "Leaf", LEAF, map=rocky)])
-    c = Character("c1", "Kiwi", "Warrior", "Fighter", 20)
-    assert grindlive.live(kb, lg, c, [], now=1030.0).last_drop == ("Leaf", LEAF, 12)    # 60 kills, 5 Leaves
 
 
 @needs_kb
 def test_best_spots_rank_maps_by_exp_an_hour_near_the_level(kb, rocky, isolated_store):
+    """The maps the player grinded on for 10 minutes at least, by EXP an hour (no kills: a Spot has none)."""
     on = _on_maps(kb)
     a = rocky
     b, c, d = [m for m in sorted(on) if m != rocky][:3]
@@ -430,6 +407,7 @@ def test_best_spots_rank_maps_by_exp_an_hour_near_the_level(kb, rocky, isolated_
     assert [(s.map_id, s.exp_h, s.sessions) for s in spots] == [(b, 21600, 1), (a, 14400, 2)]
     assert spots[1].active_s == pytest.approx(1800) and spots[1].map_name == "Rocky Road II"
     assert [s.map_id for s in grindlive.best_spots(kb, "c1", None)] == [c, b, a]
+    assert not any(hasattr(s, "kills_h") for s in spots)
 
 
 @needs_kb
@@ -451,8 +429,7 @@ def test_move_on_when_another_map_paid_a_quarter_more(kb, rocky, isolated_store,
 
 @needs_kb
 def test_history_lists_finished_runs_and_summary_the_running_one(kb, rocky, isolated_store):
-    ds = _mob(kb, "Dark Stump")
-    evs = [Event(i * 5.0, "exp", 21, map=rocky, monster=ds["key"], level=20 if i < 110 else 21) for i in range(120)]
+    evs = [Event(i * 5.0, "exp", 21, map=rocky, level=20 if i < 110 else 21) for i in range(120)]
     evs += [Event(3.0, "mesos", 50, map=rocky, level=20), Event(4.0, "item", 2, "Leaf", LEAF, map=rocky, level=20)]
     lid = _logged(kb, 0.0, 600.0, evs)
     running = lootdb.open_log("c1", "Kiwi", 1000.0)
@@ -461,13 +438,12 @@ def test_history_lists_finished_runs_and_summary_the_running_one(kb, rocky, isol
     assert [h.log_id for h in hist] == [lid]
     h = hist[0]
     price = farm.value(kb, LEAF).price
-    assert (h.start, h.end, h.exp, h.mesos, h.kills, h.levels, h.deaths) == (0.0, 600.0, 2520, 50, 120, (20, 21), 0)
+    assert (h.start, h.end, h.exp, h.mesos, h.levels, h.deaths) == (0.0, 600.0, 2520, 50, (20, 21), 0)
     assert (h.active_s, h.maps, h.top_drops) == (600.0, [(rocky, "Rocky Road II", 600.0)], [(LEAF, "Leaf", 2)])
     assert (h.loot, h.profit, h.exp_h) == (2 * price, 50 + 2 * price, 15120)
     assert grindlive.history(kb, "c1", limit=0) == []
     lg = lootlog.Log(start=0.0, ended=600.0, db_id=lid)
     lg.add(evs)
     sm = grindlive.summary(kb, lg, None)
-    assert (sm.log_id, sm.exp, sm.kills, sm.levels, sm.loot, sm.top_drops) == (lid, 2520, 120, (20, 21), 2 * price,
-                                                                               [(LEAF, "Leaf", 2)])
+    assert (sm.log_id, sm.exp, sm.levels, sm.loot, sm.top_drops) == (lid, 2520, (20, 21), 2 * price, [(LEAF, "Leaf", 2)])
     assert sm.maps == [(rocky, "Rocky Road II", 600.0)] and sm.exp_h == 15120
