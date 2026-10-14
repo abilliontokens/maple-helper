@@ -756,8 +756,8 @@ class _SettingsPanel(QWidget):
         self._bar.minimap_toggled.emit()
 
     def _pick_route(self, _=False) -> None:
-        """The route arrow on the minimap: written, and the arrow comes or goes, with the Guide me there button on
-        the search's page and in the ◎ window (minimap_toggled)."""
+        """The route arrow on the minimap: written, and the arrow comes or goes, with the line naming it on the
+        search's page and in the ◎ window (minimap_toggled)."""
         self._settings["minimap_route_arrow"] = self._route_arrow.isChecked()
         self._bar.minimap_toggled.emit()
 
