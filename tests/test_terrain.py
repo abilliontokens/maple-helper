@@ -58,6 +58,55 @@ def test_a_rope_climbs_without_a_pad_and_a_pad_that_saves_the_climb_is_named():
     assert walk.pads((10, 200), (150, 100), [pad]) == [pad]
 
 
+def test_a_rope_stopping_one_jump_short_of_the_platform_above_still_climbs():
+    # the rope's top end stops 70 short of the upper platform (and its bottom end 50
+    # short of the lower one): one jump grabs the bottom end, and one jump off the
+    # top end lands on the platform, so the rope still joins the two
+    ground = [[0, 300, 200, 300], [0, 100, 200, 100]]
+    walk = Walk.of(ground, [[100, 170, 250]])
+    assert walk.pads((10, 300), (150, 100), []) == []
+
+
+def test_a_rope_stopping_more_than_one_jump_short_of_the_platform_above_does_not_climb():
+    """The same rope stopping 76 short of the upper platform — the measure of Utah's
+    Pig Farm's rope at x=1453, which stops 76 short of the span at y=-265 (its rope
+    at x=-1185 stops 84 short of y=-385): past one jump (rule 5), so the player
+    cannot get off the rope onto that platform, and without the rope nothing else
+    climbs there either. Falling back down the other way is still free."""
+    ground = [[0, 300, 200, 300], [0, 100, 200, 100]]
+    walk = Walk.of(ground, [[100, 176, 250]])
+    assert walk.pads((10, 300), (150, 100), []) is None
+    assert walk.pads((150, 100), (10, 300), []) == []
+
+
+def test_a_platform_beside_a_rope_between_its_ends_is_a_mid_rope_exit():
+    """A platform the rope runs past, not one it ends at: the span at y=175 starts
+    38 units east of the rope at x=100 (the measure of Utah's Pig Farm, whose rope
+    at x=-1185 passes 36 from the span at y=-145 and whose rope at x=1453 passes
+    38 from the span at y=-25). The player climbs from the floor (50 below the
+    rope's bottom end: a jump-grab) and gets off sideways onto that platform."""
+    ground = [[0, 300, 200, 300], [138, 175, 300, 175]]
+    walk = Walk.of(ground, [[100, 100, 250]])
+    assert walk.pads((10, 300), (200, 175), []) == []
+
+
+def test_a_rope_can_be_grabbed_mid_way_from_a_platform_beside_it():
+    # the same beside platform, this time as the start: jump at the rope from it,
+    # grab on at y=175 (between the rope's ends), climb and jump off the top end
+    # (50 short of the platform at y=50)
+    ground = [[138, 175, 300, 175], [0, 50, 200, 50]]
+    walk = Walk.of(ground, [[100, 100, 250]])
+    assert walk.pads((200, 175), (150, 50), []) == []
+
+
+def test_a_platform_too_far_beside_a_rope_is_not_a_mid_rope_exit():
+    # the same platform starting 80 units east of the rope: past one jump sideways,
+    # so the rope does not serve it and nothing else climbs there
+    ground = [[0, 300, 200, 300], [180, 175, 300, 175]]
+    walk = Walk.of(ground, [[100, 100, 250]])
+    assert walk.pads((10, 300), (200, 175), []) is None
+
+
 def test_a_target_reachable_by_falling_needs_no_pad():
     pad = Jump((20, 100), (200, 200), "t009")
     ground = [[0, 100, 120, 100], [80, 200, 240, 200]]

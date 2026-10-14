@@ -40,10 +40,24 @@ The model — every line of this is an assumption fitted to the data, not a fact
    196-unit rope from the span at y≈-1345 toward the one at y≈-1105; on Utah's Pig Farm
    `[1964, -803, 85]` as a height ends at y=-718 on nothing, and as an end it lands on the
    span at y≈87. A rope joins, both ways, every span it crosses plus any span ending within
-   ROPE_END_DIST past either end: several of the Pig Farm's ropes stop that far short of the
-   spans they plainly serve (`[689, -196, -41]` crosses nothing, and sits 69 units below the
-   span at y=-265 and 76 above the one at y=35), which reads as the player grabbing, dropping
-   from, or stepping off the end. Climbing costs the vertical distance between the two spans.
+   one jump past either end (ROPE_END_DIST = JUMP_HEIGHT, rule 5's measured one-tier jump):
+   past the bottom end the player jumps up and grabs the rope, and past the top end they
+   jump off the rope onto the span above, so either reach is the same jump. A span farther
+   past an end than one jump is not served by that rope, however near it looks on the
+   picture: on Utah's Pig Farm the rope at x=1453 ([1453, -189, 105]) stops 76 units short
+   of the span at y=-265 above it, and the rope at x=-1185 ([-1185, -301, 35]) stops 84
+   short of the span at y=-385, both past one jump, so neither rope climbs to those
+   spans. A rope is not only its two ends, either: it also joins every span that passes
+   beside it — a span whose nearest point sits within one jump sideways of the rope's
+   line (ROPE_SIDE_DIST = JUMP_HEIGHT) at a height between the rope's ends, which the
+   player reaches by jumping off the rope sideways, or grabs the rope mid-way from by
+   jumping at it. On Utah's Pig Farm the rope at x=-1185 passes 36 units east of the
+   span at y=-145 and the rope at x=1453 passes 38 west of the span at y=-25, and
+   across every map in the KB the nearest beside-platform distance per rope holds
+   steady out to about 64 units and then drops away — the same one-jump reach. The
+   rope at x=1964, by contrast, ends 2 units above the span at y≈87 at its bottom
+   end and 2 below Utah's span at y=-805 at its top: solid contact at both ends. Climbing
+   costs the vertical distance between the two spans.
 4. Falling. From a few probe points along a span the player drops onto the first span
    below (greater y) whose ground is within FALL_REACH sideways and whose drop no wall
    (rule 2) crosses. Falling is one way and nearly free. Probing, rather than solving
@@ -136,11 +150,18 @@ JUMP_EFFORT = 250.0
 # what a hidden teleport costs: about nothing (it is instant), but not nothing, so a
 # pad that only ties a walk or a fall is not named for it
 TELEPORT_COST = 5.0
-# a span this far past a rope's end still counts as served by that rope (rule 3)
-ROPE_END_DIST = 90.0
+# a span this far past a rope's end still counts as served by that rope (rule 3): one jump
+# (JUMP_HEIGHT, rule 5's measured tier) — the player jumps up to grab the bottom end, and
+# jumps off the top end onto the span above, so a span farther past an end than one jump
+# is not served by that rope at all
+ROPE_END_DIST = JUMP_HEIGHT
 # a rope this far sideways of a span's end still crosses that span (the site's rope x can sit
 # a few units past the last foothold fragment of the platform it hangs over)
 ROPE_X_DIST = 10.0
+# how far sideways of a rope's line a span it passes — its y between the rope's ends —
+# still counts as served by that rope (rule 3): one jump sideways (JUMP_HEIGHT), off the
+# rope onto the platform beside it or at the rope from that platform to grab on mid-way
+ROPE_SIDE_DIST = JUMP_HEIGHT
 # x-bin width of the span and wall index that keeps snapping and fall probes off a full scan
 # per query
 _BIN = 128.0
@@ -364,8 +385,8 @@ class Walk:
                     self._add(j, i, s.width, both=False)
 
     def _join_ropes(self, lr) -> None:
-        """Every span a rope crosses or ends near joins every other, both ways (rule 3), at
-        the cost of the height between them at the rope's x."""
+        """Every span a rope crosses, ends near, or passes beside joins every other, both
+        ways (rule 3), at the cost of the height between them at the rope's x."""
         for row in lr:
             rope = _nums(row, 3)
             if rope is None:
@@ -374,11 +395,13 @@ class Walk:
             top, bottom = min(ya, yb), max(ya, yb)
             joined = []
             for i, s in enumerate(self._spans):
-                if x < s.x0 - ROPE_X_DIST or x > s.x1 + ROPE_X_DIST:
-                    continue
-                y = s.y_at(max(s.x0, min(s.x1, x)))
-                if top - ROPE_END_DIST <= y <= bottom + ROPE_END_DIST:
-                    joined.append((i, y))
+                near_x = max(s.x0, min(s.x1, x))
+                y = s.y_at(near_x)
+                side = abs(x - near_x)
+                if side <= ROPE_X_DIST and top - ROPE_END_DIST <= y <= bottom + ROPE_END_DIST:
+                    joined.append((i, y))    # crossed, or within a jump past an end
+                elif side <= ROPE_SIDE_DIST and top <= y <= bottom:
+                    joined.append((i, y))    # passed beside, between the ends: a jump on or off sideways
             for a, (i, yi) in enumerate(joined):
                 for j, yj in joined[a + 1:]:
                     self._add(i, j, abs(yi - yj) + 1.0)

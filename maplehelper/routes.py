@@ -511,6 +511,89 @@ class Graph:
         best = min(range(len(jumps)), key=total.__getitem__)
         return [jumps[i] for i in way[best]] if total[best] + margin <= walk(you, target) else []
 
+    def shortcut_costs(self, mid: str, you: tuple[float, float] | None,
+                       target: tuple[float, float] | None) -> tuple[float, dict[str, float]] | None:
+        """What the cheapest way across the map to a spot costs, and what the cheapest way through each pad
+        first costs with it (its name -> that cost), in the measure shortcut_path picks by on this map: the
+        real ground's effort (terrain.Walk: walks, ropes, falls and jumps, a teleport TELEPORT_COST) when the
+        KB has that ground and both ends stand on it, else the straight line of shortcut_path (its up-and-down
+        part SHORTCUT_CLIMB times over, a pad free). The first cost is the cheaper of walking and every pad
+        way. Both costs of one call share its one measure, so a caller may set them against each other (the
+        minimap arrow's steady pad, ui.portaldots); two calls' never may, a spot the ground cannot place
+        falling back to the straight line from one read to the next. A pad missing from the second is one no
+        way through first reaches the spot from here at all. None on a map with no pads, without the player's
+        dot or the target, or on a map the graph doesn't know."""
+        jumps = self.hidden_jumps(mid)
+        if not jumps or you is None or target is None or mid not in self.known or not self.known[mid].minimap:
+            return None
+
+        def distances(adj: list, start: int) -> dict[int, float]:
+            best: dict[int, float] = {start: 0.0}
+            queue = [(0.0, 0, start)]
+            n = 0
+            while queue:
+                cost, _, here = heapq.heappop(queue)
+                if cost != best.get(here):
+                    continue
+                for nxt, step in adj[here]:
+                    key = cost + step
+                    if nxt not in best or key < best[nxt]:
+                        best[nxt] = key
+                        n += 1
+                        heapq.heappush(queue, (key, n, nxt))
+            return best
+
+        ground = self._terrain_walk(mid)
+        if ground is not None:
+            mm = self.known[mid].minimap
+
+            def units(spot: tuple[float, float]) -> tuple[float, float]:
+                return spot[0] * mm[0] - mm[2], spot[1] * mm[1] - mm[3]
+            in_units = [Jump(units(j.frm), units(j.to), j.name) for j in jumps]
+            start, goal = ground._snap(units(you)), ground._snap(units(target))
+            if start is not None and goal is not None:
+                teleports: list[list[tuple[int, Jump]]] = [[] for _ in ground._base]
+                for in_unit, jump in zip(in_units, jumps):
+                    snapped = ground._snap_jump(in_unit)
+                    if snapped is not None:
+                        teleports[snapped[0]].append((snapped[1], jump))
+                full = [list(edges) + [(nxt, terrain.TELEPORT_COST) for nxt, _ in teleports[i]]
+                        for i, edges in enumerate(ground._base)]
+                best = distances(full, start)
+                if goal in best:
+                    walked = distances([list(edges) for edges in ground._base], start)
+                    back: list[list[tuple[int, float]]] = [[] for _ in full]
+                    for i, edges in enumerate(full):
+                        for nxt, step in edges:
+                            back[nxt].append((i, step))
+                    onward = distances(back, goal)     # from a span, the cheapest on to the spot
+                    via = {}
+                    for in_unit, jump in zip(in_units, jumps):
+                        snapped = ground._snap_jump(in_unit)
+                        if snapped is not None and snapped[0] in walked and snapped[1] in onward:
+                            via[jump.name] = (walked[snapped[0]] + terrain.TELEPORT_COST
+                                              + onward[snapped[1]])
+                    return best[goal], via
+        w, h = self.known[mid].minimap[:2]
+
+        def walk(a: tuple[float, float], b: tuple[float, float]) -> float:
+            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h * SHORTCUT_CLIMB)
+        # from where each pad lands, the cheapest on to the spot: walk there, or walk to another pad's dot and
+        # take it for free, as shortcut_path costs it; asked backwards from the spot, once for every pad
+        adj: list[list[tuple[int, float]]] = [[] for _ in range(len(jumps) + 1)]
+        for i, jump in enumerate(jumps):
+            adj[i].append((len(jumps), walk(jump.to, target)))
+            for j, other in enumerate(jumps):
+                if i != j:
+                    adj[i].append((j, walk(jump.to, other.frm)))
+        back = [[] for _ in adj]
+        for i, edges in enumerate(adj):
+            for nxt, step in edges:
+                back[nxt].append((i, step))
+        onward = distances(back, len(jumps))
+        via = {jump.name: walk(you, jump.frm) + onward[i] for i, jump in enumerate(jumps)}
+        return min([walk(you, target), *via.values()]), via
+
     def shortcut(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
                  margin: float = SHORTCUT_MARGIN) -> Jump | None:
         """The pad to take first on the cheapest way across the map to a spot (shortcut_path): from the map's real

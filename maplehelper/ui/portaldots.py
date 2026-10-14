@@ -21,7 +21,11 @@ on the NPC as ever) and their own dot read (LOCATION.here.spot): the graph is as
 guide, or once a read has the dot in another of the picture's cells (SHORTCUT_CELLS each way; never for a follow
 frame), and the pad stays picked while they stand on it (PAD_NEAR), so the arrow never flickers back to the portal
 or the NPC before they take the jump; the read that lands them past it points at the portal or the NPC again, or at
-the next pad. The arrows look as the bar's ⚙ panel picks, read at every refresh: the route's colour
+the next pad. A pad once named stays named past a cheaper rival too, while a way through it still reaches its
+spot within SHORTCUT_SWITCH_MARGIN of the cheapest way's cost (_held_chain), so a wobble about a tie — their dot
+jumping, the cheapest pad flipping cell to cell — never changes the arrow's mind; it gives the pad up only for a
+way clearly cheaper, for none through it from where they stand, or once they have taken it. The arrows look as
+the bar's ⚙ panel picks, read at every refresh: the route's colour
 (minimap_arrow_color, a name in ARROW_COLORS: orange unless another is picked; the NPC's is the ring's green whatever
 is picked, so it reads as the NPC and never as the route's step), their size (minimap_arrow_size: the length in
 screen pixels, from ARROW_SIZE_MIN to ARROW_SIZE_MAX, both shapes scaled alike), a small name beside each saying what
@@ -106,6 +110,18 @@ SHORTCUT_CELLS = 50
 # two cells) and not past the jump (_on_pad): standing on it, their dot jitters about it as they press up there, and
 # the arrow must not flicker between the pad and the portal or the NPC
 PAD_NEAR = 2 / SHORTCUT_CELLS
+# a pad once named stays named while a way through it stays within this much of the cheapest way's cost
+# (routes.Graph.shortcut_costs, its own measure for the map), however the cheapest first pad changes read to
+# read: the two ways on Utah's Pig Farm cost nearly the same there. Measured on the live KB (2026-10-14, the
+# cost through t001 less the cheapest cost toward Utah, over the 300x300-unit patch about the owner's spot
+# (-1178, -18), fed spot by spot): median 1280, 95th of 961 spots 1948, worst 2105 — the band where the
+# answer flips t001/t004 cell to cell (31 against 18 of the owner's 49, before that map's ground was
+# corrected). Toward a spot on three other maps with pads (Forest West of Henesys, The Forest of Wisdom,
+# The Forest of Evil I, 361 spots each), the cheapest way's lead over the next way ran median 356/365/206
+# and 90th 1946/1444/1839, so a lead past this margin is a way a player would call clearly better, not the
+# coin toss inside it; a cost through the kept pad past it, or no cost through it at all (no way through
+# it reaches the spot from here), lets it go.
+SHORTCUT_SWITCH_MARGIN = 2200
 
 
 def _name(graph, mid: str) -> str:
@@ -222,6 +238,35 @@ def _on_pad(you: tuple[float, float], jump: routes.Jump) -> bool:
             and math.dist(you, jump.frm) < math.dist(you, jump.to))
 
 
+def _at_landing(you: tuple[float, float], jump: routes.Jump) -> bool:
+    """The player's spot is on a shortcut's landing (Jump.to: where its pad puts them), or within PAD_NEAR of
+    it either way, and not back toward the pad: nearer the landing than the pad (Jump.frm), so standing on the
+    pad itself never counts as having taken it."""
+    return (abs(you[0] - jump.to[0]) <= PAD_NEAR and abs(you[1] - jump.to[1]) <= PAD_NEAR
+            and math.dist(you, jump.to) < math.dist(you, jump.frm))
+
+
+def _held_chain(graph, here: Here, you: tuple[float, float], target: tuple[float, float], chain: list) -> list | None:
+    """The chain already named, kept though the cheapest way now starts another way, when a way through its
+    first pad still reaches the spot from here at a cost within SHORTCUT_SWITCH_MARGIN of the cheapest
+    (routes.Graph.shortcut_costs: both costs of that one call, in its one measure). None — the cheapest way
+    stands — when the graph cannot cost the ways (a stand-in with only Graph.shortcut or shortcut_path: its
+    fresh answer has no rival to set it against), when no way through the named pad reaches the spot from
+    here at all (its name missing from the costs: never hold a pad the player cannot reach), or when that
+    way costs more than the margin over the cheapest."""
+    costs = getattr(graph, "shortcut_costs", None)
+    if not callable(costs):
+        return None
+    got = costs(here.map, you, target)
+    if not got:
+        return None
+    best, via = got
+    kept = via.get(chain[0].name) if isinstance(via, dict) else None
+    if kept is None or math.isinf(kept):
+        return None
+    return chain if kept - best <= SHORTCUT_SWITCH_MARGIN else None
+
+
 def _shortcut_path(graph, here: Here, you: tuple[float, float], target: tuple[float, float]) -> list:
     """The pads of the cheapest way across the player's map to `target`, in order (routes.Graph.shortcut_path);
     a graph that only knows Graph.shortcut (a stand-in) gives its one pad, or none. The one search the first pad
@@ -244,7 +289,14 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     follow frame, a read a step on or one while they stand on the first pad picked (_on_pad), where it stays picked
     so the arrow never flickers between the pad and the spot as their dot jitters about it. The first read off the
     pad asks again: the one that lands them past the jump gets the spot back (or the next pad), that jump saving
-    nothing from there."""
+    nothing from there.
+
+    A pad once named stays named while it stays a sensible way (_held_chain): a new cell's cheapest chain
+    starting another way — or with no pad at all — takes over only when no way through the named pad reaches
+    the spot from here, or its way costs more than SHORTCUT_SWITCH_MARGIN over the cheapest, or they have
+    taken the named pad (a read on its landing, _at_landing: the fresh chain then starts at the next pad, as
+    a new map's or a new guide's does, its caller having forgotten the old chain before asking). Nothing is
+    held without a costing (a graph that cannot cost its ways keeps the fresh answer, as ever)."""
     chain, cell = kept
     you = here.spot
     if you is None:
@@ -252,7 +304,14 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     if chain and _on_pad(you, chain[0]):
         return chain, None       # standing on it: kept, and the first read off it asks again
     now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
-    return kept if now == cell else (_shortcut_path(graph, here, you, target), now)
+    if now == cell:
+        return kept
+    fresh = _shortcut_path(graph, here, you, target)
+    if chain and not (fresh and fresh[0].name == chain[0].name) and not _at_landing(you, chain[0]):
+        held = _held_chain(graph, here, you, target, chain)
+        if held is not None:
+            return held, now
+    return fresh, now
 
 
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:

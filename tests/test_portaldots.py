@@ -46,9 +46,11 @@ def shortcuts():
     shortcut it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets
     one), unless `toward` has one for the spot it is asked toward (the way's next step's or the guided NPC's: its
     own pad, or None for none there); `path`, the chain it offers wherever asked, or `paths` by the spot asked
-    toward, when a test sets a chain of more than one pad (its first pad is then the shortcut too); and `asked`,
-    each time it was asked, in order: (the player's map, their spot, that spot)."""
-    return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[])
+    toward, when a test sets a chain of more than one pad (its first pad is then the shortcut too); `costs`, what
+    its Graph.shortcut_costs answers — (the cheapest cost, {a first pad's name: the cost through it}) or a
+    callable of (their spot, that spot) returning one, None for a graph that cannot cost its ways; and `asked`,
+    each time it was asked for a chain, in order: (the player's map, their spot, that spot)."""
+    return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[], costs=None, cost_asked=[])
 
 
 @pytest.fixture
@@ -89,10 +91,14 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
             return list(shortcuts.path)
         jump = shortcuts.toward.get(target, shortcuts.jump)
         return [jump] if jump is not None else []
+
+    def shortcut_costs(mid, you, target):
+        shortcuts.cost_asked.append((mid, you, target))
+        return shortcuts.costs(you, target) if callable(shortcuts.costs) else shortcuts.costs
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
         hidden_jumps=lambda m: [j for j in (shortcuts.jump, *shortcuts.toward.values()) if j is not None],
-        shortcut=shortcut, shortcut_path=shortcut_path))
+        shortcut=shortcut, shortcut_path=shortcut_path, shortcut_costs=shortcut_costs))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -950,6 +956,140 @@ def test_standing_on_the_pad_keeps_the_arrow_on_it_until_the_jump_is_taken(dots,
     assert shortcuts.asked[1:] == [("010003000", (0.55, 0.5), (0.5, 0.5))]
     assert w._arrow == QPointF(60, 45) and w._tag.text == "→ Bush Road"
     assert "route arrow: no shortcut from here, pointing at its next step" in caplog.messages
+
+
+def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
+    """Two ways costing nearly the same (on Utah's Pig Farm, t001's chain against t004's): the cheapest first
+    pad flips cell to cell as their dot wobbles and jumps, but a pad once named stays named across repeated
+    reads in new cells while a way through it still costs within SHORTCUT_SWITCH_MARGIN of the cheapest
+    (routes.Graph.shortcut_costs), so the arrow never changes its mind several times a second."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["route_hidden_teleports"] = True
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
+    shortcuts.path = [first]
+    shortcuts.costs = (1000.0, {"t001": 1010.0, "t004": 1000.0})    # the rival cheaper, by a coin toss
+    loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.30, 0.30), view))
+    assert w._arrow == QPointF(60, 45) and w._arrow_chain == [first]
+    shortcuts.path = [rival]                                        # asked fresh, the rival now wins
+    for spot in ((0.34, 0.30), (0.34, 0.36), (0.40, 0.36), (0.40, 0.30), (0.44, 0.34)):     # a wobble, cell to cell
+        loc.set(Here("010003000", spot, view))
+        assert w._arrow == QPointF(60, 45) and w._arrow_chain == [first], spot
+    assert shortcuts.cost_asked                                     # the holding was costed, not guessed
+
+
+def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
+    """A real move makes the other way cheaper by more than the tie band (past SHORTCUT_SWITCH_MARGIN over
+    the cheapest, routes.Graph.shortcut_costs): the arrow gives up the pad it named and takes the new one."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
+    shortcuts.path = [first]
+    shortcuts.costs = (1000.0, {"t001": 1010.0, "t004": 1000.0})
+    loc.set_route_dest("020000000")
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.30, 0.30), view))
+    assert w._arrow == QPointF(60, 45)
+    shortcuts.path = [rival]
+    shortcuts.costs = (1000.0, {"t001": 6000.0, "t004": 1000.0})    # through the named pad: clearly worse
+    loc.set(Here("010003000", (0.45, 0.31), view))                  # a read in another cell, further on
+    assert w._arrow == QPointF(30, 30) and w._arrow_chain == [rival]
+
+
+def test_reaching_the_named_pad_advances_to_the_next_pad_of_the_chain(dots, shortcuts):
+    """On the named pad the arrow stays on it (they still have to take it); the read that lands them where
+    the pad puts them names the chain's next pad instead, even though a way back through the first still
+    costs within the tie band — it is taken, not merely dearer."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
+    second = Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name="t003")     # its pad at (100, 65)
+    shortcuts.path = [first, second]
+    shortcuts.costs = (1000.0, {"t001": 1005.0, "t003": 1000.0})    # back through the first: within the band
+    loc.set_route_dest("020000000")
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.30, 0.30), view))
+    assert w._arrow == QPointF(60, 45) and w._arrow_chain == [first, second]
+    loc.set(Here("010003000", first.frm, view))                     # standing on it: still its pad
+    assert w._arrow == QPointF(60, 45)
+    shortcuts.path = [second]                                       # from the landing, the next pad first
+    loc.set(Here("010003000", first.to, view))                      # through it: landed where it puts them
+    assert w._arrow == QPointF(100, 65) and w._arrow_chain == [second]
+
+
+def test_a_named_pad_no_way_reaches_from_here_is_dropped(dots, shortcuts):
+    """Holding a pad must never name one the player cannot reach: from where they now stand no way through
+    the named pad reaches the spot at all (missing from routes.Graph.shortcut_costs), so it is dropped for
+    the cheapest way there is, however close the costs elsewhere run."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
+    shortcuts.path = [first]
+    shortcuts.costs = (1000.0, {"t001": 1010.0, "t004": 1000.0})
+    loc.set_route_dest("020000000")
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.30, 0.30), view))
+    assert w._arrow == QPointF(60, 45)
+    shortcuts.path = [rival]
+    shortcuts.costs = (1000.0, {"t004": 1000.0})                    # no way through t001 from here at all
+    loc.set(Here("010003000", (0.45, 0.31), view))
+    assert w._arrow == QPointF(30, 30) and w._arrow_chain == [rival]
+
+
+def test_a_new_guide_or_a_new_map_starts_the_pad_fresh(dots, shortcuts):
+    """A held pad belongs to its guide and its map: another guide is asked anew and takes its own first pad
+    at once (no holding over from the last guide's), and so is the route's pad on another map; letting the
+    guide go leaves no held pad behind for the next one."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
+    other = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
+    shortcuts.paths = {(0.9, 0.9): [first], (0.1, 0.9): [other]}
+    shortcuts.costs = (1000.0, {"t001": 1005.0, "t004": 1000.0})    # holding the old pad would cost little
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.30, 0.30), view))
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))         # Athena Pierce, at (100, 65)
+    assert w._npc_arrow == QPointF(60, 45) and w._npc_chain == [first]
+    loc.set_guide(("010003000", (0.1, 0.9), "npc/303"))             # another guide: fresh, its own pad
+    assert w._npc_arrow == QPointF(30, 30) and w._npc_chain == [other]
+    loc.set_guide(None)                                             # let go: nothing held for the next guide
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))
+    assert w._npc_arrow == QPointF(60, 45) and w._npc_chain == [first]
+    shortcuts.path = [first]
+    loc.set_route_dest("020000000")                                 # the route's pad, on this map
+    assert w._arrow == QPointF(60, 45) and w._arrow_chain == [first]
+    shortcuts.path = [other]
+    _place(loc, Here("010003001", (0.45, 0.31), view))              # another map: its chain asked fresh
+    assert w._arrow == QPointF(30, 30) and w._arrow_chain == [other]
 
 
 def test_the_name_by_the_sign_at_the_panels_edge_stays_inside_the_panel(dots):
