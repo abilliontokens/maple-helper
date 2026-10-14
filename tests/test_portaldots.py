@@ -48,9 +48,13 @@ def shortcuts():
     own pad, or None for none there); `path`, the chain it offers wherever asked, or `paths` by the spot asked
     toward, when a test sets a chain of more than one pad (its first pad is then the shortcut too); `costs`, what
     its Graph.shortcut_costs answers — (the cheapest cost, {a first pad's name: the cost through it}) or a
-    callable of (their spot, that spot) returning one, None for a graph that cannot cost its ways; and `asked`,
-    each time it was asked for a chain, in order: (the player's map, their spot, that spot)."""
-    return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[], costs=None, cost_asked=[])
+    callable of (their spot, that spot) returning one, None for a graph that cannot cost its ways; `platform`,
+    what its Graph.standing_platform answers for a spot — a callable of their spot returning the joined
+    platform they stand on, or a dict by spot, the map counting as ground when it is set at all (None, the
+    default: no ground, the straight-line hold); and `asked`, each time it was asked for a chain, in order:
+    (the player's map, their spot, that spot)."""
+    return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[], costs=None, cost_asked=[],
+                           platform=None)
 
 
 @pytest.fixture
@@ -95,10 +99,15 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
     def shortcut_costs(mid, you, target):
         shortcuts.cost_asked.append((mid, you, target))
         return shortcuts.costs(you, target) if callable(shortcuts.costs) else shortcuts.costs
+    def standing_platform(mid, you):
+        if shortcuts.platform is None:
+            return False, None
+        return True, shortcuts.platform(you) if callable(shortcuts.platform) else shortcuts.platform.get(you)
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
         hidden_jumps=lambda m: [j for j in (shortcuts.jump, *shortcuts.toward.values()) if j is not None],
-        shortcut=shortcut, shortcut_path=shortcut_path, shortcut_costs=shortcut_costs))
+        shortcut=shortcut, shortcut_path=shortcut_path, shortcut_costs=shortcut_costs,
+        standing_platform=standing_platform))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -961,12 +970,13 @@ def test_standing_on_the_pad_keeps_the_arrow_on_it_until_the_jump_is_taken(dots,
 def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
     """Two ways costing nearly the same (on Utah's Pig Farm, t001's chain against t004's): the cheapest first
     pad flips cell to cell as their dot wobbles and jumps, but a pad once named stays named across repeated
-    reads in new cells while a way through it still costs within the switch margin of the cheapest
-    (routes.Graph.shortcut_costs: the larger of SHORTCUT_SWITCH_MARGIN and SHORTCUT_SWITCH_MARGIN_SHARE of
+    reads in new cells while they still stand on the joined platform it was picked from and a way through
+    it still costs within the ground model's own resolution of the cheapest (terrain.MODEL_RESOLUTION of
     the cheapest cost, at maplehelper.ui.portaldots), so the arrow never changes its mind several times a
-    second. The costs here are at the Pig Farm ground measure's own scale (cheapest 9862.5 there): through
-    the named pad 5000 over the cheapest is past the flat 2200 alone, and held only by the share
-    (0.6 of 10000) — under the old flat margin alone this wobble would flip to the rival."""
+    second. This premise replaces the old switch-share one — through the named pad 5000 over a cheapest of
+    10000, held only by SHORTCUT_SWITCH_MARGIN_SHARE (0.6) — because that share was a cost licence, not a
+    measure of not having moved: on one platform the model's noise is only its 3.4% resolution, so here
+    the rival is cheaper by 300 on 10000 (3%), inside that resolution and nowhere else."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.minimap import Here, View
@@ -977,7 +987,8 @@ def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
     first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
     rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
     shortcuts.path = [first]
-    shortcuts.costs = (10000.0, {"t001": 15000.0, "t004": 10000.0})  # the rival cheaper, by a coin toss at this scale
+    shortcuts.platform = lambda spot: 3                             # every wobble spot: the pick's platform
+    shortcuts.costs = (10000.0, {"t001": 10300.0, "t004": 10000.0})  # the rival cheaper, within the resolution
     loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
     view = View(10, 20, 100, 50, (0, 0, 200, 200))
     _place(loc, Here("010003000", (0.30, 0.30), view))
@@ -990,12 +1001,13 @@ def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
 
 
 def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
-    """A real move makes the other way cheaper by more than the tie band (past the switch margin over the
-    cheapest, routes.Graph.shortcut_costs: the larger of SHORTCUT_SWITCH_MARGIN and
-    SHORTCUT_SWITCH_MARGIN_SHARE of the cheapest cost): the arrow gives up the pad it named and takes the
-    new one. At the Pig Farm ground measure's scale (cheapest 10000 here) that band is the share, 6000:
-    through the named pad 7000 over the cheapest is past it, for all that it would also be past the flat
-    2200 — the share, not the flat number, is what a clearly-cheaper way has to beat there."""
+    """On the very platform the pad was picked from, a rival that beats the held way by more than the ground
+    model's own resolution takes over (terrain.MODEL_RESOLUTION of the cheapest cost,
+    routes.Graph.shortcut_costs): the arrow gives up the pad it named and takes the new one. This premise
+    replaces the old switch-share one — that band was the share, 6000 on a cheapest of 10000 — because on
+    one platform only the 3.4% resolution (340 here) is noise: through the named pad 7000 over the cheapest
+    is past it many times over, for all that it would also be past the flat 2200, which is the
+    straight-line branch's measure and not this ground map's."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.minimap import Here, View
@@ -1006,6 +1018,7 @@ def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
     first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
     rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
     shortcuts.path = [first]
+    shortcuts.platform = lambda spot: 3                             # the same platform throughout
     shortcuts.costs = (10000.0, {"t001": 10100.0, "t004": 10000.0})
     loc.set_route_dest("020000000")
     view = View(10, 20, 100, 50, (0, 0, 200, 200))
@@ -1015,6 +1028,117 @@ def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
     shortcuts.costs = (10000.0, {"t001": 17000.0, "t004": 10000.0})  # through the named pad: clearly worse
     loc.set(Here("010003000", (0.45, 0.31), view))                  # a read in another cell, further on
     assert w._arrow == QPointF(30, 30) and w._arrow_chain == [rival]
+
+def test_reaching_a_different_platform_repicks_the_fresh_cheapest():
+    """A different joined platform than the pick's ends the hold at once, however close the costs run: the
+    way through the named pad here is only 10 over the cheapest on 1000 (1%, inside the model's
+    resolution, so the same costs on the pick's own platform would hold it), but the player has really
+    moved — another platform — so the fresh cheapest chain decides and the rival is named."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1010.0, "t004": 1000.0})}
+    platforms = {(0.30, 0.30): 1, (0.34, 0.30): 2}                  # the pick's platform, then another
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"],
+                            standing_platform=lambda mid, you: (True, platforms.get(you)))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first] and kept[5] == 1                      # picked from platform 1
+    offered["path"] = [rival]                                       # asked fresh, the rival now wins
+    kept = ask((0.34, 0.30), kept)                                  # a read on another platform
+    assert kept[0] == [rival] and kept[5] == 2
+
+
+def test_on_one_platform_the_resolution_alone_decides_the_hold():
+    """On the pick's own platform the tie-break is the ground model's resolution and nothing wider: a rival
+    beating the held way by 30 on 1000 (3%, inside terrain.MODEL_RESOLUTION's 3.4%) leaves the named pad
+    named, and one beating it by 100 (10%, past the resolution yet far inside the straight-line branch's
+    flat 2200) takes over — on ground the flat margin is not the measure."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1000.0, "t004": 1000.0})}
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"],
+                            standing_platform=lambda mid, you: (True, 1))     # one platform throughout
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first]
+    offered["path"] = [rival]
+    offered["costs"] = (1000.0, {"t001": 1030.0, "t004": 1000.0})    # inside the resolution: held
+    kept = ask((0.34, 0.30), kept)
+    assert kept[0] == [first] and kept[5] == 1
+    offered["costs"] = (1000.0, {"t001": 1100.0, "t004": 1000.0})    # past it, inside the flat 2200: rival
+    kept = ask((0.38, 0.30), kept)
+    assert kept[0] == [rival] and kept[5] == 1
+
+
+def test_a_read_the_ground_cannot_place_keeps_the_named_pad():
+    """A read on ground the model cannot place the player on (standing_platform's platform None: mid-jump,
+    say) is no new answer: the named pad stays named while a way through it still reaches the spot, even
+    where the costing that read can give — the straight-line fallback's — runs clearly against it. The
+    next placed read decides again as ever."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1000.0, "t004": 1000.0})}
+    platforms = {(0.30, 0.30): 1, (0.34, 0.30): None, (0.38, 0.30): 1}
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"],
+                            standing_platform=lambda mid, you: (True, platforms.get(you)))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first]
+    offered["path"] = [rival]
+    offered["costs"] = (1000.0, {"t001": 9000.0, "t004": 1000.0})    # clearly worse, on an unplaced read
+    kept = ask((0.34, 0.30), kept)
+    assert kept[0] == [first] and kept[5] == 1                      # kept, its platform remembered
+    kept = ask((0.38, 0.30), kept)                                  # placed again, on the pick's platform
+    assert kept[0] == [rival]                                       # past the resolution there: rival
+
+
+def test_off_ground_the_flat_margin_still_decides_the_hold():
+    """Without ground there are no platforms, so the straight-line branch keeps its own measure: a graph
+    that cannot say where the player stands (no standing_platform) holds the named pad while a way
+    through it costs within the flat SHORTCUT_SWITCH_MARGIN of the cheapest — 500 over on 1000, far past
+    the ground model's 3.4% resolution, still holds there — and lets it go past the flat margin."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1000.0, "t004": 1000.0})}
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"])
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first]
+    offered["path"] = [rival]
+    offered["costs"] = (1000.0, {"t001": 1500.0, "t004": 1000.0})    # inside the flat margin: held
+    kept = ask((0.34, 0.30), kept)
+    assert kept[0] == [first]
+    offered["costs"] = (1000.0, {"t001": 4000.0, "t004": 1000.0})    # past it: the rival takes over
+    kept = ask((0.38, 0.30), kept)
+    assert kept[0] == [rival]
 
 
 def test_reaching_the_named_pad_advances_to_the_next_pad_of_the_chain(dots, shortcuts):

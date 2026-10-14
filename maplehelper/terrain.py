@@ -393,6 +393,7 @@ class Walk:
         edges: list[dict[int, float]] = [dict() for _ in self._spans]
         self._edges = edges
         self._join_fragments()
+        self._platform_of = self._joined_platforms()
         self._join_ropes(lr or [])
         self._join_falls()
         self._join_jumps()
@@ -403,6 +404,33 @@ class Walk:
     def of(cls, fh, lr) -> "Walk":
         """The walk model of one map's ground: its `fh` footholds and `lr` ropes (terrain.json)."""
         return cls(fh, lr)
+
+    def _joined_platforms(self) -> list[int]:
+        """Each span's joined platform (rule 1): fragments joined end to end are one platform, numbered in
+        span order. Read off the fragment joins alone, before ropes, falls and jumps join spans the player
+        cannot simply walk between, so two spans share a number only when the player walks freely between
+        them along the ground."""
+        neighbours: list[set[int]] = [set() for _ in self._spans]
+        for i, edges in enumerate(self._edges):
+            for j in edges:
+                neighbours[i].add(j)
+                neighbours[j].add(i)
+        platform = [-1] * len(self._spans)
+        nxt = 0
+        for i in range(len(self._spans)):
+            if platform[i] >= 0:
+                continue
+            stack = [i]
+            platform[i] = nxt
+            while stack:
+                here = stack.pop()
+                for j in neighbours[here]:
+                    if platform[j] < 0:
+                        platform[j] = nxt
+                        stack.append(j)
+            nxt += 1
+        return platform
+
 
     # ------------------------------------------------------------ building
 
@@ -588,6 +616,15 @@ class Walk:
             if d <= best_d and (best is None or d < best_d):
                 best, best_d = j, d
         return best
+
+    def platform(self, point) -> int | None:
+        """The joined platform (rule 1, `_joined_platforms`) a point in map units stands on, snapped as
+        `_snap` snaps it (rule 7); None when the point snaps to no span at all — the ground cannot say
+        where it stands. Two points share a platform only when a player walks freely along joined
+        fragments between them, never merely because a rope, a fall or a jump joins their spans."""
+        snapped = self._snap(point)
+        return self._platform_of[snapped] if snapped is not None else None
+
 
     def _snap_jump(self, jump) -> tuple[int, int] | None:
         """A jump's (from span, to span), remembered by its end points; None when either end

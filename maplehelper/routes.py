@@ -460,6 +460,23 @@ class Graph:
         said.add(mid)
         log.info("routes: %s on %s, so its pads are picked by straight-line distance", why, self.name(mid))
 
+    def standing_platform(self, mid: str, you: tuple[float, float] | None) -> tuple[bool, int | None]:
+        """Where a spot on the map's picture stands, for the minimap arrow's held pad (ui.portaldots):
+        (the KB has the map's real ground, the joined platform its spot stands on in that ground).
+        The spot (a fraction of the picture, as shortcut_path takes it) is turned into map units
+        exactly as shortcut_path turns it, and the ground (terrain.Walk.platform) says which joined
+        platform it snaps to. (False, None) when the KB has no ground for the map — the caller then
+        falls back to its straight-line measure, which has no platforms; (True, None) when it has
+        ground but the spot snaps to none of it, so the ground cannot say where the player stands.
+        (False, None) too for a map or picture the graph doesn't know, or without the player's dot."""
+        if mid not in self.known or not self.known[mid].minimap or you is None:
+            return False, None
+        ground = self._terrain_walk(mid)
+        if ground is None:
+            return False, None
+        mm = self.known[mid].minimap
+        return True, ground.platform((you[0] * mm[0] - mm[2], you[1] * mm[1] - mm[3]))
+
     def shortcut_path(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
                       margin: float = SHORTCUT_MARGIN) -> list[Jump]:
         """The pads of the cheapest way across the map to a spot (the next step's portal or an NPC), in the order
