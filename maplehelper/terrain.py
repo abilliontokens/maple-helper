@@ -57,7 +57,20 @@ The model — every line of this is an assumption fitted to the data, not a fact
    steady out to about 64 units and then drops away — the same one-jump reach. The
    rope at x=1964, by contrast, ends 2 units above the span at y≈87 at its bottom
    end and 2 below Utah's span at y=-805 at its top: solid contact at both ends. A
-   climb is priced per unit of height by rule 8, not at walking's 1 per unit.
+   climb is priced per unit of height by rule 8, not at walking's 1 per unit, and each of
+   the two ends is priced for what making it costs. An end at the rope's own line — the
+   rope crossing the span, or stopping within a jump of its end — is the ordinary top or
+   bottom join — mostly solid contact: across the KB's 1697 rope ends that meet a span
+   at all, the end-to-span gap has a median of 2 — and keeps the half of
+   the flat 1 the edge has always paid. A beside end is not that: the player jumps at the
+   rope to grab it, or jumps off it sideways, which is a jump by rule 5 and is charged as
+   one, JUMP_EFFORT plus the sideways reach. Without that the model priced a lateral hop
+   across a shaft at less than walking a single unit: on Utah's Pig Farm the rope at
+   x=-991 passes 50 from the span (-1119..-1041, y=-445) and 52 from the span
+   (-939..-861, y=-445), the same height, so crossing the 102 units between them cost
+   1.0 — the whole edge price, no climb at all. It now costs 602.0 (two jumps, 250 of
+   effort plus 50 and 52 of reach), and the map's other two beside-to-beside crossings
+   go 301.0 -> 902.0 (x=-539, 60 of climb) and 601.0 -> 1202.0 (x=1003, 120 of climb).
 4. Falling. From a few probe points along a span the player drops onto the first span
    below (greater y) whose ground is within FALL_REACH sideways and whose drop no wall
    (rule 2) crosses. Falling is one way and nearly free (priced by rule 8). Probing, rather than solving
@@ -98,7 +111,21 @@ The model — every line of this is an assumption fitted to the data, not a fact
    costs its height plus JUMP_EFFORT: a jump is slow to line up and land compared with
    walking the same rise on a slope, so the fixed part is priced well above the height
    itself, and a long ladder of jumps loses to a pad that skips the ladder (rule 8
-   says why the height part itself stays at walking's 1 per unit).
+   says why the height part itself stays at walking's 1 per unit). A jump at a rope, or
+   off one sideways, is this same jump and costs the same (rule 3): the rope's beside
+   ends are priced here, not given away, so a lateral hop across a shaft on a rope can
+   no longer undercut a walk. What that repricing did, measured against the live KB
+   (old price -> new price), on Utah's Pig Farm (010001082) with Utah as the target:
+     - the pad chain from the owner's spot (-1191, -220): t001, t003, t004 -> unchanged;
+       from t001's landing (-1480, -637): t003, t004 -> unchanged.
+     - from that landing, t003's lead over t002 widens: t002 9606.0 vs t003 8231.0
+       (16.7% of t003) -> t002 11095.5 vs t003 8697.5 (27.6%).
+     - KB-wide, 103 maps have ground and 97 of them answer a pad query, before and
+       after alike; the 44 of 688 queries that go unanswered are the same 44 either way,
+       so no map that answered stops answering.
+     - on this map, 43 of its 355 standing spots (one per span, at its middle) change
+       their answer, every one of them from "walk there" to naming a pad, or from a
+       chain to a longer one: the free hop had been standing in for a real crossing.
 6. Hidden teleports. A jump (a hidden teleport; `Jump` to the engine, `jumps` in `pads`)
    connects the span under its `frm` to the span under its `to`, one way, at a flat
    TELEPORT_COST. Either end that cannot be snapped to a span (rule 7) makes that jump
@@ -169,18 +196,62 @@ The model — every line of this is an assumption fitted to the data, not a fact
    not from nearly all: a band read off a wider part of the spread (its
    75th-percentile share, 9%) would name 27 of the 28, which is how a too-wide
    band would show itself.
+10. A named pad must advance. Rule 9's band is wide enough to let a way be named for
+   tying, so what it names must still be a way worth taking: a pad is worth naming
+   only where taking it carries the player forward. What remains of the walk from a
+   span is the whole pad-free way less what reaching that span cost without pads, and
+   the search has both already settled in its first layer, so the test is one lookup
+   per named pad and no second search. A pad whose landing the pad-free walk reaches
+   for no more than the band of rule 9 leaves as much walk as the player already
+   faces where they stand: it puts them back where they effectively are, or behind,
+   and its way is the pad-free way with a loop bolted on. Measured on the live KB
+   (2026-10-15), Utah's Pig Farm toward Utah at (1766, -809): standing on t004's own
+   landing (-5, -630) — a fresh read after a restart, or arriving by another way —
+   the pad-free walk costs 8040.5 and the way through t004 costs 8089.5, 0.61%
+   dearer and well inside the band of 273.4, so rule 9 named t004: the player walks
+   the 44 back down to its dot at (-141, 36), teleports, and arrives where they
+   already stood. Its landing is where they stand, settled at 0, so rule 10 drops it
+   and no pad is named there — the one way through a pad that rule 9 would have
+   named is dropped whole, rather than the next-dearest tie hunted for after the
+   search has stopped. The ties rule 9 is for are untouched: from (140, -493) the way
+   through t007 costs 8119.5 against 7868.5, 3.19% inside a band of 267.5, and its
+   landing sits 2642.5 along that walk, ten times the band past where the player
+   stands, so t007 is still named. What is deliberately not the measure is the pad's
+   own dot. The walk on from the dot takes a second search, and would name the loop:
+   nothing climbs back up from t004's dot, which the player reaches by a one-way
+   fall, so the walk from the dot reaches Utah not at all while the walk from its
+   landing reaches it for 8040.5, and every such pad would look like progress. The
+   dot's cost from the player is settled and no help either — it would unname t007,
+   whose dot sits 246 further along the walk than its own landing (2888.5 against
+   2642.5), the climb the pad gives back. Where no pad-free way reaches the goal at
+   all there is nothing to measure against, and the pad way, being the only way
+   there, stands. What the rule moves, on that map toward Utah: asked from each of
+   its 16 pads' own landings, t004 was the only pad naming itself (t005's and t006's
+   landings name t007, the nine h pads' shared landing names t001, t003, t004 — all
+   unchanged, as are (-1191, -220) -> t001, t003, t004 and t001's landing -> t003,
+   t004). Standing at the middle of each of its 355 spans, a pad is named from 263
+   spots before this rule and 244 after; all 19 that change stand within the band of
+   the landing of the pad they named (t005's or t007's) and all 19 change to naming
+   none. KB-wide (115 maps with ground, 2237 queries from span middles toward each
+   map's pad landings) the same 2106 queries answer before and after, from the same
+   114 maps: a rule that only ever returns [] in place of a chain cannot stop a map
+   answering.
 
 `pads` returns the teleports on the cheapest walk, in the order taken: effort, not
 pad-count, decides. Walking into a span costs its horizontal length, a rope
-CLIMB_WEIGHT per unit of height climbed, a fall a flat FALL_COST (plus its sideways
+CLIMB_WEIGHT per unit of height climbed (plus what each of its two ends costs: half
+the old flat 1 at an ordinary end, a jump's price at one taken sideways), a fall a
+flat FALL_COST (plus its sideways
 drift), a jump its height plus JUMP_EFFORT (and its sideways
 drift, when it lands past the lower span's end), and a teleport a flat TELEPORT_COST
 — about nothing, since the teleport itself is instant, but not zero, so it still
 counts in a way's cost. The teleports returned are those of the cheapest pad-using
 way when that way wins outright, and also when it only ties the cheapest pad-free
-way within the model's resolution (rule 9, MODEL_RESOLUTION of the pad-free
-cost); [] is returned only when every pad-using way loses by more than that, or
-none reaches at all: no teleport is worth taking. However many jumps a way takes
+way within the model's resolution (rule 9, MODEL_RESOLUTION of the pad-free cost) —
+in either case only while every pad in it carries the player forward (rule 10);
+[] is returned when every pad-using way loses by more than that, when the cheapest
+one only loops back to where the player already effectively stands, or when none
+reaches at all: no teleport is worth taking. However many jumps a way takes
 does not decide it; effort does. Within a span the exact entry and exit points
 are not tracked, so costs are map-unit estimates good enough to order ways
 clearly apart, not to separate ways a few percent apart — rule 9 again.
@@ -200,6 +271,14 @@ layer settles at the goal). Timed on that map against the live KB (2026-10-14,
 0.27 ms before this rule and 0.57 ms after it — the second layer costs about
 0.3 ms on the largest map; a pad-winning spot took 0.31 ms before and 0.45 ms
 after, and standing at the target itself is unchanged at some 0.02 ms.
+Rule 10 adds no search either: the first layer writes its settled cost as each span
+comes off the queue (one dictionary store per settled span), and a named chain is
+judged by one lookup per pad in it. Timed the same way on the same map (2026-10-15,
+best of three 2000-query runs, this machine, with the rope-end prices in): the
+(140, -493) tie took 0.673 ms before rule 10 and 0.694 ms after, standing on t004's
+landing 0.690 ms and 0.695 ms, the three-pad chain from (-1191, -220) 0.512 ms and
+0.504 ms, and standing at the target itself 0.017 ms and 0.018 ms — at most 0.02 ms
+on the largest map, which is inside the spread between runs.
 """
 from __future__ import annotations
 
@@ -518,7 +597,11 @@ class Walk:
     def _join_ropes(self, lr) -> None:
         """Every span a rope crosses, ends near, or passes beside joins every other, both
         ways (rule 3), at CLIMB_WEIGHT per unit of the height between them at the rope's
-        x (rule 8), plus the flat 1 it has always paid."""
+        x (rule 8), plus what each of the two ends costs to make. An ordinary end — the
+        rope crossing the span or stopping within a jump of it, its line all but on the
+        span's own x — keeps the half of the flat 1 it has always paid. An end the player
+        reaches by jumping sideways at the rope, or leaves by jumping sideways off it,
+        is a jump by rule 5 and is charged as one: JUMP_EFFORT plus the sideways reach."""
         for row in lr:
             rope = _nums(row, 3)
             if rope is None:
@@ -531,12 +614,13 @@ class Walk:
                 y = s.y_at(near_x)
                 side = abs(x - near_x)
                 if side <= ROPE_X_DIST and top - ROPE_END_DIST <= y <= bottom + ROPE_END_DIST:
-                    joined.append((i, y))    # crossed, or within a jump past an end
+                    joined.append((i, y, 0.5))    # crossed, or within a jump past an end
                 elif side <= ROPE_SIDE_DIST and top <= y <= bottom:
-                    joined.append((i, y))    # passed beside, between the ends: a jump on or off sideways
-            for a, (i, yi) in enumerate(joined):
-                for j, yj in joined[a + 1:]:
-                    self._add(i, j, abs(yi - yj) * CLIMB_WEIGHT + 1.0)
+                    # passed beside, between the ends: a jump on or off sideways (rule 5)
+                    joined.append((i, y, JUMP_EFFORT + side))
+            for a, (i, yi, ci) in enumerate(joined):
+                for j, yj, cj in joined[a + 1:]:
+                    self._add(i, j, abs(yi - yj) * CLIMB_WEIGHT + ci + cj)
 
     def _join_falls(self) -> None:
         """From each probe point along a span, a one-way cheap drop to the first span below
@@ -640,10 +724,13 @@ class Walk:
         order taken: the very objects passed in `jumps` (each with `.frm`, `.to` and `.name`,
         all in map units). The cheapest pad-using way is returned when it beats the
         cheapest pad-free way, and also when it only ties it within the model's
-        resolution (rule 9); [] when every pad-using way loses by more than that, or
-        none reaches at all — no teleport is worth taking. None when either end
-        cannot be snapped to the ground, or no walk reaches the target at all: the
-        ground cannot answer, and the caller falls back to its own heuristic."""
+        resolution (rule 9) — either way only while every pad in it carries the
+        player forward (rule 10); [] when every pad-using way loses by more than
+        that, when the cheapest one only lands the player where they already
+        effectively stand, or when none reaches at all — no teleport is worth
+        taking. None when either end cannot be snapped to the ground, or no walk
+        reaches the target at all: the ground cannot answer, and the caller falls
+        back to its own heuristic."""
         if you is None or target is None:
             return None
         start, goal = self._snap(you), self._snap(target)
@@ -668,12 +755,17 @@ class Walk:
         free: float | None = None
         bound = math.inf
         pad_cost: float | None = None
+        # what the pad-free walk has settled at, span by span (rule 10): the cost from
+        # `you` to that span with no pad taken, filled in as the first layer settles
+        reached: dict[int, float] = {}
         while queue:
             cost, _, here, used = heapq.heappop(queue)
             if cost != best.get((here, used)):
                 continue
             if cost > bound:
                 break
+            if not used:
+                reached[here] = cost
             if here == goal:
                 if used:
                     pad_cost = cost
@@ -707,5 +799,22 @@ class Walk:
                 at, jump = came[at][0], came[at][1]
                 if jump is not None:
                     out.append(jump)
+            # rule 10: a pad is worth naming only where taking it carries the player
+            # forward. What remains of the walk from a span is the whole pad-free
+            # way less what reaching that span pad-free cost — settled right here in
+            # the first layer — so a landing the walk reaches for no more than the
+            # band (rule 9) leaves as much walk as the player already faces where
+            # they stand: the pad puts them back where they effectively are, and its
+            # way is the pad-free way with a loop bolted on. No teleport in it is
+            # worth taking. A landing the first layer never settles is past the band
+            # and carries the player on; where no pad-free way reaches the goal at
+            # all there is nothing to measure against and the pad way is the only
+            # way there, so it stands.
+            if free is not None:
+                band = MODEL_RESOLUTION * free
+                for jump in out:
+                    landed = reached.get(self._snap_jump(jump)[1])
+                    if landed is not None and landed <= band:
+                        return []
             return out[::-1]
         return [] if free is not None else None

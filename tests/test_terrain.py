@@ -110,7 +110,9 @@ def test_a_platform_beside_a_rope_between_its_ends_is_a_mid_rope_exit():
     38 units east of the rope at x=100 (the measure of Utah's Pig Farm, whose rope
     at x=-1185 passes 36 from the span at y=-145 and whose rope at x=1453 passes
     38 from the span at y=-25). The player climbs from the floor (50 below the
-    rope's bottom end: a jump-grab) and gets off sideways onto that platform."""
+    rope's bottom end: a jump-grab) and gets off sideways onto that platform. Getting
+    off sideways is a jump and is priced as one (JUMP_EFFORT plus the 38 of reach):
+    the way is dearer than it used to be, but it is still the only way there."""
     ground = [[0, 300, 200, 300], [138, 175, 300, 175]]
     walk = Walk.of(ground, [[100, 100, 250]])
     assert walk.pads((10, 300), (200, 175), []) == []
@@ -119,7 +121,9 @@ def test_a_platform_beside_a_rope_between_its_ends_is_a_mid_rope_exit():
 def test_a_rope_can_be_grabbed_mid_way_from_a_platform_beside_it():
     # the same beside platform, this time as the start: jump at the rope from it,
     # grab on at y=175 (between the rope's ends), climb and jump off the top end
-    # (50 short of the platform at y=50)
+    # (50 short of the platform at y=50). The grab is a jump and costs one: it used
+    # to be thrown in with the climb for the edge's flat 1, which is what made a
+    # beside-to-beside hop cheaper than walking (see the shaft-crossing test below)
     ground = [[138, 175, 300, 175], [0, 50, 200, 50]]
     walk = Walk.of(ground, [[100, 100, 250]])
     assert walk.pads((200, 175), (150, 50), []) == []
@@ -131,6 +135,62 @@ def test_a_platform_too_far_beside_a_rope_is_not_a_mid_rope_exit():
     ground = [[0, 300, 200, 300], [180, 175, 300, 175]]
     walk = Walk.of(ground, [[100, 100, 250]])
     assert walk.pads((10, 300), (200, 175), []) is None
+
+
+def _west_floor(y):
+    """A floor of 100-wide fragments running west from x=100, so a pad placed along it is
+    reached by a walk whose length its x gives: walking into a span costs its width, so
+    from x=50 the pad at x=-100 is 100 walked, the one at x=-300 some 300, the one at
+    x=-800 some 800 — each good to one fragment, which is all the brackets below need."""
+    return [[-800 + 100 * k, y, -700 + 100 * k, y] for k in range(9)]
+
+
+def test_a_lateral_hop_across_a_shaft_on_a_rope_costs_two_jumps():
+    """Both spans join the rope from beside it, at the same height: the player jumps at
+    the rope, holds it, climbing nothing, and jumps off the other side. That is two jumps
+    by rule 5 — JUMP_EFFORT plus 51 of reach each, some 602 for the 102-unit crossing —
+    not the flat 1 the edge used to cost, which was less than walking a single unit.
+    A pad is the yardstick: one reached by walking some 400 west still beats the
+    crossing, so the crossing costs more than a jump of that reach would
+    (JUMP_EFFORT + 102 = 352), while one some 800 west loses to it."""
+    ground = [*_west_floor(0), [202, 0, 302, 0]]
+    walk = Walk.of(ground, [[151, -50, 50]])          # rope 51 from each span's near end
+    near = Jump((-100, 0), (250, 0), "t001")          # 100 walked: the crossing's own width
+    mid = Jump((-400, 0), (250, 0), "t002")           # some 400 walked
+    far = Jump((-800, 0), (250, 0), "t003")           # some 800 walked
+    # the crossing loses to a walk of the same 102 and to a jump of that reach
+    assert walk.pads((50, 0), (250, 0), [near]) == [near]
+    assert walk.pads((50, 0), (250, 0), [mid]) == [mid]
+    # but it is not boundless: a pad 800 of walking away is the worse way
+    assert walk.pads((50, 0), (250, 0), [far]) == []
+
+
+def test_a_straight_climb_up_a_rope_costs_its_height_and_nothing_at_the_ends():
+    """The rope ends on the floor and at the platform above: both ends are ordinary
+    joins, so the climb is its 100 of height at CLIMB_WEIGHT (some 501) as it always
+    was. A pad reached by walking 300 west beats it; one 800 west does not."""
+    ground = [*_west_floor(200), [50, 100, 250, 100]]
+    walk = Walk.of(ground, [[100, 100, 200]])
+    near = Jump((-100, 200), (150, 100), "t001")      # 100 walked
+    mid = Jump((-300, 200), (150, 100), "t002")       # 300 walked
+    far = Jump((-800, 200), (150, 100), "t003")       # 800 walked
+    assert walk.pads((50, 200), (150, 100), [near]) == [near]
+    assert walk.pads((50, 200), (150, 100), [mid]) == [mid]
+    assert walk.pads((50, 200), (150, 100), [far]) == []
+
+
+def test_an_ordinary_top_and_bottom_rope_join_is_priced_as_it_always_was():
+    """The same rope stopping 50 short of the floor and 50 short of the platform — the
+    ordinary join, where the rope's own end meets its span across a gap (a median of 2
+    across the KB, well inside one jump). The ends are grabbed and left at the rope's
+    end, not sideways, so they keep the flat 1 between them and the same pads win and
+    lose as for the rope that touches both."""
+    ground = [*_west_floor(200), [50, 100, 250, 100]]
+    walk = Walk.of(ground, [[100, 150, 150]])
+    mid = Jump((-300, 200), (150, 100), "t002")       # 300 walked
+    far = Jump((-800, 200), (150, 100), "t003")       # 800 walked
+    assert walk.pads((50, 200), (150, 100), [mid]) == [mid]
+    assert walk.pads((50, 200), (150, 100), [far]) == []
 
 
 def test_a_target_reachable_by_falling_needs_no_pad():
@@ -238,24 +298,44 @@ def test_a_pad_way_within_the_models_resolution_is_named():
     """A pad way that loses only inside the model's resolution (rule 9 in
     terrain.py: MODEL_RESOLUTION, 3.4% of the pad-free way's cost, measured from
     how far the computed cost moves for spots on the same joined platform) is a
-    tie the model cannot tell apart, and the tie goes to the pad. Here a fall
-    lands on the floor for 1 and the walk east along it costs some 2200, while
-    the pad lands on that same floor for 5 and the same walk follows: 2205
-    against 2201, well inside the band, so the pad is named even though it does
-    not win outright."""
-    ground = [[0, 400, 200, 400]] + \
-        [[x, 600, x + 100, 600] for x in range(0, 2400, 100)]
-    pad = Jump((50, 400), (150, 600), "t001")
+    tie the model cannot tell apart, and the tie goes to the pad — so long as the
+    pad carries the player forward (rule 10). The floor runs 2300 of walking east
+    from where the player stands to the target, and the pad's dot sits 1250 west
+    of them: walking out to it, teleporting, and walking the last 1100 east from
+    where it lands costs 2355 against 2300, a loss of 55 inside the band of 78,
+    so the pad is named though it does not win outright. It is worth naming
+    because taking it really does leave less walk: its landing lies 1200 of
+    walking further along than where the player stands, far past that band."""
+    ground = [[x, 600, x + 100, 600] for x in range(0, 2400, 100)] + \
+        [[x, 600, x + 50, 600] for x in range(-1400, 0, 50)]
+    pad = Jump((-1175, 600), (1250, 600), "t001")
     walk = Walk.of(ground, [])
-    assert walk.pads((10, 400), (2350, 600), [pad]) == [pad]
+    assert walk.pads((10, 600), (2350, 600), [pad]) == [pad]
+
+
+def test_a_pad_that_lands_the_player_where_they_stand_is_not_named():
+    """Standing on a pad's own landing, that pad is a loop: the walk to its dot
+    and the teleport put the player back where they already are, and the same
+    2300 of walking east to the target follows from there. This is Utah's Pig
+    Farm's t004 in miniature (terrain.py rule 10): the player stands on the floor
+    the pad lands on, its dot sits on a ledge one fall below, so the way through
+    it costs 2306 against the pad-free 2300 — 0.26%, well inside rule 9's band of
+    78, which is why the band alone used to name it. Its landing is where they
+    already stand, reached for 0, so it carries them nowhere and nothing is
+    named: no teleport is worth taking."""
+    ground = [[x, 400, x + 100, 400] for x in range(0, 2400, 100)] + [[0, 600, 200, 600]]
+    pad = Jump((50, 600), (50, 400), "t001")
+    walk = Walk.of(ground, [])
+    assert walk.pads((50, 400), (2350, 400), [pad]) == []
 
 
 def test_a_pad_way_losing_by_more_than_the_resolution_is_not_named():
-    """The same long walk east, but the pad lands 500 units west of where the
-    fall lands: its way pays that 500 again on top of the teleport, some 2705
-    against 2201 — a loss of about 23%, far past the model's resolution
-    (rule 9), so the pad-free way wins outright and [] keeps its meaning: no
-    teleport is worth taking."""
+    """A ledge over the west end of a long floor, and a pad off it landing 500
+    units west of where a fall from that ledge lands: the player stands on the
+    ledge and the target is 2350 east along the floor, so the pad's way pays that
+    500 back again on top of the teleport, some 2705 against 2201 — a loss of
+    about 23%, far past the model's resolution (rule 9), so the pad-free way wins
+    outright and [] keeps its meaning: no teleport is worth taking."""
     ground = [[0, 400, 200, 400]] + \
         [[x, 600, x + 100, 600] for x in range(-400, 2400, 100)]
     pad = Jump((50, 400), (-350, 600), "t001")
