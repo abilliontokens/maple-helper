@@ -412,7 +412,9 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         self._way: WayFromHere | None = None
         self._first = None                    # (picture, map, leg|None, npc spot|None) of the first card
         self._legend = None                   # the first card's legend of the dots (MapLegend)
-        self.route_btn: QPushButton | None = None    # "Guide me there" / "Stop the route arrow" heading a way
+        self.route_btn: QPushButton | None = None    # "Stop the route arrow" / "Guide me there" heading a way
+        self._routed: str | None = None       # the route arrow's map this window armed, None while it armed none
+        self._declined: str | None = None     # the map the player stopped the arrow for, until the next ◎ (show_map)
         outer = QVBoxLayout(self.content)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll = scroll = QScrollArea()
@@ -476,12 +478,14 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         return size
 
     def _remember(self) -> None:
-        """Closed (its button, the X, Esc): it opens there next time, at its size once the player resized it."""
+        """Closed (its button, the X, Esc): the route arrow it armed let go (_clear_route), and it opens there next
+        time, at its size once the player resized it."""
         for signal, slot in ((LOCATION.changed, self._on_location), (LOCATION.routed, self._on_routed)):
             try:
                 signal.disconnect(slot)
             except (RuntimeError, TypeError):
                 pass                              # never connected, or already gone with the window
+        self._clear_route()                       # (its slots let go above: the closing window isn't drawn again)
         if self.settings is not None:
             p = self.pos()
             if self._user_sized:
@@ -491,12 +495,27 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                 self.settings[POS_SETTING] = {"x": p.x(), "y": p.y()}
 
     def show_map(self, key: str) -> None:
-        """Where a map, an NPC or a quest's NPCs are (one window: a second ◎ shows its thing here instead of opening
-        another). With the player's live map known, the way from there instead of the generic ways in; over its first
-        step, while the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), Guide me
-        there (_route_button), seen without scrolling."""
-        t, rtl, g = self.t, self.t.rtl, routes.of(self.kb)
+        """A ◎ clicked: where a map, an NPC or a quest's NPCs are (one window: a second ◎ shows its thing here instead
+        of opening another), its way arming the game minimap's route arrow by itself (_draw) — a Stop pressed on what
+        it showed before forgotten."""
         self.key = key
+        self._declined = None
+        self._draw(arm=True)
+
+    def redraw(self) -> None:
+        """The thing shown drawn again (the player on another map, the route arrow picked or let go), never arming
+        the arrow: a Stop holds until the next ◎."""
+        if self.key is not None:
+            self._draw()
+
+    def _draw(self, arm: bool = False) -> None:
+        """With the player's live map known, the way from there instead of the generic ways in; over its first step,
+        while the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), its button
+        (_route_button), seen without scrolling. Opened (arm: show_map) on screen, a way with steps arms the arrow at
+        its map by itself (LOCATION.route_dest), unless the player stopped it for this one; a window never shown arms
+        nothing (no close would let it go)."""
+        key = self.key
+        t, rtl, g = self.t, self.t.rtl, routes.of(self.kb)
         self._shown_cap = self._picture_cap()     # the width the new cards' pictures draw at
         clear(self.lay)
         self._way, self._first, self._legend, self.route_btn = None, None, None, None
@@ -527,6 +546,9 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                 self.lay.addWidget(self._here_card(g, way, you))
             else:
                 if self.settings is None or self.settings["minimap_route_arrow"]:    # no settings (a test): on
+                    if arm and self.isVisible() and way.dest != self._declined:
+                        self._routed = way.dest
+                        LOCATION.set_route_dest(way.dest)    # no button yet: nothing for _on_routed to redraw
                     self._route_button(way.dest)
                 for i, leg in enumerate(way.route.legs, 1):
                     self.lay.addWidget(self._route_card(g, str(i), leg.frm, leg, you if i == 1 else None, i == 1))
@@ -544,12 +566,12 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         self._fit_height()
 
     def _on_location(self, here) -> None:
-        """The minimap read changed while open: a new map re-renders the way; a moved dot repaints the first
-        card's picture only (rebuilding every second flickered the window)."""
+        """The minimap read changed while open: a new map re-renders the way (redraw: the route arrow not armed
+        again); a moved dot repaints the first card's picture only (rebuilding every second flickered the window)."""
         if self.key is None:
             return
         if (here.map if here else None) != self._here_map:
-            self.show_map(self.key)
+            self.redraw()
             return
         if self._first is None or self._way is None:
             return                                     # the generic ways in: no live dot on them
@@ -572,9 +594,9 @@ class MapLocationDialog(EdgeResize, GlassDialog):
 
     def _on_routed(self, _dest) -> None:
         """The route arrow picked or let go, here or on the search's map page (LOCATION.routed): a way with its
-        button is shown again, the button saying what a click does now."""
+        button is shown again, the button saying what a click does now (redraw: never arming the arrow itself)."""
         if self.route_btn is not None:
-            self.show_map(self.key)
+            self.redraw()
 
     def _picture_cap(self) -> int:
         """The width a map picture may take: the card's inside width at the window's current width."""
@@ -692,18 +714,36 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         return card
 
     def _route_button(self, dest: str) -> None:
-        """Heading the way, over its first step's card, so it needs no scrolling however long the way: "Guide me
-        there", which has the game's minimap point its orange route arrow at each next step to this map
-        (LOCATION.route_dest, ui/portaldots.py), or "Stop the route arrow" while it already does, which lets it go. A
+        """Heading the way, over its first step's card, so it needs no scrolling however long the way: "Stop the route
+        arrow" while the game's minimap points its orange route arrow at each next step to this map
+        (LOCATION.route_dest, ui/portaldots.py), else "Guide me there", which points it here again (_route_clicked). A
         click needs no rebuild of its own: the pick is LOCATION.routed, which shows the way again (_on_routed)."""
         t = self.t
         said = "route_arrow_stop" if LOCATION.route_dest == dest else "route_arrow_pick"
         btn = QPushButton(bidi.button(t(said), t.rtl), objectName="Secondary")
         btn.setCursor(Qt.PointingHandCursor)
         btn.setAutoDefault(False)
-        btn.clicked.connect(lambda _=False: LOCATION.set_route_dest(None if LOCATION.route_dest == dest else dest))
+        btn.clicked.connect(lambda _=False: self._route_clicked(dest))
         self.route_btn = btn
         self.lay.addWidget(btn, 0, Qt.AlignHCenter)
+
+    def _route_clicked(self, dest: str) -> None:
+        """"Stop the route arrow": let go, and kept let go while this window shows the way — its redraws (the player
+        moving) never arm it again, the next ◎ does. "Guide me there": pointed here again, this window's to let go."""
+        if LOCATION.route_dest == dest:
+            self._declined, self._routed = dest, None
+            LOCATION.set_route_dest(None)
+        else:
+            self._declined, self._routed = None, dest
+            LOCATION.set_route_dest(dest)
+
+    def _clear_route(self) -> None:
+        """Let the game-minimap route arrow go — only when it still points where this window armed it (another
+        window may have pointed it elsewhere since)."""
+        if self._routed is not None:
+            dest, self._routed = self._routed, None
+            if LOCATION.route_dest == dest:
+                LOCATION.set_route_dest(None)
 
     def _here_card(self, g, way: WayFromHere, you) -> QFrame:
         """Already on the destination map: said, with the player's blue dot (and the NPC's for an NPC)."""

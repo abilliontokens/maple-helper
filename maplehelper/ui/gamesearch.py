@@ -734,7 +734,8 @@ class DetailWindow(EdgeResize, QWidget):
     and chips, a muted line — over its titled blocks. Its views are a history — a row's click pushes one, ‹ Back
     pops, a new search click starts it over. While it shows an NPC on the player's map it guides them: the sentence
     and the picture's blue dot follow the player, and the game's own minimap rings the spot (LOCATION.guide). The way
-    to another map starts with "Guide me there" (toolbar panel's route arrow on): the game minimap's arrow along it (LOCATION.route_dest).
+    to another map arms the game minimap's route arrow along it by itself as its page opens (LOCATION.route_dest; the
+    toolbar panel's route arrow on), and its button stops it; hidden, the window lets go of the ring and the arrow.
     Its edges resize it (EdgeResize): the size the player drags it to is kept (game_detail_size) and its pictures
     follow the width; until then it is DETAIL_W wide and as tall as its page, up to DETAIL_H."""
 
@@ -753,11 +754,15 @@ class DetailWindow(EdgeResize, QWidget):
         self.setLayoutDirection(Qt.RightToLeft if owner.t.rtl else Qt.LeftToRight)
         self._stack: list[tuple[str, str]] = []     # each view pushed, the last one shown
         self._guided: tuple | None = None           # the guide this window set, None while it set none
+        self._routed: str | None = None             # the route arrow's map this window armed, None while it armed none
+        self._declined: dict[int, str] = {}         # the map the player stopped the arrow for, by its view's place on
+                                                    # the history (‹ Back to it leaves it stopped)
+        self._arming = False                        # a view being drawn as it opens: its way arms the arrow (_open)
         self._rows: list[QWidget] = []
         self.hit_figures: list[QFrame] = []         # a monster page's Hit & damage figures (_hit_damage)
         self.stats_link: QPushButton | None = None  # ... and its "Type your stats", while stats are missing
         self.market_link: QPushButton | None = None  # an item page's "Free Market prices", for a tradeable item
-        self.route_btn: QPushButton | None = None   # the way's "Guide me there" / "Stop the route arrow" (_way)
+        self.route_btn: QPushButton | None = None   # the way's "Stop the route arrow" / "Guide me there" (_way)
         col = QVBoxLayout(self)
         col.setContentsMargins(SIDE, TOP, SIDE, BOTTOM)
         col.setSpacing(8)
@@ -796,23 +801,35 @@ class DetailWindow(EdgeResize, QWidget):
     # ------------------------------------------------------------ the views
 
     def open_view(self, kind: str, key: str) -> None:
-        """A search result clicked: its page, the history started over."""
+        """A search result clicked: its page, the history started over (a Stop pressed on it before forgotten: opened
+        afresh, its way arms the route arrow again)."""
         self._stack = [(kind, key)]
-        self._draw()
-        self.show_beside()
+        self._declined = {}
+        self._open()
 
     def push(self, kind: str, key: str) -> None:
         """A row's click inside a page: one more view on the history."""
         self._stack.append((kind, key))
-        self._draw()
-        self.show_beside()
+        self._open()
 
     def go_back(self) -> None:
-        """‹ Back: the view under this one on the history."""
+        """‹ Back: the view under this one on the history (its way arms the route arrow again, unless the player
+        stopped it on that view)."""
         if len(self._stack) > 1:
+            self._declined.pop(len(self._stack) - 1, None)     # a Stop on the view that goes, gone with it
             self._stack.pop()
+            self._open()
+
+    def _open(self) -> None:
+        """The last view on the history drawn as it opens, then shown beside the search: a way to another map on it
+        arms the game minimap's route arrow (_way). Only here, never on a redraw (the player moving, a switch, a
+        resize), so a Stop is not undone a moment later."""
+        self._arming = True
+        try:
             self._draw()
-            self.show_beside()
+        finally:
+            self._arming = False
+        self.show_beside()
 
     def redraw(self) -> None:
         """The view drawn again — the language, the KB or the Cabs & Teleports switch changed under it."""
@@ -1140,9 +1157,10 @@ class DetailWindow(EdgeResize, QWidget):
         the step's number and map, what to do there, and the map's picture with the portal (orange) or the NPC
         (green) marked, the player's blue dot on the first; already there, no way known, or their map not read
         yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"]).
-        While the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), the button that
-        points it along this way (_route_button) heads it, under its title and over the steps: never a scroll away
-        below a long way's pictures."""
+        While the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), a way with steps
+        arms it by itself as its view opens (_open) — not on a view the player stopped it on, which ‹ Back returns to
+        stopped — and the button that stops it (_route_button) heads the way, under its title and over the steps:
+        never a scroll away below a long way's pictures."""
         o = self._owner
         t = o.t
         here = LOCATION.here
@@ -1157,6 +1175,9 @@ class DetailWindow(EdgeResize, QWidget):
         else:
             g = routes.of(o._kb)
             if o._settings["minimap_route_arrow"]:
+                if self._arming and self._declined.get(len(self._stack) - 1) != to_map:
+                    self._routed = to_map
+                    LOCATION.set_route_dest(to_map)     # the page in the making: not drawn again for it (_moved)
                 self._route_button(block, g, to_map)
             for i, leg in enumerate(way.legs, 1):
                 w = QLabel(objectName="StepMap")
@@ -1171,11 +1192,11 @@ class DetailWindow(EdgeResize, QWidget):
         self._add(block)
 
     def _route_button(self, block: _Block, g, to_map: str) -> None:
-        """Heads the way, under its title and over the steps, so it needs no scrolling however long the way: "Guide
-        me there", which has the game's minimap point its orange route arrow at each next step to this map
-        (LOCATION.route_dest, ui/portaldots.py); while it already does, a muted line saying so over "Stop the route
-        arrow", which lets it go. A click needs no redraw of its own: the pick is LOCATION.routed, which draws the
-        page again (_moved), so the button always says what a click does now."""
+        """Heads the way, under its title and over the steps, so it needs no scrolling however long the way: while the
+        game's minimap points its orange route arrow at each next step to this map (LOCATION.route_dest,
+        ui/portaldots.py), a muted line saying so over "Stop the route arrow"; stopped (or pointed elsewhere), "Guide me
+        there", which points it here again (_route_clicked). A click needs no redraw of its own: the pick is
+        LOCATION.routed, which draws the page again (_moved), so the button always says what a click does now."""
         t = self._owner.t
         guiding = LOCATION.route_dest == to_map
         if guiding:
@@ -1183,9 +1204,21 @@ class DetailWindow(EdgeResize, QWidget):
         self.route_btn = QPushButton(bidi.button(t("route_arrow_stop" if guiding else "route_arrow_pick"), t.rtl))
         self.route_btn.setCursor(Qt.PointingHandCursor)
         self.route_btn.setFocusPolicy(Qt.NoFocus)
-        self.route_btn.clicked.connect(
-            lambda _=False: LOCATION.set_route_dest(None if LOCATION.route_dest == to_map else to_map))
+        self.route_btn.clicked.connect(lambda _=False: self._route_clicked(to_map))
         block.add(self.route_btn)
+
+    def _route_clicked(self, to_map: str) -> None:
+        """"Stop the route arrow": let go, and kept let go on this view — its redraws and ‹ Back to it never arm it
+        again; opening it afresh (a search click, a row's) does. "Guide me there": pointed here again, this window's
+        to let go."""
+        at = len(self._stack) - 1
+        if LOCATION.route_dest == to_map:
+            self._declined[at], self._routed = to_map, None
+            LOCATION.set_route_dest(None)
+        else:
+            self._declined.pop(at, None)
+            self._routed = to_map
+            LOCATION.set_route_dest(to_map)
 
     def _item_chips(self, key: str) -> list[tuple[str, str]]:
         """An item's header chips: its type's words in the UI's language ("Equip", "One-Handed Sword";
@@ -1311,12 +1344,21 @@ class DetailWindow(EdgeResize, QWidget):
             if LOCATION.guide == guide:
                 LOCATION.set_guide(None)
 
+    def _clear_route(self) -> None:
+        """Let the game-minimap route arrow go — only when it still points where this window armed it (another
+        window may have pointed it elsewhere since)."""
+        if self._routed is not None:
+            dest, self._routed = self._routed, None
+            if LOCATION.route_dest == dest:
+                LOCATION.set_route_dest(None)
+
     def _moved(self, _here: object = None) -> None:
         """The player moved, or the route arrow was picked or let go (a Qt slot too: LOCATION.changed and
         LOCATION.routed): the view of an NPC or a map is drawn again — on the map they're on the sentence and the
-        blue dot follow them, another map and the guide is let go, the way's button says what a click does now.
-        Hidden, nothing is drawn: every view is drawn again as it opens."""
-        if self.isVisible() and self._stack and self._stack[-1][0] in ("npc", "map"):
+        blue dot follow them, another map and the guide is let go, the way's button says what a click does now (the
+        arrow never armed by it: _open). Hidden, nothing is drawn: every view is drawn again as it opens; nor while
+        a view opens (_arming), its own arming sending LOCATION.routed halfway through its page."""
+        if not self._arming and self.isVisible() and self._stack and self._stack[-1][0] in ("npc", "map"):
             self._draw()
 
     # ------------------------------------------------------------ language
@@ -1404,6 +1446,7 @@ class DetailWindow(EdgeResize, QWidget):
 
     def hideEvent(self, e) -> None:
         self._clear_guide()
+        self._clear_route()              # the arrow it armed let go too
         self._owner._page_closed()       # its row in the search no longer lit
         super().hideEvent(e)
 

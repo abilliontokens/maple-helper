@@ -448,7 +448,7 @@ class MapleHelperApp:
             search.rides_changed()
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
-            where.show_map(where.key)
+            where.redraw()      # drawn again, never armed again: a route the player stopped stays stopped
         dots = getattr(self, "portal_dots", None)
         if dots is not None:
             dots.refresh()          # the route's arrow on the game's minimap points along the new way
@@ -466,7 +466,7 @@ class MapleHelperApp:
             search.rides_changed()  # the page shown drawn again: its Guide me there button only with the arrow on
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
-            where.show_map(where.key)   # ... and in the ◎ window
+            where.redraw()      # ... and in the ◎ window (drawn again, never armed again)
 
     def _grind_toggled(self) -> None:
         """The toolbar's Grind button (or the bar's own Hide) flipped settings["grind_bar"]: the bar shows or hides,

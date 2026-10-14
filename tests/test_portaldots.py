@@ -1,6 +1,7 @@
 """The hidden-portal dots and the route's arrow over the game's minimap (ui/portaldots.py): placed from each minimap
 read's view over the minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or their
-setting is off; and the dots' switch, gone from Settings to the bar's ⚙ panel."""
+setting is off, the arrow pointing from the panel's edge at a step off the part shown; and the dots' switch, gone
+from Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 BOX = {"x": 100, "y": 100, "w": 200, "h": 200}
+LIVE_BOX = {"x": 100, "y": 100, "w": 440, "h": 434}     # Kerning City's minimap window, as found live (_live_read)
 
 
 @pytest.fixture
@@ -40,10 +42,12 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
     spots = {"010003000": [(0.5, 0.5), (0.9, 0.9), (0.0, 0.0)]}
     # the ways from the player's map (routes.Graph.route), by the map picked and the first step's spot there: through
     # a portal at (0.5, 0.5); no step left to take; through an NPC with no spot on the minimap; through a portal at
-    # (0.0, 0.0), left of a panel starting at x=15. No way known to any other map. Every ask is kept (routed).
+    # (0.0, 0.0); through a portal at the map's far left (Kerning City's west00 on its way to Henesys, live), off the
+    # live view of the map's middle (_live_read). No way known to any other map. Every ask is kept (routed).
     ways = {"020000000": [SimpleNamespace(kind="portal", spot=(0.5, 0.5))], "030000000": [],
             "040000000": [SimpleNamespace(kind="npc", spot=None)],
-            "050000000": [SimpleNamespace(kind="portal", spot=(0.0, 0.0))]}
+            "050000000": [SimpleNamespace(kind="portal", spot=(0.0, 0.0))],
+            "060000000": [SimpleNamespace(kind="portal", spot=(0.0427, 0.7532))]}
 
     def route(frm, to, taxi=True, teleport=True):
         routed.append((frm, to, taxi, teleport))
@@ -71,6 +75,13 @@ def _place(loc, here):
     """A confirmed read that placed its map, as the scanner hands it over: the map, and the follow started there."""
     loc.set(here)
     loc.set_follow((here.map, here.view))
+
+
+def _live_read(x=-150.0):
+    """Kerning City as read live in LIVE_BOX: its picture 643x263 with its top-left at (x, 143), so its left part
+    lies off the panel shown from x=10; the player's dot at (0.577, 0.429), at (221, 256) in the box."""
+    from maplehelper.minimap import Here, View
+    return Here("010003000", (0.577, 0.429), View(x, 143, 643, 263, (10, 142, 430, 406)))
 
 
 def test_dots_sit_on_the_box_where_the_map_was_placed(dots, qapp):
@@ -196,7 +207,7 @@ def test_the_route_arrow_points_down_at_the_ways_next_step(dots):
     _place(loc, _here())
     assert w._arrow is None                                         # no route picked: the dots alone
     loc.set_route_dest("020000000")
-    assert w.isVisible() and w._arrow == QPointF(60, 45) and w._dots
+    assert w.isVisible() and w._arrow == QPointF(60, 45) and w._dots and w._arrow_angle == 0 and not w._arrow_edge
     img = w.grab().toImage()
     c = img.pixelColor(60, 37)                                      # on the shaft, 8 px above the step
     assert c.red() > 200 and c.green() > 120 and c.blue() < 120     # the route's orange, drawn
@@ -206,11 +217,12 @@ def test_the_route_arrow_points_down_at_the_ways_next_step(dots):
 
 
 @pytest.mark.parametrize("change", ["setting_off", "no_route", "arrived", "no_way", "no_steps", "no_spot",
-                                    "out_of_view", "no_routing"])
+                                    "no_routing"])
 def test_no_next_step_to_point_at_hides_the_arrow(dots, kb, monkeypatch, change):
     """The arrow needs its setting, a route picked to a map other than the player's, a way known there and a first
-    step with a spot in the minimap's window: without one there is nothing to point at, and with no dots or ring
-    either the window hides. A graph that can't route (an older stand-in) places no arrow and breaks nothing."""
+    step with a spot on the minimap's picture (in the part shown or not: one off it is pointed at from the panel's
+    edge): without one there is nothing to point at, and with no dots or ring either the window hides. A graph that
+    can't route (an older stand-in) places no arrow and breaks nothing."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.ui import portaldots
@@ -232,12 +244,68 @@ def test_no_next_step_to_point_at_hides_the_arrow(dots, kb, monkeypatch, change)
         loc.set_route_dest("030000000")                             # a way with no step left to take
     elif change == "no_spot":
         loc.set_route_dest("040000000")                             # its first step isn't on the minimap
-    elif change == "out_of_view":
-        loc.set_route_dest("050000000")                             # its first step is left of the window shown
     else:
         monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(hidden_spots=lambda m: []))
         w.set_kb(kb)                                                # another KB, its graph one that can't route
     assert not w.isVisible() and w._arrow is None
+
+
+def test_a_next_step_off_the_part_shown_is_pointed_at_from_the_panels_edge(dots):
+    """The game's minimap often shows only part of the map, and the way's next step can lie off it: Kerning City's
+    way to Henesys starts at the portal west00, at x=-123 in the box, left of the panel shown from x=10 (live). The
+    arrow still shows, a bigger sign than the mark on a step: just inside the panel's edge, on the line from the
+    player's dot toward the step, turned to point out along it (its shaft behind its tip, not above it), and none of
+    it past the edge."""
+    import math
+
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    loc.set_box(dict(LIVE_BOX))
+    here = _live_read()
+    _place(loc, here)
+    loc.set_route_dest("060000000")                                 # its first step at (0.0427, 0.7532)
+    v = here.view
+    me = (v.x + 0.577 * v.w, v.y + 0.429 * v.h)                     # the player's dot: (221, 256)
+    step = (v.x + 0.0427 * v.w, v.y + 0.7532 * v.h)                 # the step: (-123, 341), left of the panel
+    assert w.isVisible() and w._arrow is not None and w._arrow_edge
+    tip = w._arrow
+    assert 10 <= tip.x() <= 20                                      # at the panel's left edge, inside it
+    assert me[1] < tip.y() < step[1]                                # on the way down-left toward the step
+    assert 45 < w._arrow_angle < 135                                # turned from pointing down to pointing left
+    n = math.hypot(step[0] - me[0], step[1] - me[1])
+    ux, uy = (step[0] - me[0]) / n, (step[1] - me[1]) / n           # that way, one pixel long
+    img = w.grab().toImage()
+    for back in (4, 16):                        # in the head just behind the tip, and on the shaft further back (right)
+        c = img.pixelColor(int(tip.x() - back * ux), int(tip.y() - back * uy))
+        assert c.red() > 200 and c.green() > 120 and c.blue() < 120     # the route's orange, drawn
+    assert img.pixelColor(int(tip.x()), int(tip.y()) - 16).alpha() == 0    # no shaft above the tip: not pointing down
+    assert not any(img.pixelColor(x, y).alpha() for x in range(10) for y in range(434))    # nothing past the edge
+
+
+def test_the_arrow_moves_between_its_step_and_the_edge_as_the_minimap_scrolls(dots, caplog):
+    """The minimap scrolls as the player walks: the step coming into the part shown gets the mark pointing down at
+    it, exactly as before, and going off it again the sign at the edge. The log says each change once (a player's
+    report tells which they saw), never once a frame."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    loc.set_box(dict(LIVE_BOX))
+    edge, on = ("route arrow: pointing from the edge: its next step is off the part shown",
+                "route arrow: on the minimap")
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_route_dest("060000000")
+        _place(loc, _live_read())
+        assert w.isVisible() and w._arrow_edge
+        loc.set_follow(("010003000", _live_read(-145.0).view))      # a frame on, the step still off: along the edge
+        assert w.isVisible() and w._arrow_edge
+        loc.set_follow(("010003000", _live_read(150.0).view))       # scrolled far enough: the step shows
+        assert w.isVisible() and not w._arrow_edge and w._arrow_angle == 0
+        assert w._arrow == QPointF(150.0 + 0.0427 * 643, 143 + 0.7532 * 263)    # on the step, pointing down at it
+        loc.set_follow(("010003000", _live_read().view))            # and back off it
+        assert w.isVisible() and w._arrow_edge
+    assert [m for m in caplog.messages if m in (edge, on)] == [edge, on, edge]
 
 
 def test_the_follow_moves_the_arrow_and_a_lost_one_hides_it(dots):

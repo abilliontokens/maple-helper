@@ -1116,10 +1116,11 @@ STRINGS = {
                                     "en": "A small blue dot on the game's minimap wherever an invisible teleport is."},
     "minimap_route_arrow": {"he": "חץ מסלול במיני-מפה", "en": "Route arrow on the minimap"},
     "minimap_route_arrow_hint": {
-        "he": "חץ כתום במיני-מפה של המשחק בפורטל הבא או אצל הדמות הבאה בדרך למקום שבחרתם. "
-              "בוחרים מפה (בחיפוש המפות או בחלון ה-◎ שלה) ולוחצים 'הדריכו אותי לשם'.",
-        "en": "An orange arrow on the game's minimap at the next portal or NPC on the way to the place you picked. "
-              "Pick a map (Maps search, or its ◎ window) and choose 'Guide me there'."},
+        "he": "חץ כתום במיני-מפה של המשחק בפורטל הבא או אצל הדמות הבאה בדרך למקום שבחרתם, ומצד המיני-מפה כשהשלב הבא "
+              "נמצא מחוץ לחלק שרואים. הוא נדלק מעצמו כשפותחים מפה בחיפוש המפות או בחלון ה-◎ שלה.",
+        "en": "An orange arrow on the game's minimap at the next portal or NPC on the way to the place you picked, or "
+              "at the minimap's edge pointing the way when that step is off the part shown. It lights up on its own "
+              "when you open a map in the Maps search or its ◎ window."},
     "route_arrow_pick": {"he": "הדריכו אותי לשם", "en": "Guide me there"},
     "route_arrow_stop": {"he": "עצירת חץ המסלול", "en": "Stop the route arrow"},
     "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
