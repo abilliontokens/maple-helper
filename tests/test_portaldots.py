@@ -1030,17 +1030,19 @@ def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
     assert w._arrow == QPointF(30, 30) and w._arrow_chain == [rival]
 
 def test_reaching_a_different_platform_repicks_the_fresh_cheapest():
-    """A different joined platform than the pick's ends the hold at once, however close the costs run: the
-    way through the named pad here is only 10 over the cheapest on 1000 (1%, inside the model's
-    resolution, so the same costs on the pick's own platform would hold it), but the player has really
-    moved — another platform — so the fresh cheapest chain decides and the rival is named."""
+    """A different joined platform than the pick's ends the hold once the player has arrived there,
+    however close the costs run: the way through the named pad here is only 10 over the cheapest on
+    1000 (1%, inside the model's resolution, so the same costs on the pick's own platform would hold
+    it), but the player has really moved — another platform, seen on two reads in a row — so the
+    fresh cheapest chain decides and the rival is named. The first read there alone is only a
+    crossing: the named pad stays, its platform remembered."""
     from maplehelper.minimap import Here
     from maplehelper.routes import Jump
     from maplehelper.ui import portaldots
     first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
     rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
     offered = {"path": [first], "costs": (1000.0, {"t001": 1010.0, "t004": 1000.0})}
-    platforms = {(0.30, 0.30): 1, (0.34, 0.30): 2}                  # the pick's platform, then another
+    platforms = {(0.30, 0.30): 1, (0.34, 0.30): 2, (0.38, 0.30): 2}   # the pick's platform, then another
     graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
                             shortcut_costs=lambda mid, you, target: offered["costs"],
                             standing_platform=lambda mid, you: (True, platforms.get(you)))
@@ -1051,8 +1053,67 @@ def test_reaching_a_different_platform_repicks_the_fresh_cheapest():
     kept = ask((0.30, 0.30), ([], None))
     assert kept[0] == [first] and kept[5] == 1                      # picked from platform 1
     offered["path"] = [rival]                                       # asked fresh, the rival now wins
-    kept = ask((0.34, 0.30), kept)                                  # a read on another platform
+    kept = ask((0.34, 0.30), kept)                                  # one read on another platform: crossing
+    assert kept[0] == [first] and kept[5] == 1                      # the named pad stays, not yet arrived
+    kept = ask((0.38, 0.30), kept)                                  # a second read in a row there: arrived
     assert kept[0] == [rival] and kept[5] == 2
+
+
+def test_a_platform_crossed_for_one_read_does_not_change_the_named_pad():
+    """A fall or a jump catches the dot on a platform it is only passing over for one read, between
+    two reads on the platform the chain was picked from: the fresh cheapest there starts another
+    way, but the arrow keeps the pad it had — the player never arrived on the crossed platform —
+    and the read back on the pick's platform names it still, the crossing forgotten."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1010.0, "t004": 1000.0})}
+    platforms = {(0.30, 0.30): 1, (0.34, 0.30): 2, (0.38, 0.30): 1}   # the pick's, a crossed one, the pick's
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"],
+                            standing_platform=lambda mid, you: (True, platforms.get(you)))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first] and kept[5] == 1                      # picked from platform 1
+    offered["path"] = [rival]                                       # crossed platform: the rival wins fresh
+    kept = ask((0.34, 0.30), kept)                                  # one read passing over platform 2
+    assert kept[0] == [first] and kept[5] == 1                      # the named pad does not change
+    kept = ask((0.38, 0.30), kept)                                  # back on the pick's platform
+    assert kept[0] == [first] and kept[5] == 1 and kept[6] is None  # still its pad, the crossing forgotten
+
+
+def test_taking_a_pad_moves_the_arrow_on_at_once_without_arrival():
+    """Taking the named pad is witnessed, not arrived at: seen standing on it, the next read lands
+    them where it puts them, on a platform they have never been read on before — and the arrow
+    moves on to the next pad on that one read, without waiting for a second read to confirm the
+    landing platform. Arrival confirms a platform crossed on foot or in the air; a pad taken is
+    known the moment it is witnessed."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    second = Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name="t003")
+    offered = {"path": [first, second], "costs": (1000.0, {"t001": 1005.0, "t003": 1000.0})}
+    platforms = {(0.30, 0.30): 1, first.frm: 1, first.to: 2}        # the pick's platform, then the landing's
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"],
+                            standing_platform=lambda mid, you: (True, platforms.get(you)))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first, second]                               # its pad named, from platform 1
+    kept = ask(first.frm, kept)                                     # standing on it: witnessed seen
+    assert kept[0] == [first, second]
+    offered["path"] = [second]                                      # from the landing, the next pad first
+    kept = ask(first.to, kept)                                      # one read on the landing platform
+    assert kept[0] == [second] and kept[5] == 2                     # moved on at once, no arrival wait
 
 
 def test_on_one_platform_the_resolution_alone_decides_the_hold():
@@ -1203,6 +1264,136 @@ def test_walking_well_past_a_taken_pads_landing_stops_naming_it():
     offered["costs"] = (1000.0, {"t001": 1000.0, "t004": 6000.0})   # and clearly the cheapest way there now
     kept = ask(at(-1800, 0), kept)
     assert kept[0] == [first]
+
+
+# Utah's Pig Farm's own minimap picture, as the live KB has it (2026-10-14: [3658, 1642, 1559, 1237]), so
+# a spot in map units falls where the picker sees it and PAD_NEAR is the real 146 units across the map and
+# 66 up and down it. The pads' dots and landings below are that KB's own, and every cost quoted is what
+# routes.Graph.shortcut_costs answers there toward Utah at (1766, -809)
+def _pig_farm(x: float, y: float) -> tuple[float, float]:
+    return (x + 1559) / 3658, (y + 1237) / 1642
+
+
+def test_standing_on_a_pad_a_little_dearer_names_that_pad_and_the_chain_after_it():
+    """The owner's complaint, measured: standing on t002 (its dot at (-338, -506)) the cheapest way to Utah
+    starts at t004, across the map, and the way through the pad under their feet costs 8134 against 7802.5
+    — 4.2%, inside PAD_UNDERFOOT_BAND. They have already paid the walk to t002 and it is the one pad they
+    can take without walking anywhere, so the arrow names it, and the pads of the way on from where it puts
+    them (t003 then t004) keep their numbered markers: the whole chain, not a lone pad."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    at = _pig_farm
+    t002 = Jump(frm=at(-338, -506), to=at(-1165, -406), name="t002")
+    t003 = Jump(frm=at(-769, -266), to=at(-272, -212), name="t003")
+    t004 = Jump(frm=at(-141, 36), to=at(-5, -630), name="t004")
+    h002 = Jump(frm=at(-1132, -745), to=at(-1466, 147), name="h002")
+    target = at(1766, -809)                                         # Utah, across the map
+    costs = (7802.5, {"t002": 8134.0, "t003": 8263.2, "t004": 7802.5, "h002": 12636.8})
+    onward = {t002.to: [t003, t004]}                                # from where t002 puts them, the way on
+    graph = SimpleNamespace(hidden_jumps=lambda mid: [t002, t003, t004, h002],
+                            shortcut_path=lambda mid, you, target: list(onward.get(you, [t004])),
+                            shortcut_costs=lambda mid, you, target: costs,
+                            standing_platform=lambda mid, you: (True, 1))
+    kept = portaldots._ask_shortcut(graph, Here("010001082", t002.frm), target, ([], None))
+    assert [j.name for j in kept[0]] == ["t002", "t003", "t004"]    # the pad underfoot, then its own chain
+    assert kept[2] is t002 and kept[5] == 1                         # seen standing on it, picked from here
+
+
+def test_standing_on_a_pad_that_throws_them_back_still_names_the_better_way():
+    """Utah's Pig Farm's nine h pads all drop the player at its west entrance, back where they started:
+    standing on h002, the way through it costs 10309 against the cheapest 7826 — 31.7%, more than four
+    times PAD_UNDERFOOT_BAND — so the pad under their feet is passed over exactly as it always was and the
+    arrow names the cheapest chain (t003 then t004). Standing on it is not the question; what a way through
+    it costs is."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    at = _pig_farm
+    t003 = Jump(frm=at(-769, -266), to=at(-272, -212), name="t003")
+    t004 = Jump(frm=at(-141, 36), to=at(-5, -630), name="t004")
+    h002 = Jump(frm=at(-1132, -745), to=at(-1466, 147), name="h002")
+    target = at(1766, -809)
+    costs = (7826.0, {"t003": 7826.0, "t004": 8825.5, "h002": 10309.0})
+    graph = SimpleNamespace(hidden_jumps=lambda mid: [t003, t004, h002],
+                            shortcut_path=lambda mid, you, target: [t003, t004],
+                            shortcut_costs=lambda mid, you, target: costs,
+                            standing_platform=lambda mid, you: (True, 1))
+    here = Here("010001082", h002.frm)
+    assert portaldots._pad_underfoot(graph, here, h002.frm) is h002     # they really are standing on it
+    kept = portaldots._ask_shortcut(graph, here, target, ([], None))
+    assert [j.name for j in kept[0]] == ["t003", "t004"]
+
+
+def test_stepping_off_the_pad_goes_back_to_the_normal_pick():
+    """The pad underfoot is named while they stand on it and no longer: the read at (-500, -480), 162 units
+    west of t002's dot and so past PAD_NEAR's 146 across this picture, asks again and takes the cheapest
+    chain (t004). Nothing holds t002 there either — a way through it costs 8541 against 7967.5, past the
+    ground model's own resolution on the one platform (terrain.MODEL_RESOLUTION)."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    at = _pig_farm
+    t002 = Jump(frm=at(-338, -506), to=at(-1165, -406), name="t002")
+    t003 = Jump(frm=at(-769, -266), to=at(-272, -212), name="t003")
+    t004 = Jump(frm=at(-141, 36), to=at(-5, -630), name="t004")
+    target = at(1766, -809)
+    off = at(-500, -480)
+    costs = {t002.frm: (7802.5, {"t002": 8134.0, "t003": 8263.2, "t004": 7802.5}),
+             off: (7967.5, {"t002": 8541.0, "t003": 8165.5, "t004": 7967.5})}
+    onward = {t002.to: [t003, t004]}
+    graph = SimpleNamespace(hidden_jumps=lambda mid: [t002, t003, t004],
+                            shortcut_path=lambda mid, you, target: list(onward.get(you, [t004])),
+                            shortcut_costs=lambda mid, you, target: costs[you],
+                            standing_platform=lambda mid, you: (True, 1))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010001082", spot), target, kept)
+
+    kept = ask(t002.frm, ([], None))
+    assert [j.name for j in kept[0]] == ["t002", "t003", "t004"]
+    assert portaldots._pad_underfoot(graph, Here("010001082", off), off) is None     # off every pad there
+    kept = ask(off, kept)
+    assert [j.name for j in kept[0]] == ["t004"]                    # the cheapest way, as before the rule
+
+
+def test_a_pad_witnessed_taken_is_still_not_named_again_with_a_pad_underfoot():
+    """A pad underfoot is the opposite case to a pad taken — they are on it, not past it — and the taken
+    rule keeps its ground: the owner's walk takes t001 (pad (-1463, -205), landing (-1480, -637)), and the
+    read at its landing does not name it again though a way back through it costs 8257 against the cheapest
+    8231 there, well inside the tie band. The next read at (-1104, -713) stands on h002's pad (28 units
+    across, 32 down: inside PAD_NEAR), but that pad's way costs 10366 against 7821, far past
+    PAD_UNDERFOOT_BAND, so neither pad is named and the fresh chain decides as it did before."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    at = _pig_farm
+    t001 = Jump(frm=at(-1463, -205), to=at(-1480, -637), name="t001")
+    t003 = Jump(frm=at(-769, -266), to=at(-272, -212), name="t003")
+    t004 = Jump(frm=at(-141, 36), to=at(-5, -630), name="t004")
+    h002 = Jump(frm=at(-1132, -745), to=at(-1466, 147), name="h002")
+    target = at(1766, -809)
+    before, past = at(-1800, 0), at(-1104, -713)
+    onward = {before: [t001], t001.to: [t003, t004], past: [t003, t004]}
+    costs = {before: (3653.0, {"t001": 3653.0, "t003": 4400.0, "t004": 4500.0, "h002": 9000.0}),
+             t001.to: (8231.0, {"t001": 8257.0, "t003": 8231.0, "t004": 9274.5, "h002": 10947.0}),
+             past: (7821.0, {"t001": 8450.5, "t003": 7821.0, "t004": 8774.5, "h002": 10366.0})}
+    graph = SimpleNamespace(hidden_jumps=lambda mid: [t001, t003, t004, h002],
+                            shortcut_path=lambda mid, you, target: list(onward[you]),
+                            shortcut_costs=lambda mid, you, target: costs[you])
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010001082", spot), target, kept)
+
+    kept = ask(before, ([], None))                                  # a spot before t001: its pad first
+    assert kept[0] == [t001]
+    kept = ask(t001.frm, kept)                                      # standing on it: seen, nothing asked
+    assert kept[0] == [t001] and kept[2] is t001
+    kept = ask(t001.to, kept)                                       # the read that lands them: taken
+    assert [j.name for j in kept[0]] == ["t003", "t004"] and kept[3].name == "t001"
+    assert portaldots._pad_underfoot(graph, Here("010001082", past), past) is h002
+    kept = ask(past, kept)                                          # standing on a pad that throws them back
+    assert [j.name for j in kept[0]] == ["t003", "t004"] and kept[3].name == "t001"
 
 
 def test_wandering_near_a_landing_without_taking_it_asks_once_a_cell():

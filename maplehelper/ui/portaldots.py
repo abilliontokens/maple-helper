@@ -21,16 +21,21 @@ on the NPC as ever) and their own dot read (LOCATION.here.spot): the graph is as
 guide, or once a read has the dot in another of the picture's cells (SHORTCUT_CELLS each way; never for a follow
 frame), and the pad stays picked while they stand on it (PAD_NEAR), so the arrow never flickers back to the portal
 or the NPC before they take the jump; the read that lands them past it points at the portal or the NPC again, or at
-the next pad. A pad once named stays named past a cheaper rival too, while the player has not really
+the next pad. A read that finds them standing on another of the map's pads names that one instead, with its own
+chain numbered after it, while a way through it reaches the spot within PAD_UNDERFOOT_BAND of the cheapest way's
+cost: the walk to it is already paid, so a way a few percent dearer through the pad under their feet beats a
+cheaper way starting across the map, while a pad that would throw them back to where they started costs far more
+than that band and is passed over as ever. A pad once named stays named past a cheaper rival too, while the player has not really
 moved and a way through it still reaches its spot (_held_chain): on ground, still on the joined platform
 it was picked from and beaten by no more than the ground model's own resolution (terrain.MODEL_RESOLUTION);
 off ground, within the flat switch margin (SHORTCUT_SWITCH_MARGIN) — so a wobble about a tie, their dot
 jumping about one platform, the cheapest pad flipping cell to cell, never changes the arrow's mind. It
-gives the pad up on reaching another platform, for a way that beats it past its branch's margin, for none
-through it from where they stand, or once taking it has been witnessed: they
-were seen on the pad and are now on its landing side, or their dot moved in one read from the pad's
-neighbourhood to its landing — nearer the landing alone, true of most of a map for most pads, is no witness
-and leaves the per-cell asking untouched. Once witnessed, the pad stays given up while they remain on that
+gives the pad up on arriving on another platform (that platform seen on ARRIVE_READS reads in a
+row; one read crossing it in a fall or a jump, the arrow keeping what it had, is not arrival),
+for a way that beats it past its branch's margin, for none through it from where they stand, or
+once taking it has been witnessed: they were seen on the pad and are now on its landing side, or
+their dot moved in one read from the pad's neighbourhood to its landing — nearer the landing
+alone, true of most of a map for most pads, is no witness and leaves the per-cell asking untouched. Once witnessed, the pad stays given up while they remain on that
 side, however far they walk on, the fresh chain deciding there — and naming that same pad again only when
 it genuinely does. The arrows look as
 the bar's ⚙ panel picks, read at every refresh: the route's colour
@@ -118,6 +123,19 @@ SHORTCUT_CELLS = 50
 # two cells) and not past the jump (_on_pad): standing on it, their dot jitters about it as they press up there, and
 # the arrow must not flicker between the pad and the portal or the NPC
 PAD_NEAR = 2 / SHORTCUT_CELLS
+# a pad the player is standing on (_on_pad) is named ahead of a pad somewhere else while a way through it
+# reaches the spot within this share of the cheapest way's cost (_underfoot_chain): they have already paid
+# the walk to it, and it is the one pad they can act on without walking anywhere, so a way a few percent
+# dearer through it is worth more to them than a cheaper way starting across the map. Measured on the live
+# KB, 2026-10-14, standing on every pad of all 34 maps that have both ground and pads, toward up to ten of
+# each map's portals and NPCs (289 stands): the picker passes over the pad underfoot in 117 of them, and
+# their cost over the cheapest runs 0.2% to 151x. The few-percent cases the owner reports are Utah's Pig
+# Farm's t002 (+4.2%) and t006 (+6.1%) toward Utah, and the KB-wide census has nothing at all between
+# +6.1% and +8.1%, the one empty gap under the pads that throw the player back to where they started —
+# Utah's nine h pads, all landing at its west entrance, at +23.7% and worse, and elsewhere +250% to
+# +500%. 7.5% sits in that gap: it clears t006 with room and stays more than three times under the
+# cheapest pad that undoes the walk.
+PAD_UNDERFOOT_BAND = 0.075
 # a pad once named stays named while the player has not really moved (_held_chain, _ask_shortcut): on a map
 # with real ground (routes.Graph.standing_platform, terrain.Walk.platform) they are still standing on the
 # joined platform the chain was picked from, and a way through its first pad still reaches the spot. What
@@ -138,6 +156,15 @@ PAD_NEAR = 2 / SHORTCUT_CELLS
 # A cost through the kept pad past its branch's margin, or no cost through it at all (no way through it
 # reaches the spot from here), lets it go; a read the ground cannot place keeps it too (no new answer).
 SHORTCUT_SWITCH_MARGIN = 2200
+# a different joined platform than the pick's takes over only once the player has arrived on it
+# (_ask_shortcut's pending): ARRIVE_READS reads in a row standing on it. Read off the live app,
+# 2026-10-14: its minimap reads are set 0.5 s apart (the minimap_scan_interval setting) and the npc
+# arrow's re-picks in its log at 13:22:13.660, 13:22:14.603 and 13:22:16.089 stand 0.94 s and 1.49 s
+# apart, so a platform the dot only crosses in a fall or a jump — from one tier to the next in
+# under a read's span — shows for one read and only one, while a platform the player has landed
+# on shows again on the next read. Two in a row is therefore arrival, counted in reads
+# themselves: no clock needed.
+ARRIVE_READS = 2
 
 
 def _name(graph, mid: str) -> str:
@@ -296,13 +323,17 @@ def _standing(graph, here: Here, you: tuple[float, float]) -> tuple[bool, int | 
 
 
 def _held_chain(graph, here: Here, you: tuple[float, float], target: tuple[float, float], chain: list,
-                anchor: int | None = None, standing: tuple[bool, int | None] | None = None) -> list | None:
+                anchor: int | None = None, standing: tuple[bool, int | None] | None = None,
+                arrived: bool = False) -> list | None:
     """The chain already named, kept though the cheapest way now starts another way, when the player has
     not really moved and a way through its first pad still reaches the spot from here
     (routes.Graph.shortcut_costs: both costs of that one call, in its one measure). Which measure decides
     is the branch's own (at their constants): on real ground (routes.Graph.standing_platform) the player
     must still stand on the joined platform the chain was picked from (`anchor`, terrain.Walk.platform) —
-    a different platform, or none known for the pick, lets it go at once, the fresh cheapest wins there —
+    a different platform lets it go only once the player has arrived there (`arrived`: that platform
+    seen on ARRIVE_READS reads in a row, _ask_shortcut's pending; until then the chain is kept, the
+    player only crossing that platform), and none known for the pick lets it go at once, the fresh
+    cheapest winning there —
     and on that one platform a fresh rival takes over only when it beats the held way by more than
     terrain.MODEL_RESOLUTION of the cheapest cost, the ground model's own resolution for where on a
     platform a player stands (terrain rule 9); a read the ground cannot place (its platform None) has no
@@ -326,8 +357,10 @@ def _held_chain(graph, here: Here, you: tuple[float, float], target: tuple[float
     if grounded:
         if platform is None:
             return chain            # the ground cannot place them: no new answer, the named pad stays
-        if anchor is None or platform != anchor:
-            return None             # a different platform than the pick's: they have really moved
+        if anchor is None:
+            return None             # none known for the pick: the fresh cheapest wins
+        if platform != anchor:
+            return None if arrived else chain     # arrived there: really moved; only crossing it: kept
         return chain if kept - best <= terrain.MODEL_RESOLUTION * best else None
     return chain if kept - best <= SHORTCUT_SWITCH_MARGIN else None
 
@@ -343,6 +376,41 @@ def _shortcut_path(graph, here: Here, you: tuple[float, float], target: tuple[fl
     return [jump] if jump is not None else []
 
 
+def _pad_underfoot(graph, here: Here, you: tuple[float, float]) -> routes.Jump | None:
+    """The map's hidden teleport the player is standing on (_on_pad, routes.Graph.hidden_jumps), the nearest
+    of them when their spot is on more than one; None off every pad, and on a graph that cannot list a map's
+    pads (a stand-in). This is the opposite case to a pad witnessed taken (_witnessed_take): there the player
+    is past the jump, on its landing side, and here they are on the pad itself, with the jump still to take."""
+    jumps = getattr(graph, "hidden_jumps", None)
+    if not callable(jumps):
+        return None
+    under = [j for j in jumps(here.map) or () if _on_pad(you, j)]
+    return min(under, key=lambda j: math.dist(you, j.frm)) if under else None
+
+
+def _underfoot_chain(graph, here: Here, you: tuple[float, float], target: tuple[float, float]) -> list | None:
+    """The whole chain to name for the pad the player is standing on (_pad_underfoot): that pad, then the pads
+    of the cheapest way on from where it puts them (_shortcut_path from Jump.to), so taking the pad underfoot
+    still numbers the markers of everything after it. None when they stand on no pad, when the graph cannot
+    cost its ways (a stand-in: nothing to set the pad against), when no way through that pad reaches the spot
+    from here at all, or when the way through it costs more than PAD_UNDERFOOT_BAND of the cheapest way over
+    it — a pad that would throw them back to where they started is far past that band and stays unnamed."""
+    pad = _pad_underfoot(graph, here, you)
+    if pad is None:
+        return None
+    costs = getattr(graph, "shortcut_costs", None)
+    if not callable(costs):
+        return None
+    got = costs(here.map, you, target)
+    if not got:
+        return None
+    best, via = got
+    through = via.get(pad.name) if isinstance(via, dict) else None
+    if through is None or math.isinf(through) or through - best > PAD_UNDERFOOT_BAND * best:
+        return None
+    return [pad, *_shortcut_path(graph, here, pad.to, target)]
+
+
 def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -> tuple:
     """The hidden teleports on the player's own map that cut their walk to a spot on it, in the order they are
     taken (`target`: the way's next step, PortalDots._shortcut; the guided NPC, PortalDots._npc_shortcut), as
@@ -350,9 +418,12 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     points at the first pad (Jump.frm) then, the later pads get their numbered markers; [] when no teleport beats
     the walk. `kept` is the last chain, the cell of their spot it was asked from (SHORTCUT_CELLS each way;
     None: to be asked), the pad they were seen standing on (`seen`), the pad witnessed taken (`taken`),
-    their last spot read (`last`), and the joined platform the chain was picked from (`anchor`,
+    their last spot read (`last`), the joined platform the chain was picked from (`anchor`,
     terrain.Walk.platform by way of routes.Graph.standing_platform; None off ground, or when the ground
-    could not place the pick), handed back as they are now — a short `kept` counts the rest as none yet:
+    could not place the pick), and a platform not yet arrived on (`pending`: its platform, how many
+    reads in a row have stood on it, and the chain its first read offered; None once arrived, back
+    on the anchor's platform, or off ground), handed back as they are now — a short `kept` counts
+    the rest as none yet:
     asked only with their spot known (a read that didn't see the dot keeps the last chain), and again only
     once a read has it in another of the picture's cells, never for a follow frame, a read a step on or one
     while they stand on the first pad picked (_on_pad), where it stays picked so the arrow never flickers
@@ -361,12 +432,28 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     A player who has taken nothing — however near some pad's landing their spot happens to be — is asked
     once a cell as ever: no witness, no extra asks.
 
+    A read that asks and finds them standing on some other pad than the one named (_pad_underfoot: any of the
+    map's pads, _on_pad) names that pad and the chain on from where it puts them (_underfoot_chain), ahead of
+    the cheapest chain and ahead of a held one, while a way through it reaches the spot within
+    PAD_UNDERFOOT_BAND of the cheapest way's cost: the walk to it is already paid and it is the one pad they
+    can take where they stand, so a way a few percent dearer through it beats a cheaper way starting across
+    the map. A pad that would throw them back to where they started costs far more than that band and is
+    passed over as it always was. This is the opposite case to a pad witnessed taken — there they are past
+    the jump, here they are on it — and it never names a pad given up: the witness lapses only on the pad's
+    own side, where this rule looks (_witnessed_take, _on_landing_side). It asks nothing extra per read: the
+    cell's one ask decides it, and the read after, still on that pad, is the "standing on the pad picked"
+    case above, which asks nothing at all.
+
     A pad once named stays named while the player has not really moved (_held_chain): a new cell's cheapest chain
-    starting another way — or with no pad at all — takes over only on a different joined platform than
-    the pick's (on ground; off ground, only when its way costs more than the flat SHORTCUT_SWITCH_MARGIN
+    starting another way — or with no pad at all — takes over only once the player has arrived on a
+    different joined platform than the pick's (on ground: that platform on ARRIVE_READS reads in a
+    row — the first such read keeps the named pad and remembers the chain it offered, the next read
+    in a row on that same platform, in its cell or a new one, takes that chain over without asking
+    the graph again; a read on any other platform, the anchor's included, or one the ground cannot
+    place breaks the row; off ground, only when its way costs more than the flat SHORTCUT_SWITCH_MARGIN
     over the cheapest), on the pick's own platform only when it beats the held way by more than
     terrain.MODEL_RESOLUTION of the cheapest cost, when no way through the named pad reaches
-    the spot from here, or when taking it has been witnessed (_witnessed_take: seen on it and now on its landing side, or a dot moved in one
+    the spot from here (even from a platform only being crossed: never hold an unreachable pad), or when taking it has been witnessed (_witnessed_take: seen on it and now on its landing side, or a dot moved in one
     read from its neighbourhood to its landing). Then it stays given up while
     they remain on that landing side, however far they walk on past the landing — asked again even in the
     cell the chain was last asked from — the fresh chain deciding there: naming that same pad again only
@@ -381,12 +468,13 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     taken = kept[3] if len(kept) > 3 else None
     last = kept[4] if len(kept) > 4 else None
     anchor = kept[5] if len(kept) > 5 else None
+    pending = kept[6] if len(kept) > 6 else None
     you = here.spot
     if you is None:
-        return chain, cell, seen, taken, last, anchor
+        return chain, cell, seen, taken, last, anchor, pending
     jump = chain[0] if chain else None
     if jump is not None and _on_pad(you, jump):
-        return chain, None, jump, taken, you, anchor       # standing on it: seen; kept, first read off it asks again
+        return chain, None, jump, taken, you, anchor, None       # standing on it: seen; kept, first read off it asks again
     if jump is not None and _witnessed_take(you, last, seen, jump):
         taken = jump
     if taken is not None and not _on_landing_side(you, taken):
@@ -394,18 +482,46 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     given_up = jump is not None and taken is not None and taken.name == jump.name
     now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
     if now == cell and not given_up:
-        return chain, cell, seen, taken, you, anchor
+        if pending is not None:
+            there, reads, candidate = pending
+            grounded, platform = _standing(graph, here, you)
+            if grounded and platform == there and reads + 1 >= ARRIVE_READS:
+                # arrived (ARRIVE_READS reads in a row here): the remembered chain takes over,
+                # asked already, so the per-cell asking still asked the graph only once here
+                if taken is not None and candidate and candidate[0].name == taken.name:
+                    taken = None                    # named again by that chain itself: not given up
+                seen = candidate[0] if candidate and _on_pad(you, candidate[0]) else (
+                    seen if seen is not None and candidate and seen.name == candidate[0].name else None)
+                return candidate, now, seen, taken, you, platform, None
+            pending = ((there, reads + 1, candidate) if grounded and platform == there
+                       else None if grounded else pending)     # another platform (or none): the row is broken
+        return chain, cell, seen, taken, you, anchor, pending
     fresh = _shortcut_path(graph, here, you, target)
     standing = _standing(graph, here, you)
-    if jump is not None and not (fresh and fresh[0].name == jump.name) and not given_up:
+    grounded, platform = standing
+    if not (fresh and _on_pad(you, fresh[0])):
+        # a pad under their feet: the one pad they can take without walking anywhere, named ahead of any
+        # pad across the map while a way through it stays within PAD_UNDERFOOT_BAND of the cheapest
+        under = _underfoot_chain(graph, here, you, target)
+        if under is not None:
+            return under, now, under[0], taken, you, standing[1], None
+    arrived = (pending is not None and grounded and platform is not None and platform == pending[0]
+               and pending[1] + 1 >= ARRIVE_READS)
+    if (jump is not None and not given_up and grounded and platform is not None and anchor is not None
+            and platform != anchor and not arrived):
         held = _held_chain(graph, here, you, target, chain, anchor, standing)
         if held is not None:
-            return held, now, seen, taken, you, anchor
+            reads = pending[1] + 1 if pending is not None and platform == pending[0] else 1
+            return held, now, seen, taken, you, anchor, (platform, reads, fresh)     # only crossing it: remembered, not yet arrived
+    if jump is not None and not (fresh and fresh[0].name == jump.name) and not given_up:
+        held = _held_chain(graph, here, you, target, chain, anchor, standing, arrived)
+        if held is not None:
+            return held, now, seen, taken, you, anchor, None
     if taken is not None and fresh and fresh[0].name == taken.name:
         taken = None                                # named again by the fresh chain itself: not given up
     seen = fresh[0] if fresh and _on_pad(you, fresh[0]) else (
         seen if seen is not None and fresh and seen.name == fresh[0].name else None)
-    return fresh, now, seen, taken, you, standing[1] if fresh else None
+    return fresh, now, seen, taken, you, standing[1] if fresh else None, None
 
 
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:
@@ -537,6 +653,7 @@ class PortalDots(QWidget):
         self._arrow_taken: routes.Jump | None = None
         self._arrow_last: tuple[float, float] | None = None
         self._arrow_platform: int | None = None
+        self._arrow_pending: tuple | None = None     # a platform not yet arrived on (_ask_shortcut's pending)
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say)
         self._ratio = 1.0
         # the arrows' look, from the settings at each refresh: how many times their drawn size (_size_scale), and
@@ -567,6 +684,7 @@ class PortalDots(QWidget):
         self._npc_taken: routes.Jump | None = None
         self._npc_last: tuple[float, float] | None = None
         self._npc_platform: int | None = None
+        self._npc_pending: tuple | None = None       # as the route's, for the guided NPC's chain
         # the arrows' blink while its flash setting is on (_flash): a beat of the timer hides both, the next shows
         # them again
         self._flash_on = True
@@ -687,7 +805,7 @@ class PortalDots(QWidget):
             leg = way.legs[0] if way is not None and way.legs else None
             self._arrow_key, self._arrow_leg = key, leg if leg is not None and leg.spot is not None else None
             self._arrow_jump, self._arrow_chain, self._jump_cell = None, [], None     # a new way: its chain asked anew
-            self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform = None, None, None, None     # ... and no witness kept
+            self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform, self._arrow_pending = None, None, None, None, None     # ... and no witness kept
             self._arrow_said = None
             log.info("route arrow: to %s, %s", _name(graph, dest),
                      f"next step: {getattr(leg, 'kind', '')} {getattr(leg, 'via', '')}".strip()
@@ -699,7 +817,7 @@ class PortalDots(QWidget):
             return None
         if not hidden:
             self._arrow_jump, self._arrow_chain = None, []
-            self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform = None, None, None, None
+            self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform, self._arrow_pending = None, None, None, None, None
             return leg, None
         return leg, self._shortcut(graph, here, leg)
 
@@ -711,9 +829,9 @@ class PortalDots(QWidget):
         takes a shortcut — how many pads its chain has, when more than one — and when it goes back to the step. Kept
         with the way: _next_step asks anew for a new one."""
         kept = (self._arrow_chain, self._jump_cell, self._arrow_seen, self._arrow_taken, self._arrow_last,
-                self._arrow_platform)
-        chain, self._jump_cell, self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform = _ask_shortcut(
-            graph, here, leg.spot, kept)
+                self._arrow_platform, self._arrow_pending)
+        (chain, self._jump_cell, self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform,
+         self._arrow_pending) = _ask_shortcut(graph, here, leg.spot, kept)
         jump = chain[0] if chain else None
         if chain != self._arrow_chain:
             log.info("route arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
@@ -736,15 +854,15 @@ class PortalDots(QWidget):
         hidden = _switch(self._settings, "route_hidden_teleports")
         if (guide, hidden) != self._npc_key:
             self._npc_key, self._npc_jump, self._npc_chain, self._npc_cell = (guide, hidden), None, [], None
-            self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform = None, None, None, None     # a new guide: no witness kept
+            self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform, self._npc_pending = None, None, None, None, None     # a new guide: no witness kept
         if not hidden:
             self._npc_jump, self._npc_chain = None, []
-            self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform = None, None, None, None
+            self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform, self._npc_pending = None, None, None, None, None
             return None
         kept = (self._npc_chain, self._npc_cell, self._npc_seen, self._npc_taken, self._npc_last,
-                self._npc_platform)
-        chain, self._npc_cell, self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform = _ask_shortcut(
-            graph, here, guide[1], kept)
+                self._npc_platform, self._npc_pending)
+        (chain, self._npc_cell, self._npc_seen, self._npc_taken, self._npc_last, self._npc_platform,
+         self._npc_pending) = _ask_shortcut(graph, here, guide[1], kept)
         jump = chain[0] if chain else None
         if chain != self._npc_chain:
             log.info("npc arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
