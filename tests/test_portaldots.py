@@ -2,9 +2,9 @@
 (ui/portaldots.py): placed from each minimap read's view over the minimap's box (LOCATION.box) and moved with it,
 hidden when there is nothing to place or their setting is off, an arrow pointing from the panel's edge at a step or
 an NPC off the part shown, the route's in the colour its setting picks and the NPC's in the ring's green, both at the
-size picked, with a name beside each saying what to click there, and blinking together with the flash setting; the
-route's on the pad of a hidden teleport that cuts the walk to its step, with the Hidden teleport routes switch on;
-and the dots' switch, gone from Settings to the bar's ⚙ panel."""
+size picked, with a name beside each saying what to click there, and blinking together with the flash setting; each
+on the pad of a hidden teleport that cuts the walk to its spot with the Hidden teleport routes switch on (the NPC's
+ring staying on the NPC); and the dots' switch, gone from Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -43,9 +43,10 @@ def routed():
 @pytest.fixture
 def shortcuts():
     """The dots' stand-in graph's hidden teleports (routes.Graph.hidden_jumps, Graph.shortcut): `jump`, the shortcut
-    it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets one), and
-    `asked`, each time it was asked, in order: (the player's map, their spot, the next step's spot)."""
-    return SimpleNamespace(jump=None, asked=[])
+    it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets one), unless
+    `toward` has one for the spot it is asked toward (the way's next step's or the guided NPC's: its own pad, or None
+    for none there); and `asked`, each time it was asked, in order: (the player's map, their spot, that spot)."""
+    return SimpleNamespace(jump=None, toward={}, asked=[])
 
 
 @pytest.fixture
@@ -59,7 +60,8 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
     # its way to Henesys, live), off the live view of the map's middle (_live_read); through a hidden teleport at
     # (0.5, 0.5) into a map with a long name; on an NPC's trip, Shanks at (0.5, 0.5). No way known to any other map.
     # Every ask is kept (routed); the maps' names are what the name beside the arrow says. The hidden teleports'
-    # shortcut is the one `shortcuts` offers, every ask kept there too.
+    # shortcut is the one `shortcuts` offers toward the spot asked (the step's or the guided NPC's), every ask kept
+    # there too.
     me = "010003000"
     ways = {"020000000": [Leg(me, "010002000", "portal", "east00", spot=(0.5, 0.5))], "030000000": [],
             "040000000": [Leg(me, "040000000", "npc", "Shanks", spot=None)],
@@ -75,10 +77,11 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
 
     def shortcut(mid, you, target, margin=None):
         shortcuts.asked.append((mid, you, target))
-        return shortcuts.jump
+        return shortcuts.toward.get(target, shortcuts.jump)
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
-        hidden_jumps=lambda m: [shortcuts.jump] if shortcuts.jump is not None else [], shortcut=shortcut))
+        hidden_jumps=lambda m: [j for j in (shortcuts.jump, *shortcuts.toward.values()) if j is not None],
+        shortcut=shortcut))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -1048,6 +1051,205 @@ def test_a_flash_beat_hides_both_arrows_and_their_names_and_nothing_else(dots):
                if img.pixelColor(x, y).alpha())                     # nothing but the dots and the ring
     timer.timeout.emit()                                            # the next: all shown again
     assert w._flash_on and drawn() == (True, True, True, True)
+
+
+def test_a_hidden_teleport_that_cuts_the_walk_to_the_guided_npc_gets_its_arrow_on_its_pad(dots, shortcuts, caplog):
+    """A guided NPC across a map of hidden teleports (Utah on Utah's Pig Farm, sixteen blue dots between them): with
+    the Hidden teleport routes switch on and a teleport there cutting the walk (routes.Graph.shortcut, asked from the
+    player's dot toward the NPC's spot, as for the route's step), the NPC's arrow points down at its pad, the blue dot
+    to stand on, while the green ring stays on the NPC. The name beside it is the hidden teleport's words with the
+    NPC's name (stand on it, it takes you toward them), in the app's language, never the NPC's own 💬, so the pad
+    never reads as the NPC; and the log says the arrow takes a shortcut. The minimap scrolling the NPC off the part
+    shown takes the ring away and leaves the arrow on the pad, nothing asked."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper import bidi
+    from maplehelper.minimap import View
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    shortcuts.jump = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="h001")    # its pad at (60, 45), landing by the NPC
+    _place(loc, _here())                                            # the player's dot at (40, 35)
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))     # Athena Pierce, at (100, 65)
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.9, 0.9))]
+    assert w.isVisible() and w._ring == QPointF(100, 65) and w._arrow is None     # the ring on the NPC
+    assert w._npc_arrow == QPointF(60, 45) and w._npc_arrow_angle == 0 and not w._npc_arrow_edge    # on the pad
+    assert w._npc_tag is not None and w._npc_tag.text == "⚡ Athena Pierce" and not w._npc_tag.rtl
+    assert "npc arrow: pointing at a shortcut, the hidden teleport h001 toward Athena Pierce" in caplog.messages
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 37)                                      # on its shaft, 8 px above the pad
+    assert c.alpha() == 255 and _near(c, portaldots.RING_FILL.name())     # the NPC's green
+    for x, y in ((100, 71), (93, 65), (106, 65)):                   # the ring below the NPC and either side of it
+        r = img.pixelColor(x, y)
+        assert r.alpha() == 255 and r.green() > 90 and r.red() < 90, (x, y)
+    assert img.pixelColor(100, 53).alpha() == 0                     # no shaft above the ring: the arrow is on the pad
+    s["language"] = "he"                                            # "{name} ⚡": the name first, as Hebrew reads
+    w.refresh()
+    assert w._npc_tag.rtl and w._npc_tag.text == bidi.LRI + "Athena Pierce" + bidi.PDI + " ⚡"
+    loc.set_follow(("010003000", View(110, 20, 100, 50, (0, 0, 200, 200))))     # the NPC scrolled off the part shown
+    assert w._ring is None and w._npc_arrow == QPointF(160, 45) and not w._npc_arrow_edge     # its pad still in it
+    assert len(shortcuts.asked) == 1                                # the refresh and the frame asked nothing
+
+
+def test_with_hidden_teleport_routes_off_the_guided_npcs_arrow_never_takes_a_pad(dots, shortcuts):
+    """The NPC's shortcut is the Hidden teleport routes switch's too (settings["route_hidden_teleports"], off by
+    default): off, the graph is never asked and the NPC's arrow points at the NPC as it always has, whatever teleport
+    would cut the walk; switched on, the pad; off again, the NPC, nothing asked. The ring stays on the NPC
+    throughout."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    assert s["route_hidden_teleports"] is False
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["language"] = "en"
+    shortcuts.jump = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="h001")    # one there to take, were it allowed
+    _place(loc, _here())
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))         # Athena Pierce, at (100, 65)
+    assert w._npc_arrow == w._ring == QPointF(100, 65) and w._npc_tag.text == "💬 Athena Pierce"
+    assert shortcuts.asked == []                                    # on the NPC, the graph never asked
+    s["route_hidden_teleports"] = True                              # the switch on (the app refreshes the arrow)
+    w.refresh()
+    assert w._npc_arrow == QPointF(60, 45) and w._ring == QPointF(100, 65) and w._npc_tag.text == "⚡ Athena Pierce"
+    assert len(shortcuts.asked) == 1
+    s["route_hidden_teleports"] = False                             # and off again: the NPC, nothing asked
+    w.refresh()
+    assert w._npc_arrow == w._ring == QPointF(100, 65) and w._npc_tag.text == "💬 Athena Pierce"
+    assert not w._npc_arrow_edge and len(shortcuts.asked) == 1
+
+
+def test_no_hidden_teleport_cutting_the_walk_to_the_guided_npc_changes_nothing(dots, shortcuts, caplog):
+    """The switch on and the graph asked toward the NPC, but no teleport beats the walk (on most maps there is none to
+    take): the NPC's arrow points down at the NPC on its ring as ever, its name beside it with 💬, drawn as ever, and
+    the log says only where it is placed, nothing of a shortcut."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    _place(loc, _here())
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_guide(("010003000", (0.5, 0.5), "npc/1012100"))     # Athena Pierce, at (60, 45)
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5))]
+    assert w.isVisible() and w._ring == w._npc_arrow == QPointF(60, 45)
+    assert w._npc_arrow_angle == 0 and not w._npc_arrow_edge and w._npc_tag.text == "💬 Athena Pierce"
+    assert [m for m in caplog.messages if m.startswith("npc arrow")] == ["npc arrow: on the minimap"]
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 37)                                      # on its shaft, 8 px above the NPC
+    assert c.alpha() == 255 and _near(c, portaldots.RING_FILL.name())
+    for x, y in ((60, 51), (53, 45), (66, 45)):                     # the ring below the tip and either side of it
+        r = img.pixelColor(x, y)
+        assert r.alpha() == 255 and r.green() > 90 and r.red() < 90, (x, y)
+
+
+def test_the_guided_npcs_pad_is_asked_again_only_once_the_player_has_moved_on(dots, shortcuts, kb):
+    """As the route's: refresh runs for every follow frame and each read moves the player's dot a little, so the
+    NPC's shortcut is asked from the cell of the map's picture their spot falls in (SHORTCUT_CELLS): the frames, a
+    read a step on and a read that didn't see the dot ask nothing (the pad picked kept), and a read in another cell
+    asks again from there (no teleport cutting the walk from there: the arrow back on the NPC). Another guide is asked
+    for anew from where they stand, and so is the same one with another KB."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["route_hidden_teleports"] = True
+    pad = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="h001")        # its blue dot at (60, 45)
+    shortcuts.jump = pad
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.31, 0.31), view))
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))         # Athena Pierce, at (100, 65)
+    assert w._npc_arrow == QPointF(60, 45) and shortcuts.asked == [("010003000", (0.31, 0.31), (0.9, 0.9))]
+    for x in (9, 8, 7):                                             # the minimap scrolling, frame by frame
+        loc.set_follow(("010003000", View(x, 20, 100, 50, (0, 0, 200, 200))))
+    loc.set(Here("010003000", (0.318, 0.302), view))               # a read a step on: the same cell
+    loc.set(Here("010003000", None, view))                          # a read that didn't see the dot
+    assert w.isVisible() and w._npc_arrow == QPointF(57, 45) and w._ring == QPointF(97, 65)    # moved with the scroll
+    assert len(shortcuts.asked) == 1
+    shortcuts.jump = None                                           # further on, no teleport beats the walk
+    loc.set(Here("010003000", (0.45, 0.31), view))                  # a read in another cell
+    assert shortcuts.asked[1:] == [("010003000", (0.45, 0.31), (0.9, 0.9))]
+    assert w._npc_arrow == w._ring == QPointF(97, 65)               # back on the NPC
+    shortcuts.jump = pad
+    loc.set_guide(("010003000", (0.1, 0.9), "npc/303"))             # another NPC, at (17, 65), in the same cell
+    assert shortcuts.asked[2:] == [("010003000", (0.45, 0.31), (0.1, 0.9))] and w._npc_arrow == QPointF(57, 45)
+    w.set_kb(kb)                                                    # another KB, another graph
+    assert shortcuts.asked[3:] == [("010003000", (0.45, 0.31), (0.1, 0.9))] and w._npc_arrow == QPointF(57, 45)
+
+
+def test_standing_on_the_pad_keeps_the_guided_npcs_arrow_on_it_until_the_jump_is_taken(dots, shortcuts, caplog):
+    """As the route's: on the pad toward the NPC their dot jitters about it as they press up there, and the NPC's
+    arrow stays on it with nothing asked (PAD_NEAR), so it never flickers back to the NPC, even where the graph, asked
+    from there, would say no. The read that lands them past the jump asks again: that jump saving nothing from there,
+    the arrow goes back to the NPC, its 💬 name with it, and the log says so."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    jump = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="h001")       # its pad at (60, 45), landing by the NPC
+    shortcuts.jump = jump
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.31, 0.31), view))
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))         # Athena Pierce, at (100, 65)
+    assert w._npc_arrow == QPointF(60, 45) and len(shortcuts.asked) == 1
+    shortcuts.jump = None                                           # from the pad, the graph would say no
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        for spot in ((0.48, 0.47), (0.53, 0.52), (0.5, 0.5)):       # on it, a cell or two either way
+            loc.set(Here("010003000", spot, view))
+            assert w._npc_arrow == QPointF(60, 45) and w._npc_tag.text == "⚡ Athena Pierce", spot
+        assert len(shortcuts.asked) == 1                            # never asked there
+        loc.set(Here("010003000", jump.to, view))                   # through it: landed by the NPC
+    assert shortcuts.asked[1:] == [("010003000", (0.85, 0.85), (0.9, 0.9))]
+    assert w._npc_arrow == w._ring == QPointF(100, 65) and w._npc_tag.text == "💬 Athena Pierce"
+    assert "npc arrow: no shortcut from here, pointing at the NPC" in caplog.messages
+
+
+def test_a_route_and_a_guide_each_take_the_pad_toward_their_own_spot(dots, shortcuts, routed):
+    """A route and a guide at once, the switch on: each arrow asks the graph toward its own spot, the way's next step
+    and the NPC, and takes its own answer, kept apart. A pad cutting the walk to the NPC and none the walk to the step:
+    the route's arrow stays on its step with its portal's map, and the NPC's goes to the pad with the NPC's name in the
+    hidden teleport's words, its ring on the NPC. A read in another cell asks both again; the answers the other way
+    about, so are the arrows. The way itself is routed once."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrows and the ring alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    npc_pad = Jump(frm=(0.2, 0.8), to=(0.85, 0.85), name="h002")    # its blue dot at (30, 60), landing by the NPC
+    step_pad = Jump(frm=(0.7, 0.2), to=(0.55, 0.5), name="t001")    # its blue dot at (80, 30), landing by the step
+    shortcuts.toward = {(0.9, 0.9): npc_pad, (0.5, 0.5): None}      # toward the NPC, a pad; toward the step, none
+    loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
+    _place(loc, _here())                                            # the player's dot at (40, 35)
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))         # Athena Pierce, at (100, 65)
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5)), ("010003000", (0.3, 0.3), (0.9, 0.9))]
+    assert w._arrow == QPointF(60, 45) and w._tag.text == "→ Bush Road"
+    assert w._npc_arrow == QPointF(30, 60) and w._npc_tag.text == "⚡ Athena Pierce" and w._ring == QPointF(100, 65)
+    shortcuts.toward = {(0.9, 0.9): None, (0.5, 0.5): step_pad}     # further on, the other way about
+    loc.set(Here("010003000", (0.45, 0.31), loc.here.view))         # a read in another cell: both asked again
+    assert shortcuts.asked[2:] == [("010003000", (0.45, 0.31), (0.5, 0.5)), ("010003000", (0.45, 0.31), (0.9, 0.9))]
+    assert w._arrow == QPointF(80, 30) and w._tag.text == "⚡ Bush Road"
+    assert w._npc_arrow == w._ring == QPointF(100, 65) and w._npc_tag.text == "💬 Athena Pierce"
+    assert len(routed) == 1
 
 
 def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isolated_store, kb, monkeypatch):

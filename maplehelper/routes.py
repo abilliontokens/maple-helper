@@ -8,7 +8,7 @@ The graph:
   blue dots the app marks) is a hidden step (Leg.hidden), unless it is a building's door (DOOR). A way takes one only
   where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route). One
   that lands on its own map ("to_x", "to_y": Utah's Pig Farm's pads) is no step, but a shortcut across that map
-  toward the way's next step (Graph.shortcut).
+  toward the way's next step, alone or as the first of a few taken in a row (Graph.shortcut).
 - taxis: the Pathfinder's taxi towns (routes.json "taxi"), each with its cab NPC on the map.
 - boats: a KB guide that says so ("take the boat from Shanks at the dock to Lith Harbor"), one way.
 - NPC trips: an NPC whose own words offer one ("Want to head over to Florina Beach?"), and the NPC there who takes
@@ -34,12 +34,21 @@ FOUND_MAX = 4096                # Graph.find's remembered texts (names; the AI's
 # 122-130 map units up on four live captures; dots that high read too high in game, and the owner set them lower in
 # game (2026-10-09: 125, then 100, 75, 50; 25 units is ~3 screen px at a x2 minimap) (hidden_spots)
 PORTAL_MARK_RISE = 50
-# Graph.shortcut names a hidden teleport within the map only when it saves at least this much walking (map units, in
-# straight lines on the minimap picture). A pad saves at most its own jump, and the site's 324 in-map pads jump 427
-# units at the median (2026-10-14): a whole screen's walk (~1366 units across) would name almost none, and none on
-# Utah's Pig Farm, whose best pad toward its way out saves ~460 (t003, from its left half). 300 is several times the
-# measure's own slack (the dot's PORTAL_MARK_RISE, ~16 units a minimap pixel): a pad barely shorter isn't named
+# Graph.shortcut names a hidden teleport within the map (the first of the pads it takes in a row) only when the way
+# through them saves at least this much walking (map units, as it measures a walk: SHORTCUT_CLIMB). A pad saves at
+# most its own jump, and the site's 324 in-map pads jump 427 units at the median in straight lines (2026-10-14; ~1000
+# with their climb counted): a whole screen's walk (~1366 units across) would name almost none. 300 is over twice the
+# measure's own slack (the dot's PORTAL_MARK_RISE, 125 units counted as a climb; ~16 units a minimap pixel): a pad
+# barely shorter isn't named
 SHORTCUT_MARGIN = 300
+# a step up or down costs this many steps across in Graph.shortcut's walk, standing for climbing: a player crosses a
+# map on foot but climbs it by ladders, ropes and jumps (the KB's map data has none of them), and moving the player up
+# and down is what most pads are for. Toward Utah on Utah's Pig Farm (2026-10-14) its lift t004 then saves ~840 from
+# the bottom of its left half, where in straight lines it saved 265, under the margin; 9 of the farm's 29 spawn points
+# name a pad, all t004, from its lower floors' left half and middle (8 in straight lines, 7 of them t003)
+SHORTCUT_CLIMB = 2.5
+# the most pads Graph.shortcut takes in a row, none of them twice: pads landing on each other's dots can't loop it
+SHORTCUT_PADS = 4
 # a building's door, as the game names its portal: in00, in01_1, jobin00. The game's minimap doesn't draw it either,
 # but the building does: a step like any portal, never Leg.hidden (gamelookup and ui.npcoverlay find buildings by it)
 DOOR = re.compile(r"in\d")
@@ -417,20 +426,48 @@ class Graph:
 
     def shortcut(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
                  margin: float = SHORTCUT_MARGIN) -> Jump | None:
-        """The pad that shortens the player's walk across the map to a spot (the next step's portal or NPC) the most:
-        `you` (the player's dot), `target` and the jumps are spots on its minimap picture, measured in map units (the
-        fractions times the picture's size, as npcoverlay.direction measures). A pad counts when the walk to its dot
-        and on from where it lands beats walking straight there by at least `margin` units. None without one, without
-        the player's dot or a target, and on a map with no pads (hidden_jumps)."""
+        """The pad to take first on the cheapest way across the map to a spot (the next step's portal or an NPC),
+        when that way beats walking straight there by at least `margin` units; None when walking wins, on a map with
+        no pads (hidden_jumps), and without the player's dot (`you`) or the target.
+
+        The way is a shortest path over a tiny graph: the player's dot, each pad's dot (Jump.frm) and the point it
+        lands on (Jump.to), and the target, all spots on the map's minimap picture measured in map units (the
+        fractions times the picture's size). Walking between any two costs the straight line between them, its
+        up-and-down part SHORTCUT_CLIMB times over: that stands for climbing, as a player walks across a map but
+        climbs it by ladders, ropes and jumps, and moving them up and down is what most pads are for. Taking a pad
+        costs nothing (the teleport is instant) from its dot to where it lands. A walk is never beaten by walking
+        through a third point, so the cheapest way alternates walks and pads: to a pad's dot, on from where it lands
+        to the next pad's dot, and from the last landing to the target. Each round relaxes the cheapest way to where
+        each pad lands by one more pad (Bellman-Ford over at most 16 pads a map in the live data: well under a
+        millisecond, and no state kept, so the same spots name the same pad), never through a pad the way already
+        took and through at most SHORTCUT_PADS of them, so pads that land on each other's dots end the search too.
+
+        The KB's map data has no footholds or ladders: a straight line may cross a wall or a gap, and one weight
+        stands for every climb, so a pad that mainly lifts the player past a long climb can still be undervalued (a
+        known limit), and one beside a short ladder overvalued."""
         jumps = self.hidden_jumps(mid)
         if not jumps or you is None or target is None:
             return None
         w, h = self.known[mid].minimap[:2]
 
-        def far(a: tuple[float, float], b: tuple[float, float]) -> float:
-            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h)
-        best = min(jumps, key=lambda j: far(you, j.frm) + far(j.to, target))
-        return best if far(you, best.frm) + far(best.to, target) + margin <= far(you, target) else None
+        def walk(a: tuple[float, float], b: tuple[float, float]) -> float:
+            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h * SHORTCUT_CLIMB)
+        hop = [[walk(a.to, b.frm) for b in jumps] for a in jumps]     # from where one pad lands to another's dot
+        # the cheapest way found to where each pad lands, that pad taken last: its walking, and its pads in order
+        cost = [walk(you, j.frm) for j in jumps]
+        way = [(i,) for i in range(len(jumps))]
+        for _ in range(SHORTCUT_PADS - 1):
+            cost2, way2 = cost[:], way[:]
+            for p, (c, taken) in enumerate(zip(cost, way)):
+                for i, d in enumerate(hop[p]):
+                    if c + d < cost2[i] and i not in taken:
+                        cost2[i], way2[i] = c + d, taken + (i,)
+            if cost2 == cost:
+                break                       # no way got cheaper: one more pad won't make one either
+            cost, way = cost2, way2
+        total = [c + walk(j.to, target) for c, j in zip(cost, jumps)]
+        best = min(range(len(jumps)), key=total.__getitem__)
+        return jumps[way[best][0]] if total[best] + margin <= walk(you, target) else None
 
 
 def side(spot: tuple[float, float] | None) -> str:

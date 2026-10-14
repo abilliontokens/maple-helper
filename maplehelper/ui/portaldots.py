@@ -1,32 +1,35 @@
 """Blue dots on the game's own minimap where the map's invisible teleports are (press-up and touch portals the game
 never draws), a green ring around the NPC the player asked to be guided to (LOCATION.guide: ui/npcoverlay.py, the
 search's NPC page) with a green arrow pointing down at it, and an arrow pointing down at the next portal or NPC on
-the way to the map the player picked a route to (LOCATION.route_dest), or at the pad of a hidden teleport on the
-player's own map that cuts their walk there (routes.Graph.shortcut: its blue dot, where to stand). The minimap often
-shows only part of the map: an NPC or a step off the part shown gets a bigger arrow just inside the edge of the part
-shown instead, pointing toward it (the NPC no ring then). All of it on a click-through window laid over the minimap's
-box (LOCATION.box: the game's minimap window found at its top left, else the box the player drew), and moved with it.
-The map comes from each minimap read (ui/location.LOCATION.here), where its picture lies in the box from the fast
-follow between reads (LOCATION.follow: the marks move with the minimap's scroll, and go the moment the picture stops
-matching, a teleport or the loading screen). Hidden whenever there is nothing to place (no box, no read, a picture
-that doesn't match); the portal dots also need their setting, the ring only a guide on the player's own map, the
-NPC's arrow that guide and the arrows' setting (minimap_route_arrow), and the route's arrow that setting and a way
-known from the player's map to another one, its first step on this map's minimap picture. A shortcut's pad needs the
-player's Hidden teleport routes switch too (route_hidden_teleports: off, the arrow never takes one) and their own dot
-read (LOCATION.here.spot): the graph is asked again only once a read has the dot in another of the picture's cells
-(SHORTCUT_CELLS each way; never for a follow frame), and the pad stays picked while they stand on it (PAD_NEAR), so
-the arrow never flickers back to the portal before they take the jump; the read that lands them past it points at the
-portal again, or at the next pad. The arrows look as the bar's ⚙ panel picks, read at every refresh: the route's
-colour (minimap_arrow_color, a name in ARROW_COLORS: orange unless another is picked; the NPC's is the ring's green
-whatever is picked, so it reads as the NPC and never as the route's step), their size (minimap_arrow_size: the length
-in screen pixels, from ARROW_SIZE_MIN to ARROW_SIZE_MAX, both shapes scaled alike), a small name beside each saying
-what to click there (minimap_arrow_label, in the app's language: the map the route's portal leads to, a hidden
-teleport's in words of its own (a shortcut's pad's too, with the map its step leads to), or the NPC to talk to for a
-cab, a boat or an NPC's trip; the guided NPC's own name, as the KB has it; on a pill in its arrow's colours, its
-letters sized with the arrow, just above the mark's shaft or inward of the sign at the edge, all of it inside the
-panel) and whether they blink (minimap_arrow_flash: both hidden and shown again together every FLASH_MS, their names
-with them, to catch the eye on a busy minimap; the dots and the ring never blink). Both at once (a guide here while
-the route leads elsewhere): the NPC's is drawn over the route's."""
+the way to the map the player picked a route to (LOCATION.route_dest). Either arrow points at the pad of a hidden
+teleport on the player's own map instead when one cuts their walk to its spot (routes.Graph.shortcut: its blue dot,
+where to stand), the guided NPC's ring staying on the NPC. The minimap often shows only part of the map: an NPC, a
+step or a pad off the part shown gets a bigger arrow just inside the edge of the part shown instead, pointing toward
+it (the NPC no ring then). All of it on a click-through window laid over the minimap's box (LOCATION.box: the game's
+minimap window found at its top left, else the box the player drew), and moved with it. The map comes from each
+minimap read (ui/location.LOCATION.here), where its picture lies in the box from the fast follow between reads
+(LOCATION.follow: the marks move with the minimap's scroll, and go the moment the picture stops matching, a teleport
+or the loading screen). Hidden whenever there is nothing to place (no box, no read, a picture that doesn't match);
+the portal dots also need their setting, the ring only a guide on the player's own map, the NPC's arrow that guide
+and the arrows' setting (minimap_route_arrow), and the route's arrow that setting and a way known from the player's
+map to another one, its first step on this map's minimap picture. A shortcut's pad, the route's or the NPC's, needs
+the player's Hidden teleport routes switch too (route_hidden_teleports: off, neither arrow ever takes one, the NPC's
+on the NPC as ever) and their own dot read (LOCATION.here.spot): the graph is asked again only for another way or
+guide, or once a read has the dot in another of the picture's cells (SHORTCUT_CELLS each way; never for a follow
+frame), and the pad stays picked while they stand on it (PAD_NEAR), so the arrow never flickers back to the portal
+or the NPC before they take the jump; the read that lands them past it points at the portal or the NPC again, or at
+the next pad. The arrows look as the bar's ⚙ panel picks, read at every refresh: the route's colour
+(minimap_arrow_color, a name in ARROW_COLORS: orange unless another is picked; the NPC's is the ring's green whatever
+is picked, so it reads as the NPC and never as the route's step), their size (minimap_arrow_size: the length in
+screen pixels, from ARROW_SIZE_MIN to ARROW_SIZE_MAX, both shapes scaled alike), a small name beside each saying what
+to click there (minimap_arrow_label, in the app's language: the map the route's portal leads to, a hidden teleport's
+in words of its own (a shortcut's pad's too, with the map its step leads to), or the NPC to talk to for a cab, a boat
+or an NPC's trip; the guided NPC's own name, as the KB has it, in the hidden teleport's words at its pad, so the pad
+never reads as the NPC itself; on a pill in its arrow's colours, its letters sized with the arrow, just above the
+mark's shaft or inward of the sign at the edge, all of it inside the panel) and whether they blink
+(minimap_arrow_flash: both hidden and shown again together every FLASH_MS, their names with them, to catch the eye
+on a busy minimap; the dots and the ring never blink). Both at once (a guide here while the route leads elsewhere):
+the NPC's is drawn over the route's."""
 from __future__ import annotations
 
 import logging
@@ -87,13 +90,14 @@ TAG_CHARS = 18                  # a name longer than this many characters is cut
 TAG_PAD_X, TAG_PAD_Y = 0.5, 0.1     # the pill's room around its words, across and above/below, in its letters' size
 TAG_ALPHA = 0.85                # how opaque the pill's fill (the arrow's rim) is, the minimap a touch through it
 TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen pixels
-# the route's arrow's shortcut (PortalDots._shortcut): routes.Graph.shortcut asked from the player's own spot
-# (LOCATION.here.spot) by the cell it falls in, this many across and down the map's picture: asked again only once a
-# read has their dot in another cell (it moves a little on every read, and never on the follow frames between)
+# an arrow's shortcut (_ask_shortcut: the route's toward its next step, the guided NPC's toward the NPC):
+# routes.Graph.shortcut asked from the player's own spot (LOCATION.here.spot) by the cell it falls in, this many
+# across and down the map's picture: asked again only once a read has their dot in another cell (it moves a little on
+# every read, and never on the follow frames between)
 SHORTCUT_CELLS = 50
 # ... and the pad picked kept, nothing asked, while their spot is this near it either way (fractions of the picture:
 # two cells) and not past the jump (_on_pad): standing on it, their dot jitters about it as they press up there, and
-# the arrow must not flicker between the pad and the portal
+# the arrow must not flicker between the pad and the portal or the NPC
 PAD_NEAR = 2 / SHORTCUT_CELLS
 
 
@@ -151,19 +155,28 @@ def _size_scale(settings) -> float:
     return min(max(size, ARROW_SIZE_MIN), ARROW_SIZE_MAX) / ARROW_SIZE_PX
 
 
+def _switch(settings, name: str) -> bool:
+    """One of the player's switches the arrows' ways follow (game_rides, route_hidden_teleports); off when the
+    settings can't say."""
+    try:
+        return bool(settings[name])
+    except (KeyError, TypeError):
+        return False
+
+
 def _shape(points, scale: float) -> QPolygonF:
     """One of the arrow's shapes (ARROW_PX, EDGE_ARROW_PX) scaled about its origin."""
     return QPolygonF([QPointF(x * scale, y * scale) for x, y in points])
 
 
 def _aim(view: View, target: tuple[float, float], spot: tuple[float, float] | None, scale: float) -> _Aim:
-    """An arrow for a spot on the map's picture (`target`: the route's next step or its shortcut's pad, or the guided
-    NPC): on it, pointing down, when the window shows it. Else it is off the part of the map shown (the game's minimap
-    often shows only part: Kerning City's way to Henesys starts at its far left, left of the panel, live), and the
-    arrow sits at the panel's edge, on the line from the player's dot (`spot`, the read's; the panel's middle when the
-    read saw none or the window doesn't show it) toward it, turned to point out along it, its tip pulled in just far
-    enough that all of it, head and shaft, stays inside the panel whichever way it turns, at the size it is drawn
-    (`scale`, _size_scale: a bigger arrow sits further in)."""
+    """An arrow for a spot on the map's picture (`target`: the route's next step, the guided NPC, or the pad of a
+    shortcut toward either): on it, pointing down, when the window shows it. Else it is off the part of the map shown
+    (the game's minimap often shows only part: Kerning City's way to Henesys starts at its far left, left of the
+    panel, live), and the arrow sits at the panel's edge, on the line from the player's dot (`spot`, the read's; the
+    panel's middle when the read saw none or the window doesn't show it) toward it, turned to point out along it, its
+    tip pulled in just far enough that all of it, head and shaft, stays inside the panel whichever way it turns, at
+    the size it is drawn (`scale`, _size_scale: a bigger arrow sits further in)."""
     on = view.at(target)
     if on is not None:
         return _Aim(on[0], on[1], 0.0, False)
@@ -195,6 +208,27 @@ def _on_pad(you: tuple[float, float], jump: routes.Jump) -> bool:
             and math.dist(you, jump.frm) < math.dist(you, jump.to))
 
 
+def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -> tuple:
+    """The hidden teleport on the player's own map that cuts their walk to a spot on it (`target`: the way's next
+    step, PortalDots._shortcut; the guided NPC, PortalDots._npc_shortcut), as routes.Graph.shortcut picks it from
+    their own spot (LOCATION.here.spot, the read's dot): an arrow points at its pad (Jump.frm) then; None when no
+    teleport beats the walk. `kept` is the last pick and the cell of their spot it was asked from (SHORTCUT_CELLS
+    each way; None: to be asked), both handed back as they are now: asked only with their spot known (a read that
+    didn't see the dot keeps the last pick), and again only once a read has it in another of the picture's cells,
+    never for a follow frame, a read a step on or one while they stand on the pad picked (_on_pad), where it stays
+    picked so the arrow never flickers between the pad and the spot as their dot jitters about it. The first read
+    off the pad asks again: the one that lands them past the jump gets the spot back (or the next pad), that jump
+    saving nothing from there."""
+    jump, cell = kept
+    you = here.spot
+    if you is None:
+        return kept
+    if jump is not None and _on_pad(you, jump):
+        return jump, None       # standing on it: kept, and the first read off it asks again
+    now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
+    return kept if now == cell else (graph.shortcut(here.map, you, target), now)
+
+
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:
     """What the name beside the route's arrow says for its step, an i18n key and the name it carries: the map a
     portal leads to (arrow_tag_hidden for a teleport the game's minimap never draws), or the NPC to talk to for a
@@ -208,11 +242,19 @@ def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple
     return "arrow_tag_npc", leg.via
 
 
-def _npc_words(kb, key: str) -> tuple[str, str]:
-    """What the name beside the guided NPC's arrow says, as _tag_words for the route's: arrow_tag_npc and the NPC's
-    name as the KB has it, the id its key carries (npc/<id>) when the KB has none."""
+def _npc_name(kb, key: str) -> str:
+    """The guided NPC's name as the KB has it, for the name beside its arrow and the log; the id its key carries
+    (npc/<id>) when the KB has none."""
     name = (kb.get(key) or {}).get("name")
-    return "arrow_tag_npc", str(name) if name else key.rpartition("/")[2]
+    return str(name) if name else key.rpartition("/")[2]
+
+
+def _npc_words(kb, key: str, jump: routes.Jump | None = None) -> tuple[str, str]:
+    """What the name beside the guided NPC's arrow says, as _tag_words for the route's: arrow_tag_npc and the NPC's
+    name (_npc_name). At a shortcut's pad instead (`jump`, PortalDots._npc_shortcut: a hidden teleport on the
+    player's own map that cuts the walk to the NPC), the hidden teleport's words with the NPC's name: stand on it, it
+    takes you toward them; never the NPC's own, so the pad never reads as the NPC itself."""
+    return ("arrow_tag_hidden" if jump is not None else "arrow_tag_npc"), _npc_name(kb, key)
 
 
 def _say(arrow: str, what: str, key: object, aim: _Aim | None, said: tuple | None) -> tuple | None:
@@ -269,13 +311,16 @@ class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and arrow's and the route's arrow's window over the minimap box. Never
     takes a click, the focus, or a place in the minimap reads. The route's arrow points at its way's next step, or at
     the pad of a hidden teleport on the player's map that cuts the walk there (_next_step, _shortcut): the way routed
-    once for the player's map, the route's map and the switches, its shortcut asked only with the Hidden teleport
-    routes switch on and the player's dot read, and again only as that dot moves from cell to cell, never while they
-    stand on the pad. Each refresh takes the arrows' look from the settings: the route's colour (minimap_arrow_color;
-    the guided NPC's is the ring's green, whatever is picked), their size (minimap_arrow_size), the name beside each
-    (minimap_arrow_label, in the language the app's settings pick: the window is made without one) and their blink
-    (minimap_arrow_flash): one timer on the window hiding and showing both arrows and their names alone every
-    FLASH_MS, together, while either is placed and the setting is on. The guided NPC's is drawn over the route's."""
+    once for the player's map, the route's map and the switches. The guided NPC's points at the NPC, or likewise at
+    the pad of one that cuts the walk to it (_npc_shortcut: the hidden teleport's words with the NPC's name beside
+    it, the ring staying on the NPC), its pick kept for the guide and the switch. Either shortcut is asked only with
+    the Hidden teleport routes switch on and the player's dot read, and again only as that dot moves from cell to
+    cell, never while they stand on the pad (_ask_shortcut). Each refresh takes the arrows' look from the settings:
+    the route's colour (minimap_arrow_color; the guided NPC's is the ring's green, whatever is picked), their size
+    (minimap_arrow_size), the name beside each (minimap_arrow_label, in the language the app's settings pick: the
+    window is made without one) and their blink (minimap_arrow_flash): one timer on the window hiding and showing
+    both arrows and their names alone every FLASH_MS, together, while either is placed and the setting is on. The
+    guided NPC's is drawn over the route's."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -309,14 +354,21 @@ class PortalDots(QWidget):
         self._arrow_scale = 1.0
         self._arrow_fill, self._arrow_rim = _arrow_colors(settings)
         self._tag: _Tag | None = None   # the name beside the route's arrow (_make_tag) while placed, its setting on
-        # the guided NPC's arrow, placed as the route's is (_aim): on its spot, inside the ring, or while the part
-        # shown hasn't it, its tip at the panel's edge; its turn from pointing down, which it is, the name beside it,
-        # and what the log last said about its placing (_say)
+        # the guided NPC's arrow, placed as the route's is (_aim): on the NPC, inside the ring, or on the pad of a
+        # hidden teleport that cuts the walk there (_npc_shortcut), or while the part shown hasn't it, its tip at the
+        # panel's edge; its turn from pointing down, which it is, the name beside it, and what the log last said
+        # about its placing (_say)
         self._npc_arrow: QPointF | None = None
         self._npc_arrow_angle = 0.0
         self._npc_arrow_edge = False
         self._npc_tag: _Tag | None = None
         self._npc_said: tuple | None = None
+        # ... and its shortcut, as the route's (_npc_shortcut): what it was asked for (the guide, its map, the NPC's
+        # spot and key, and the Hidden teleport routes switch), the pad picked while one cuts the walk to the NPC, and
+        # the cell of the player's spot it was last asked from (SHORTCUT_CELLS; None: to be asked)
+        self._npc_key: tuple | None = None
+        self._npc_jump: routes.Jump | None = None
+        self._npc_cell: tuple[int, int] | None = None
         # the arrows' blink while its flash setting is on (_flash): a beat of the timer hides both, the next shows
         # them again
         self._flash_on = True
@@ -332,6 +384,7 @@ class PortalDots(QWidget):
     def set_kb(self, kb: KnowledgeBase) -> None:
         self._kb = kb
         self._arrow_key = None      # another KB, another graph: the arrow's way routed and its shortcut asked again
+        self._npc_key = None        # ... and the guided NPC's shortcut asked again
         self.refresh()
 
     def refresh(self, _what: object = None) -> None:
@@ -354,10 +407,11 @@ class PortalDots(QWidget):
             return
         graph = routes.of(self._kb)
         # the portal dots need their setting; the ring, only a guide for the map the player is on, its NPC in the
-        # part shown; the NPC's arrow, that guide and the arrows' setting; the route's arrow, that setting and a way
-        # from this map with a first step on its minimap, the arrow on that step or on the pad of a hidden teleport
-        # that cuts the walk to it (_next_step). Each arrow on its spot when the part shown has it, else at the
-        # panel's edge pointing toward it (_aim)
+        # part shown; the NPC's arrow, that guide and the arrows' setting, the arrow on the NPC or on the pad of a
+        # hidden teleport that cuts the walk to it (_npc_shortcut), the ring on the NPC either way; the route's arrow,
+        # that setting and a way from this map with a first step on its minimap, the arrow on that step or on the pad
+        # of a hidden teleport that cuts the walk to it (_next_step). Each arrow on its spot when the part shown has
+        # it, else at the panel's edge pointing toward it (_aim)
         spots = graph.hidden_spots(here.map) if self._settings["minimap_hidden_portals"] else []
         at = [p for p in (view.at(s) for s in spots) if p is not None]
         guide = LOCATION.guide
@@ -365,13 +419,15 @@ class PortalDots(QWidget):
             guide = None                        # another map's guide: nothing of it here
         at_ring = view.at(guide[1]) if guide is not None else None
         leg, jump = self._next_step(graph, here) or (None, None)
+        npc = guide is not None and bool(self._settings["minimap_route_arrow"])
+        npc_jump = self._npc_shortcut(graph, here, guide) if npc else None
         scale = _size_scale(self._settings)     # the edge arrow's room in the panel depends on its size
         aim = _aim(view, jump.frm if jump is not None else leg.spot, here.spot, scale) if leg is not None else None
-        npc_aim = (_aim(view, guide[1], here.spot, scale)
-                   if guide is not None and self._settings["minimap_route_arrow"] else None)
+        npc_aim = _aim(view, npc_jump.frm if npc_jump is not None else guide[1], here.spot, scale) if npc else None
         what = f"the hidden teleport {jump.name}" if jump is not None else "its next step"
         self._arrow_said = _say("route arrow", what, (self._arrow_key, jump), aim, self._arrow_said)
-        self._npc_said = _say("npc arrow", "the NPC", guide, npc_aim, self._npc_said)
+        what = f"the hidden teleport {npc_jump.name}" if npc_jump is not None else "the NPC"
+        self._npc_said = _say("npc arrow", what, (guide, npc_jump), npc_aim, self._npc_said)
         if not at and at_ring is None and aim is None and npc_aim is None:
             self._clear()
             return
@@ -394,7 +450,7 @@ class PortalDots(QWidget):
         # the names beside them, with their setting on: placed by the arrows just placed, inside the panel shown
         label = self._settings["minimap_arrow_label"]
         self._tag = self._make_tag(_tag_words(graph, leg, jump), aim, view.panel) if aim is not None and label else None
-        self._npc_tag = (self._make_tag(_npc_words(self._kb, guide[2]), npc_aim, view.panel)
+        self._npc_tag = (self._make_tag(_npc_words(self._kb, guide[2], npc_jump), npc_aim, view.panel)
                          if npc_aim is not None and label else None)
         self._flash((self._arrow is not None or self._npc_arrow is not None)
                     and bool(self._settings["minimap_arrow_flash"]))
@@ -420,13 +476,7 @@ class PortalDots(QWidget):
         dest = LOCATION.route_dest
         if not self._settings["minimap_route_arrow"] or not dest or dest == here.map:
             return None
-
-        def switch(name: str) -> bool:
-            try:
-                return bool(self._settings[name])
-            except (KeyError, TypeError):
-                return False
-        rides, hidden = switch("game_rides"), switch("route_hidden_teleports")
+        rides, hidden = _switch(self._settings, "game_rides"), _switch(self._settings, "route_hidden_teleports")
         key = (here.map, dest, rides, hidden)
         if key != self._arrow_key:
             route = getattr(graph, "route", None)     # a stand-in graph that can't route (an older test's): no arrow
@@ -447,30 +497,40 @@ class PortalDots(QWidget):
 
     def _shortcut(self, graph, here: Here, leg: routes.Leg) -> routes.Jump | None:
         """The hidden teleport on the player's own map that cuts their walk to the way's next step (`leg`), as
-        routes.Graph.shortcut picks it from their own spot (LOCATION.here.spot, the read's dot): the route's arrow
-        points at its pad (Jump.frm) then, and the name beside it says it takes them toward the step's map; None when
-        no teleport beats the walk. Asked only with their spot known (a read that didn't see the dot keeps the last
-        pick), and again only once a read has it in another of the picture's cells (SHORTCUT_CELLS each way): never
-        for a follow frame, a read a step on or one while they stand on the pad picked (_on_pad), where it stays
-        picked so the arrow never flickers between the pad and the portal as their dot jitters about it. The first
-        read off the pad asks again: the one that lands them past the jump gets the portal back (or the next pad),
-        that jump saving nothing from there. The log says when the arrow takes a shortcut and when it goes back to
-        the step. Kept with the way: _next_step asks anew for a new one."""
-        you, jump = here.spot, self._arrow_jump
-        if you is None:
-            return jump
-        if jump is not None and _on_pad(you, jump):
-            self._jump_cell = None      # standing on it: kept, and the first read off it asks again
-            return jump
-        cell = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
-        if cell != self._jump_cell:
-            found = graph.shortcut(here.map, you, leg.spot)
-            if found != jump:
-                log.info("route arrow: %s", f"pointing at a shortcut, the hidden teleport {found.name} toward "
-                         f"{_name(graph, leg.to)}" if found is not None
-                         else "no shortcut from here, pointing at its next step")
-            self._jump_cell, self._arrow_jump = cell, found
-        return self._arrow_jump
+        _ask_shortcut picks it from their own spot: the route's arrow points at its pad (Jump.frm) then, and the name
+        beside it says it takes them toward the step's map; None when no teleport beats the walk. The log says when
+        the arrow takes a shortcut and when it goes back to the step. Kept with the way: _next_step asks anew for a
+        new one."""
+        jump, self._jump_cell = _ask_shortcut(graph, here, leg.spot, (self._arrow_jump, self._jump_cell))
+        if jump != self._arrow_jump:
+            log.info("route arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
+                     f"{_name(graph, leg.to)}" if jump is not None
+                     else "no shortcut from here, pointing at its next step")
+        self._arrow_jump = jump
+        return jump
+
+    def _npc_shortcut(self, graph, here: Here, guide: tuple) -> routes.Jump | None:
+        """The hidden teleport on the player's own map that cuts their walk to the guided NPC (`guide`: its map, the
+        NPC's spot and key, LOCATION.guide on their map), as _ask_shortcut picks it from their own spot, the same as
+        for the route's step (_shortcut): the NPC's arrow points at its pad (Jump.frm) then, the ring staying on the
+        NPC, and the name beside it says it takes them toward the NPC (_npc_words). None when no teleport beats the
+        walk, and with the Hidden teleport routes switch off (settings["route_hidden_teleports"]: the arrow on the
+        NPC as ever, the graph never asked). Kept for the guide and the switch, asked anew for another guide or the
+        switch flipped (set_kb forgets it too), and in between as the route's is: never for a follow frame, a read a
+        step on or one while they stand on the pad. The log says when the arrow takes a shortcut and when it goes
+        back to the NPC."""
+        hidden = _switch(self._settings, "route_hidden_teleports")
+        if (guide, hidden) != self._npc_key:
+            self._npc_key, self._npc_jump, self._npc_cell = (guide, hidden), None, None
+        if not hidden:
+            return None
+        jump, self._npc_cell = _ask_shortcut(graph, here, guide[1], (self._npc_jump, self._npc_cell))
+        if jump != self._npc_jump:
+            log.info("npc arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
+                     f"{_npc_name(self._kb, guide[2])}" if jump is not None
+                     else "no shortcut from here, pointing at the NPC")
+        self._npc_jump = jump
+        return jump
 
     def _make_tag(self, words: tuple[str, str], aim: _Aim, panel: tuple[float, float, float, float]) -> _Tag | None:
         """The name beside an arrow just placed at `aim` (settings["minimap_arrow_label"]), in the language the app's
