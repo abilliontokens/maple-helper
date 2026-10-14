@@ -1,10 +1,12 @@
 """routes.json from NiaMeowDB's map data (the file its Pathfinder reads): every map's portals and NPCs with their
-minimap spots, the invisible teleports the app marks on the game's minimap ("hidden"), and for a map with no minimap
-(a shop) the frame of its room picture ("scene").
+minimap spots, the invisible teleports the app marks on the game's minimap ("hidden", one within the map with the
+point it lands on), and for a map with no minimap (a shop) the frame of its room picture ("scene").
 
 The nightly scrape (tools/scrape_meowdb.py) builds it with this, and so does the app itself (refresh): a KB built
 before routes.json carried the hidden teleports gave a player no dots at all, with nothing to tell them why (0.18.0's
-KB, 2026-10-11, on macOS too), so the app rebuilds that file from the site when the KB it loaded lacks them."""
+KB, 2026-10-11, on macOS too), so the app rebuilds that file from the site when the KB it loaded lacks them. It does
+so, once, for a file without their landing points too (no LANDINGS mark: every KB built before 2026-10-14), which the
+app needs to say which pad to take on a map full of them (Utah's Pig Farm)."""
 from __future__ import annotations
 
 import json
@@ -27,6 +29,9 @@ MAP_ID = re.compile(r"^\d{9}$")
 # the game's portal kinds (the map data's "type"): 2 is drawn on the minimap (the blue ring), 1 is invisible (stand on it
 # and press up) and 3 is a touch teleport (walk or fall into it); the app draws the invisible ones on the game's minimap
 HIDDEN_PORTAL_TYPES = (1, 3)
+# routes_data's mark on the file: its hidden teleports carry where each one within the map lands ("to_x", "to_y").
+# A file without it was built before they did, and the app rebuilds it once (outdated)
+LANDINGS = "landings"
 APP_PAUSE = 0.5         # seconds between the app's own requests to the site (the nightly scrape waits 1 s)
 APP_UA = "MapleHelper (MapleStory Classic companion app; used with NiaMeowDB permission)"
 
@@ -35,20 +40,26 @@ log = logging.getLogger("maplehelper")
 
 def hidden_portals(m: dict) -> list[dict]:
     """The map's invisible teleports, to other maps and within it (the hidden passages: "hide01" to "hide01_1"), each
-    once per spot."""
+    once per spot. One within the map (the site's intraPortals: "t001" to "st00") keeps the point it lands on as
+    "to_x", "to_y": the landing point is what lets the app say which pad to take to the next step on a map full of
+    them (Utah's Pig Farm has 16). One to another map lands on no point of this one: its name, x and y alone."""
     out, seen = [], set()
     for p in [*(m.get("portals") or []), *(m.get("intraPortals") or [])]:
         x, y = p.get("x") or 0, p.get("y") or 0
         if p.get("type") in HIDDEN_PORTAL_TYPES and (x, y) not in seen:
             seen.add((x, y))
-            out.append({"name": p.get("name") or "", "x": x, "y": y})
+            row = {"name": p.get("name") or "", "x": x, "y": y}
+            if p.get("toX") is not None and p.get("toY") is not None:
+                row["to_x"], row["to_y"] = p["toX"], p["toY"]
+            out.append(row)
     return out
 
 
 def routes_data(maps: list[dict], taxi: list[str], scenes: dict[str, list] | None = None) -> dict:
     """What the app routes with, from the site's map data: ids, names, portals and NPCs with their minimap spots, and
-    the invisible teleports it marks on the game's minimap. `scenes`: for maps with no minimap, the frame of their
-    room picture ([width, height, x offset, y offset], scene_frame), kept as "scene"."""
+    the invisible teleports it marks on the game's minimap, with where each one within the map lands (the file marked
+    LANDINGS). `scenes`: for maps with no minimap, the frame of their room picture ([width, height, x offset,
+    y offset], scene_frame), kept as "scene"."""
     out, ids = [], {str(m.get("id") or "") for m in maps}
     for m in maps:
         mid = str(m.get("id") or "")
@@ -68,7 +79,7 @@ def routes_data(maps: list[dict], taxi: list[str], scenes: dict[str, list] | Non
             row["scene"] = scenes[mid]
         out.append(row)
     out.sort(key=lambda m: m["id"])
-    return {"source": SOURCE, "taxi": taxi, "maps": out}
+    return {"source": SOURCE, "taxi": taxi, LANDINGS: True, "maps": out}
 
 
 def scene_frame(terrain: dict | None) -> list | None:
@@ -120,15 +131,19 @@ def _read(root: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def lacks_hidden(data: dict | None) -> bool:
-    """routes.json built before it carried the invisible teleports: maps, and not one with a "hidden" list (a map
-    with none has an empty one). No file or no maps is not this case: there is nothing to route with anyway."""
-    maps = (data or {}).get("maps")
-    return isinstance(maps, list) and bool(maps) and not any(isinstance(m, dict) and "hidden" in m for m in maps)
+def outdated(data: dict | None) -> bool:
+    """routes.json built before it carried the invisible teleports (maps, and not one with a "hidden" list: a map with
+    none has an empty one), or before they carried where each one lands (no LANDINGS mark): rebuilt, once, since the
+    file written has both. No file or no maps is not this case: there is nothing to route with anyway."""
+    data = data or {}
+    maps = data.get("maps")
+    if not isinstance(maps, list) or not maps:
+        return False
+    return not data.get(LANDINGS) or not any(isinstance(m, dict) and "hidden" in m for m in maps)
 
 
 def needs_refresh(root: Path) -> bool:
-    return lacks_hidden(_read(root))
+    return outdated(_read(root))
 
 
 def _fetch(url: str, timeout: float = 30) -> str | None:
@@ -141,12 +156,13 @@ def _fetch(url: str, timeout: float = 30) -> str | None:
 
 
 def refresh(root: Path, fetch=_fetch, pause=lambda: time.sleep(APP_PAUSE)) -> bool:
-    """The KB's routes.json rebuilt from the site's map data when it lacks the hidden teleports; True when it was
-    written. The taxi towns stay as the file had them (the nightly scrape reads those from the Pathfinder page). The
-    site down, or its file unusable: nothing written, False (tried again on the next start or KB load)."""
+    """The KB's routes.json rebuilt from the site's map data when it lacks the hidden teleports or where they land
+    (outdated); True when it was written. The taxi towns stay as the file had them (the nightly scrape reads those
+    from the Pathfinder page). The site down, or its file unusable: nothing written, False (tried again on the next
+    start or KB load)."""
     path = Path(root) / ROUTES
     old = _read(root)
-    if not lacks_hidden(old):
+    if not outdated(old):
         return False
     raw = fetch(MAPS_DATA)
     try:
@@ -158,10 +174,12 @@ def refresh(root: Path, fetch=_fetch, pause=lambda: time.sleep(APP_PAUSE)) -> bo
         return False
     pause()
     data = routes_data(maps, [str(t) for t in (old or {}).get("taxi") or []], scene_frames(maps, fetch, pause))
-    if not data["maps"] or not lacks_hidden(_read(root)):
+    if not data["maps"] or not outdated(_read(root)):
         return False        # nothing usable, or a KB update brought a new file meanwhile: that one stays
     write_routes(path, data)
-    log.info("routes: rebuilt from NiaMeowDB's map data: %d maps, %d with hidden teleports, %d room frames",
+    log.info("routes: rebuilt from NiaMeowDB's map data (the KB's file lacked the hidden teleports or where they "
+             "land): %d maps, %d with hidden teleports, %d with landing points, %d room frames",
              len(data["maps"]), sum(1 for m in data["maps"] if m["hidden"]),
+             sum(1 for m in data["maps"] if any("to_x" in h for h in m["hidden"])),
              sum(1 for m in data["maps"] if "scene" in m))
     return True

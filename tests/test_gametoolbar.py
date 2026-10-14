@@ -6,13 +6,15 @@ kept after a drag. Its width is the player's too: the buttons wrap into as many 
 Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
 tint, the accent, the transparency, icons instead of words, the bar's key, Cabs & Teleports and the hidden-teleport
 routes, the Minimap switches and the route arrow's colour, size, name and flashing, Reset) are written and followed
-live; the panel is no taller than its screen, its sections scrolling under its title row."""
+live. The panel is one card in two columns, mirrored in Hebrew, each row's hint one line with all of it in the row's
+tooltip; on a 1080p screen at 125 % it needs no scrolling, and it is never taller than its screen (its sections then
+scroll under its title row)."""
 import os
 
 import pytest
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton
 from PySide6.QtTest import QTest
 
 from maplehelper import bidi
@@ -50,6 +52,22 @@ def bar(qapp, isolated_store):
     w.close()
     if w._panel is not None:
         w._panel.close()
+
+
+def _column(p, widget) -> int:
+    """Which of the ⚙ panel's two columns a widget lies wholly in, as seen: 0 the left one, 1 the right one."""
+    from maplehelper.ui import gametoolbar
+    step = gametoolbar.PANEL_COL_W + gametoolbar.PANEL_COL_GAP
+    x = widget.mapTo(p, QPoint(0, 0)).x() - gametoolbar.PANEL_SIDE
+    col = x // step
+    assert col in (0, 1) and x + widget.width() <= col * step + gametoolbar.PANEL_COL_W, (x, widget.width())
+    return col
+
+
+def _from_the_top(p, *widgets) -> bool:
+    """The widgets read from the top of the ⚙ panel in the order given, none level with the one before it."""
+    ys = [w.mapTo(p, QPoint(0, 0)).y() for w in widgets]
+    return ys == sorted(set(ys))
 
 
 # ------------------------------------------------------------ its setting
@@ -128,8 +146,8 @@ def test_hidden_teleport_routes_is_a_switch_under_cabs_and_teleports_off_at_firs
     w.refresh()
     w._gear.click()
     p = w._panel
-    y = lambda widget: widget.mapTo(p, QPoint(0, 0)).y()  # noqa: E731
-    assert y(p._way_head) < y(p._rides_label) < y(p._hidden_routes_label) < y(p._minimap_head)
+    column = (p._way_head, p._rides_label, p._hidden_routes_label, p._minimap_head)    # Directions, then the Minimap
+    assert {_column(p, c) for c in column} == {1} and _from_the_top(p, *column)         # down the right-hand column
     assert p._hidden_routes_label.text() == p._hidden_routes.accessibleName() == "Hidden teleport routes"
     assert p._hidden_routes_hint.text() == w.t("tb_hidden_routes_tip")      # the row says what the setting does
     assert p._hidden_routes.isChecked() is False and s["route_hidden_teleports"] is False
@@ -727,22 +745,105 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])
-def test_the_panel_is_no_taller_than_its_screen_and_its_sections_scroll(qapp, isolated_store, lang):
-    """The sections need more height than the offscreen screen has: the panel stops inside the screen's room
-    and the sections scroll under the title row, the last row (Reset) out of sight until scrolled to. Their scrollbar
-    sits in the side margin (the left one in Hebrew), so they keep the place and width they have without it."""
+def test_the_panel_is_one_card_in_two_columns_mirrored_in_hebrew(qapp, isolated_store, lang):
+    """One card, its sections in two columns PANEL_COL_W wide read from the leading edge (the left; the right in
+    Hebrew): Look, Transparency and Toolbar down the first, Directions and the Minimap down the second, both starting
+    level under the title row; Reset at the leading edge under a hairline across both, below the longer one."""
     from maplehelper.ui import gametoolbar
     w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n(lang))
     try:
         w.refresh()
         w._gear.click()
         p = w._panel
-        assert p.height() <= QGuiApplication.primaryScreen().availableGeometry().height()
+        first = (p._look_head, p._tint_label, p._tints, p._accent_label, p._accents, p._opacity_head,
+                 p._opacity_label, p._slider, p._bar_head, p._icons_label, p._icons_hint, p._hotkey_label,
+                 p._hotkey_hint)
+        second = (p._way_head, p._rides_label, p._rides_hint, p._hidden_routes_label, p._hidden_routes_hint,
+                  p._minimap_head, p._hidden_portals_label, p._hidden_portals_hint, p._route_arrow_label,
+                  p._route_arrow_hint, p._arrow_color_label, p._arrow_colors, p._arrow_size_label, p._arrow_size,
+                  p._arrow_label_label, p._arrow_label_hint, p._arrow_flash_label, p._arrow_flash_hint,
+                  p._arrival_label, p._arrival_hint, p._overlay_shots_label, p._overlay_shots_hint)
+        switches = (p._rides, p._hidden_routes, p._hidden_portals, p._route_arrow, p._arrow_label, p._arrow_flash,
+                    p._arrival, p._overlay_shots)
+        lead = 1 if lang == "he" else 0                                     # the leading column, as seen
+        assert {_column(p, c) for c in first + (p._icons, p._hotkey)} == {lead} and _from_the_top(p, *first)
+        assert {_column(p, c) for c in second + switches} == {1 - lead} and _from_the_top(p, *second)
+        assert p._tints.width() == p._arrow_colors.width() == gametoolbar.PANEL_COL_W     # a row as wide as its column
+        at = lambda widget: widget.mapTo(p, QPoint(0, 0))  # noqa: E731
+        assert at(p._look_head).y() == at(p._way_head).y()                  # both start level, under the title row
+        rule, side = p.findChild(QFrame, "Rule"), gametoolbar.PANEL_SIDE
+        assert at(rule).y() > max(at(c).y() + c.height() for c in first + second)
+        assert at(rule).x() == side and rule.width() == gametoolbar.PANEL_W - 2 * side   # across both columns
+        x = at(p._reset).x()
+        assert at(p._reset).y() > at(rule).y()
+        assert x + p._reset.width() == gametoolbar.PANEL_W - side if lang == "he" else x == side   # the leading edge
+    finally:
+        w.close()
+        w._panel.close()
+
+
+def test_each_hint_is_one_line_under_its_row_and_whole_in_the_rows_tooltip(bar):
+    """The hints no longer take the panel's height: each row's hint is one line under it, its first sentence (cut
+    with "…" where its column is narrower), while all of it is the line's text and accessible name (what a screen
+    reader reads) and the tooltip of the line, the row's label and its switch (the key box keeps its own: how to pick
+    a key). Another language brings all of it in that language."""
+    from maplehelper.ui.widgets import tip_html
+    w, _ = bar
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    rows = (("tbs_icons_hint", p._icons_hint, p._icons_label, p._icons),
+            ("tb_hotkey_hint", p._hotkey_hint, p._hotkey_label, None),
+            ("tb_rides_tip", p._rides_hint, p._rides_label, p._rides),
+            ("tb_hidden_routes_tip", p._hidden_routes_hint, p._hidden_routes_label, p._hidden_routes),
+            ("minimap_hidden_portals_hint", p._hidden_portals_hint, p._hidden_portals_label, p._hidden_portals),
+            ("minimap_route_arrow_hint", p._route_arrow_hint, p._route_arrow_label, p._route_arrow),
+            ("tbs_arrow_label_hint", p._arrow_label_hint, p._arrow_label_label, p._arrow_label),
+            ("tbs_arrow_flash_hint", p._arrow_flash_hint, p._arrow_flash_label, p._arrow_flash),
+            ("tbs_arrival_hint", p._arrival_hint, p._arrival_label, p._arrival),
+            ("overlays_in_screenshots_hint", p._overlay_shots_hint, p._overlay_shots_label, p._overlay_shots))
+    for key, hint, label, control in rows:
+        whole = w.t(key)
+        assert hint.text() == hint.accessibleName() == whole, key
+        assert hint.toolTip() == label.toolTip() == tip_html(whole, False), key
+        assert control is None or control.toolTip() == hint.toolTip(), key
+        shown = QLabel.text(hint)                                   # the line itself: the start of the hint...
+        assert shown and whole.startswith(shown.removesuffix("…")), (key, shown)
+        assert hint.fontMetrics().horizontalAdvance(shown) <= hint.contentsRect().width(), key    # ...in its column
+        assert hint.height() < 2 * hint.fontMetrics().lineSpacing(), key                        # ...on one line
+    assert QLabel.text(p._hotkey_hint) == "Shows or hides the toolbar from anywhere."   # a first sentence that fits
+    assert QLabel.text(p._route_arrow_hint).endswith("…")                              # one wider than its column
+    assert p._hotkey.box.toolTip() == w.t("tb_hotkey_box_tip")
+    w.apply_language(I18n("he"))
+    for key, hint, label, control in rows:
+        whole = w.t(key)
+        assert hint.text() == bidi.plain(whole, True) and hint.accessibleName() == whole, key
+        assert hint.toolTip() == label.toolTip() == tip_html(whole, True), key
+        assert control is None or control.toolTip() == hint.toolTip(), key
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_panel_is_no_taller_than_its_screen_and_its_sections_scroll(qapp, isolated_store, monkeypatch, lang):
+    """A screen shorter than the sections need (_room says so: 360 px; the offscreen screen has the room for them
+    all): the panel stops inside that room and the sections scroll under the title row, the last row (Reset) out of
+    sight until scrolled to. Their scrollbar sits in the side margin (the left one in Hebrew), so they keep the place
+    and width they have without it."""
+    from maplehelper.ui import gametoolbar
+    room = 360
+    monkeypatch.setattr(gametoolbar._SettingsPanel, "_room", lambda self, at=None: room)
+    w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n(lang))
+    try:
+        w.refresh()
+        w._gear.click()
+        p = w._panel
+        assert p.height() <= room
         view, sb = p._scroll.viewport(), p._scroll.verticalScrollBar()
         assert p._scroll.widget().height() > view.height() and sb.isVisibleTo(p) and sb.maximum() > 0
         side, x = gametoolbar.PANEL_SIDE, sb.mapTo(p, QPoint(0, 0)).x()
         assert x + sb.width() <= side if lang == "he" else x >= gametoolbar.PANEL_W - side
-        assert p._tints.mapTo(p, QPoint(0, 0)).x() == side and p._tints.width() == gametoolbar.PANEL_W - 2 * side
+        look, minimap = p._tints, p._arrow_colors            # each a row as wide as its column: both columns stay put
+        assert [_column(p, look), _column(p, minimap)] == ([1, 0] if lang == "he" else [0, 1])
+        assert look.width() == minimap.width() == gametoolbar.PANEL_COL_W
         reset_bottom = lambda: p._reset.mapTo(view, QPoint(0, p._reset.height())).y()  # noqa: E731
         assert reset_bottom() > view.height()
         sb.setValue(sb.maximum())
@@ -753,19 +854,57 @@ def test_the_panel_is_no_taller_than_its_screen_and_its_sections_scroll(qapp, is
 
 
 def test_with_room_for_every_section_the_panel_has_no_scrollbar(bar, monkeypatch):
-    """A screen with the room (_room says so): the panel as tall as its sections need, with no scrollbar, nothing out
-    of sight, and the sections in the same place and width as when they scroll."""
+    """A screen with the room (_room says so: 1200 px): the panel as tall as the title row and its sections need, not
+    the room, with no scrollbar and nothing out of sight (every section's head, each column's first and last control
+    and the hint under that, Reset), and the sections in the same place and width as when they scroll."""
     from maplehelper.ui import gametoolbar
-    monkeypatch.setattr(gametoolbar._SettingsPanel, "_room", lambda self, at=None: 5000)
+    room = 1200
+    monkeypatch.setattr(gametoolbar._SettingsPanel, "_room", lambda self, at=None: room)
     w, _ = bar
     w.refresh()
     w._gear.click()
     p = w._panel
-    sb, side = p._scroll.verticalScrollBar(), gametoolbar.PANEL_SIDE
-    assert p.height() > QGuiApplication.primaryScreen().availableGeometry().height()     # the room, not the screen
-    assert not sb.isVisibleTo(p) and sb.maximum() == 0
-    assert p._scroll.widget().height() == p._scroll.viewport().height()
-    assert p._tints.mapTo(p, QPoint(0, 0)).x() == side and p._tints.width() == gametoolbar.PANEL_W - 2 * side
+    body, view, sb = p._scroll.widget(), p._scroll.viewport(), p._scroll.verticalScrollBar()
+    m = p.layout().contentsMargins()
+    assert p.height() == m.top() + p._head.sizeHint().height() + body.sizeHint().height() + m.bottom() < room
+    assert not sb.isVisibleTo(p) and sb.maximum() == 0 and body.height() == view.height()
+    # wholly in view: its first and its last pixel both inside the sections' viewport
+    shown = lambda c: all(view.rect().contains(c.mapTo(view, at))  # noqa: E731
+                          for at in (QPoint(0, 0), QPoint(c.width() - 1, c.height() - 1)))
+    every = (p._look_head, p._tints, p._opacity_head, p._bar_head, p._hotkey, p._hotkey_hint,   # the first column
+             p._way_head, p._rides, p._minimap_head, p._overlay_shots, p._overlay_shots_hint,   # the second
+             p._reset)                                                                          # under both
+    assert [c for c in every if not shown(c)] == []
+    assert [_column(p, p._tints), _column(p, p._arrow_colors)] == [0, 1]
+    assert p._tints.width() == p._arrow_colors.width() == gametoolbar.PANEL_COL_W
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_on_a_1080p_screen_at_125_percent_the_panel_needs_no_scrolling(qapp, isolated_store, monkeypatch, lang):
+    """1920x1080 at 125 % is 864 px tall to Qt, 816 above Windows' 48-px taskbar: 800 px of room for the panel
+    (PANEL_SPARE kept). Side by side its sections fit in it whole: no scrollbar, every row in view, Reset too. On a
+    very short screen the same sections still scroll under the title row."""
+    from maplehelper.ui import gametoolbar
+    screen = 1080 * 4 // 5 - 48
+    room = [screen - gametoolbar.PANEL_SPARE]
+    monkeypatch.setattr(gametoolbar._SettingsPanel, "_room", lambda self, at=None: room[0])
+    w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n(lang))
+    try:
+        w.refresh()
+        w._gear.click()
+        p = w._panel
+        view, sb = p._scroll.viewport(), p._scroll.verticalScrollBar()
+        assert p.height() <= room[0] == 800
+        assert not sb.isVisibleTo(p) and sb.maximum() == 0 and p._scroll.widget().height() == view.height()
+        assert 0 < p._reset.mapTo(view, QPoint(0, p._reset.height())).y() <= view.height()     # Reset in view
+        w._gear.click()                                     # closed, and opened again on a very short screen
+        room[0] = 360
+        w._gear.click()
+        assert p.height() == 360 and sb.isVisibleTo(p) and sb.maximum() > 0
+        assert p._scroll.widget().height() > view.height()
+    finally:
+        w.close()
+        w._panel.close()
 
 
 def test_a_panel_choice_signals_the_app_to_restyle_every_window(bar):
@@ -835,11 +974,10 @@ def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_sign
     w.refresh()
     w._gear.click()
     p = w._panel
-    y = lambda widget: widget.mapTo(p, QPoint(0, 0)).y()  # noqa: E731
-    assert (y(p._route_arrow) < y(p._route_arrow_hint) < y(p._arrow_color_label) < y(p._arrow_colors)
-            < y(p._arrow_size_label) < y(p._arrow_size) < y(p._arrow_label_label) < y(p._arrow_label_hint)
-            < y(p._arrow_flash_label) < y(p._arrow_flash_hint) < y(p._arrival_label) < y(p._arrival_hint)
-            < y(p._overlay_shots_label))
+    column = (p._route_arrow, p._route_arrow_hint, p._arrow_color_label, p._arrow_colors, p._arrow_size_label,
+              p._arrow_size, p._arrow_label_label, p._arrow_label_hint, p._arrow_flash_label, p._arrow_flash_hint,
+              p._arrival_label, p._arrival_hint, p._overlay_shots_label)
+    assert {_column(p, c) for c in column} == {1} and _from_the_top(p, *column)      # down the right-hand column
     assert [p._arrow_color_label.text(), p._arrow_size_label.text(), p._arrow_flash_label.text()] == [
         "Route arrow colour", "Route arrow size", "Flashing arrow"]
     assert [p._arrow_label_hint.text(), p._arrow_flash_hint.text(), p._arrival_hint.text()] == [

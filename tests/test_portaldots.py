@@ -1,8 +1,10 @@
-"""The hidden-portal dots and the route's arrow over the game's minimap (ui/portaldots.py): placed from each minimap
-read's view over the minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or their
-setting is off, the arrow pointing from the panel's edge at a step off the part shown, in the colour and at the size
-its settings pick, with a name beside it saying what to click there, and blinking with its flash setting; and the
-dots' switch, gone from Settings to the bar's ⚙ panel."""
+"""The hidden-portal dots, the guided NPC's ring and arrow, and the route's arrow over the game's minimap
+(ui/portaldots.py): placed from each minimap read's view over the minimap's box (LOCATION.box) and moved with it,
+hidden when there is nothing to place or their setting is off, an arrow pointing from the panel's edge at a step or
+an NPC off the part shown, the route's in the colour its setting picks and the NPC's in the ring's green, both at the
+size picked, with a name beside each saying what to click there, and blinking together with the flash setting; the
+route's on the pad of a hidden teleport that cuts the walk to its step, with the Hidden teleport routes switch on;
+and the dots' switch, gone from Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -39,7 +41,15 @@ def routed():
 
 
 @pytest.fixture
-def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
+def shortcuts():
+    """The dots' stand-in graph's hidden teleports (routes.Graph.hidden_jumps, Graph.shortcut): `jump`, the shortcut
+    it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets one), and
+    `asked`, each time it was asked, in order: (the player's map, their spot, the next step's spot)."""
+    return SimpleNamespace(jump=None, asked=[])
+
+
+@pytest.fixture
+def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcuts):
     from maplehelper.routes import Leg
     from maplehelper.ui import portaldots
     spots = {"010003000": [(0.5, 0.5), (0.9, 0.9), (0.0, 0.0)]}
@@ -48,7 +58,8 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
     # through a portal at (0.0, 0.0); through a portal at the map's far left into West Road (Kerning City's west00 on
     # its way to Henesys, live), off the live view of the map's middle (_live_read); through a hidden teleport at
     # (0.5, 0.5) into a map with a long name; on an NPC's trip, Shanks at (0.5, 0.5). No way known to any other map.
-    # Every ask is kept (routed); the maps' names are what the name beside the arrow says.
+    # Every ask is kept (routed); the maps' names are what the name beside the arrow says. The hidden teleports'
+    # shortcut is the one `shortcuts` offers, every ask kept there too.
     me = "010003000"
     ways = {"020000000": [Leg(me, "010002000", "portal", "east00", spot=(0.5, 0.5))], "030000000": [],
             "040000000": [Leg(me, "040000000", "npc", "Shanks", spot=None)],
@@ -61,8 +72,13 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
     def route(frm, to, taxi=True, teleport=True, hidden=False):
         routed.append((frm, to, taxi, teleport))
         return SimpleNamespace(legs=ways[to]) if to in ways else None
+
+    def shortcut(mid, you, target, margin=None):
+        shortcuts.asked.append((mid, you, target))
+        return shortcuts.jump
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
-        hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m)))
+        hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
+        hidden_jumps=lambda m: [shortcuts.jump] if shortcuts.jump is not None else [], shortcut=shortcut))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -515,9 +531,10 @@ def test_a_bigger_arrow_at_the_panels_edge_sits_further_in_and_stays_inside_it(d
 
 def test_the_arrow_blinks_with_its_flash_setting_and_nothing_else_does(dots):
     """With its flash setting on (off by default), a timer on the window hides the arrow and shows it again every
-    FLASH_MS, to catch the eye on a busy minimap: the dots and the guided NPC's ring stay drawn throughout, and the
-    refresh of every follow frame keeps the beat going rather than restart it. The setting off, or no arrow to
-    show, stops the timer with the arrow shown, so no redraw leaves it hidden."""
+    FLASH_MS, to catch the eye on a busy minimap: the dots and the guided NPC's ring stay drawn throughout (the NPC's
+    own arrow blinks on the same beat), and the refresh of every follow frame keeps the beat going rather than restart
+    it. The setting off, or no arrow left to show (the route stopped and the guide let go), stops the timer with the
+    arrows shown, so no redraw leaves them hidden."""
     from maplehelper.ui import portaldots
     w, s, loc = dots
     assert s["minimap_arrow_flash"] is False
@@ -527,9 +544,10 @@ def test_the_arrow_blinks_with_its_flash_setting_and_nothing_else_does(dots):
     timer = w._flash_timer
 
     def arrow_drawn() -> bool:
-        """The arrow on its shaft, 8 px above its step; the dot and the ring are drawn whatever it does."""
+        """The route's arrow on its shaft, 8 px above its step; the dot and the ring are drawn whatever it does."""
         img = w.grab().toImage()
-        dot, ring = img.pixelColor(100, 65), img.pixelColor(100, 58)
+        # the dot sampled 2 px below its centre: the guided NPC's arrow has its tip on the NPC's spot, the dot's centre
+        dot, ring = img.pixelColor(100, 67), img.pixelColor(100, 58)
         assert dot.blue() > 200 and dot.red() < 80                  # the dot, blue
         assert ring.green() > 90 and ring.red() < 90                # the ring 7 px above its centre, green
         return img.pixelColor(60, 37).alpha() > 0
@@ -551,8 +569,11 @@ def test_the_arrow_blinks_with_its_flash_setting_and_nothing_else_does(dots):
     s["minimap_arrow_flash"] = True
     w.refresh()
     timer.timeout.emit()
-    loc.set_route_dest(None)                                        # the route stopped: no arrow left to blink
+    loc.set_route_dest(None)                                        # the route stopped: the NPC's arrow blinks on
+    assert w._arrow is None and w._npc_arrow is not None and timer.isActive() and not w._flash_on
+    loc.set_guide(None)                                             # and the guide let go: no arrow left to blink
     assert w.isVisible() and w._arrow is None and not timer.isActive() and w._flash_on
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/303"))
     loc.set_route_dest("020000000")                                 # a route again: blinking again, shown first
     assert timer.isActive() and w._flash_on and arrow_drawn()
     loc.set_follow(("010003000", None))                             # the picture lost: all of it hidden, the blink too
@@ -624,6 +645,151 @@ def test_a_hidden_teleport_or_an_npc_says_so_beside_the_arrow(dots, dest, lang):
         assert shown == name
 
 
+def test_a_hidden_teleport_that_cuts_the_walk_gets_the_arrow_on_its_pad(dots, shortcuts, caplog):
+    """A map of hidden teleports whose way out starts across it (Utah's Pig Farm: sixteen blue dots, its portals at
+    either end): with the player's Hidden teleport routes switch on (settings["route_hidden_teleports"]) and a
+    teleport there cutting the walk (routes.Graph.shortcut, asked from the player's dot toward the next step's
+    portal), the arrow points down at its pad, the blue dot to stand on, rather than from the panel's edge across the
+    map. The name beside it is the hidden teleport's words with the map the step leads to (stand on it, it takes you
+    toward there), in the app's language, and the log says the arrow takes a shortcut."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper import bidi
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    loc.set_box(dict(LIVE_BOX))
+    here = _live_read()                                             # the player's dot at (221, 256)
+    v = here.view
+    shortcuts.jump = Jump(frm=(0.5, 0.5), to=(0.06, 0.75), name="t001")     # a pad by the dot, landing by the step
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_route_dest("060000000")                             # its first step at (-123, 341), off the panel
+        _place(loc, here)
+    assert shortcuts.asked == [("010003000", (0.577, 0.429), (0.0427, 0.7532))]
+    pad = QPointF(v.x + 0.5 * v.w, v.y + 0.5 * v.h)                 # (171.5, 274.5), in the part shown
+    assert w.isVisible() and w._arrow == pad and w._arrow_angle == 0 and not w._arrow_edge     # on it, pointing down
+    assert w._tag is not None and w._tag.text == "⚡ West Road"
+    assert "route arrow: pointing at a shortcut, the hidden teleport t001 toward West Road" in caplog.messages
+    img = w.grab().toImage()
+    c = img.pixelColor(int(pad.x()), int(pad.y()) - 8)             # on the shaft, 8 px above the pad
+    assert c.alpha() == 255 and _near(c, portaldots.ARROW_COLORS["orange"][1])
+    assert not any(img.pixelColor(x, y).alpha() for x in range(10, 30) for y in range(142, 406))    # no sign at the edge
+    s["language"] = "he"                                            # "{name} ⚡": the name first, as Hebrew reads
+    w.refresh()
+    assert w._tag.rtl and w._tag.text == bidi.LRI + "West Road" + bidi.PDI + " ⚡" and len(shortcuts.asked) == 1
+
+
+def test_with_hidden_teleport_routes_off_the_arrow_never_takes_a_pad(dots, shortcuts):
+    """The shortcut is the Hidden teleport routes switch's, as the way through the hidden teleports is
+    (settings["route_hidden_teleports"], off by default): off, the graph is never asked and the arrow points at the
+    way's next step, from the panel's edge across the map if it must, whatever teleport would cut the walk; switched
+    on, the pad; off again, the portal."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    assert s["route_hidden_teleports"] is False
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["language"] = "en"
+    loc.set_box(dict(LIVE_BOX))
+    here = _live_read()
+    v = here.view
+    shortcuts.jump = Jump(frm=(0.5, 0.5), to=(0.06, 0.75), name="t001")     # one there to take, were it allowed
+    loc.set_route_dest("060000000")                                 # its first step at (-123, 341), off the panel
+    _place(loc, here)
+    assert w._arrow_edge and w._tag.text == "→ West Road" and shortcuts.asked == []    # toward the portal
+    s["route_hidden_teleports"] = True                              # the switch on (the app refreshes the arrow)
+    w.refresh()
+    assert not w._arrow_edge and w._arrow == QPointF(v.x + 0.5 * v.w, v.y + 0.5 * v.h)
+    assert w._tag.text == "⚡ West Road" and len(shortcuts.asked) == 1
+    s["route_hidden_teleports"] = False                             # and off again: the portal, nothing asked
+    w.refresh()
+    assert w._arrow_edge and w._tag.text == "→ West Road" and len(shortcuts.asked) == 1
+
+
+def test_no_hidden_teleport_cutting_the_walk_changes_nothing(dots, shortcuts, routed):
+    """The switch on and the graph asked, but no teleport beats the walk (on most maps there is none to take): the
+    arrow points down at the way's next step as ever, its portal's map beside it, the way routed as before."""
+    from PySide6.QtCore import QPointF
+    w, s, loc = dots
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
+    _place(loc, _here())
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5))]
+    assert w.isVisible() and w._arrow == QPointF(60, 45) and w._arrow_angle == 0 and not w._arrow_edge
+    assert w._tag.text == "→ Bush Road" and routed == [("010003000", "020000000", False, False)]
+    c = w.grab().toImage().pixelColor(60, 37)                       # on the shaft, 8 px above the step
+    assert c.red() > 200 and c.green() > 120 and c.blue() < 120     # the route's orange, drawn as ever
+
+
+def test_the_shortcut_is_asked_again_only_once_the_player_has_moved_on(dots, routed, shortcuts):
+    """refresh runs for every follow frame, and each read moves the player's dot a little: the shortcut is asked from
+    the cell of the map's picture their spot falls in (a fiftieth of it each way, SHORTCUT_CELLS), so the frames, a
+    read a step on and a read that didn't see the dot ask nothing (the pad picked kept), and a read with them further
+    on, in another cell, asks again from there: no teleport cutting the walk from there, the arrow goes back to the
+    step. The way itself is routed once through all of it."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["route_hidden_teleports"] = True
+    shortcuts.jump = Jump(frm=(0.9, 0.9), to=(0.55, 0.5), name="h001")     # its pad on the dot at (100, 65)
+    loc.set_route_dest("020000000")                                 # its step at (0.5, 0.5)
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.31, 0.31), view))
+    assert w._arrow == QPointF(100, 65) and shortcuts.asked == [("010003000", (0.31, 0.31), (0.5, 0.5))]
+    for x in (9, 8, 7):                                             # the minimap scrolling, frame by frame
+        loc.set_follow(("010003000", View(x, 20, 100, 50, (0, 0, 200, 200))))
+    loc.set(Here("010003000", (0.318, 0.302), view))               # a read a step on: the same cell
+    loc.set(Here("010003000", None, view))                          # a read that didn't see the dot
+    assert w.isVisible() and w._arrow == QPointF(97, 65) and len(shortcuts.asked) == 1    # moved with the scroll
+    shortcuts.jump = None                                           # further on, no teleport beats the walk
+    loc.set(Here("010003000", (0.45, 0.31), view))                  # a read in another cell
+    assert shortcuts.asked[1:] == [("010003000", (0.45, 0.31), (0.5, 0.5))]
+    assert w._arrow == QPointF(57, 45) and len(routed) == 1         # back on the step; the way routed once
+
+
+def test_standing_on_the_pad_keeps_the_arrow_on_it_until_the_jump_is_taken(dots, shortcuts, caplog):
+    """On the pad their dot jitters about it as they press up there, a cell or two either way: the arrow stays on it
+    and nothing is asked (PAD_NEAR), so it never flickers back to the portal, even where the jump only just beats
+    the walk and the graph, asked from there, would say no. The read that lands them past the jump asks again: that
+    jump saving nothing from there, the arrow goes back to the way's next step, and the log says so."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    jump = Jump(frm=(0.9, 0.9), to=(0.55, 0.5), name="h001")        # its pad on the dot at (100, 65)
+    shortcuts.jump = jump
+    loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
+    view = View(10, 20, 100, 50, (0, 0, 200, 200))
+    _place(loc, Here("010003000", (0.31, 0.31), view))
+    assert w._arrow == QPointF(100, 65) and len(shortcuts.asked) == 1
+    shortcuts.jump = None                                           # from the pad, the graph would say no
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        for spot in ((0.88, 0.87), (0.93, 0.92), (0.9, 0.9)):       # on it, a cell or two either way
+            loc.set(Here("010003000", spot, view))
+            assert w._arrow == QPointF(100, 65) and w._tag.text == "⚡ Bush Road", spot
+        assert len(shortcuts.asked) == 1                            # never asked there
+        loc.set(Here("010003000", jump.to, view))                   # through it: landed by the step
+    assert shortcuts.asked[1:] == [("010003000", (0.55, 0.5), (0.5, 0.5))]
+    assert w._arrow == QPointF(60, 45) and w._tag.text == "→ Bush Road"
+    assert "route arrow: no shortcut from here, pointing at its next step" in caplog.messages
+
+
 def test_the_name_by_the_sign_at_the_panels_edge_stays_inside_the_panel(dots):
     """By the sign at the panel's edge the name sits inward of it, past its tail, and by a corner of the panel too
     (the player's dot by its bottom-left corner, the way leaving off its left, and the biggest arrow, so the biggest
@@ -684,6 +850,204 @@ def test_a_flash_off_beat_leaves_the_name_out_with_the_arrow(dots):
     assert not any(img.pixelColor(x, y).alpha() for x in range(img.width()) for y in range(img.height()))
     timer.timeout.emit()                                            # the next: both shown again
     assert w._flash_on and drawn() == (True, True)
+
+
+def test_the_guided_npc_gets_a_green_arrow_on_its_ring(dots):
+    """Clicking an NPC (the NPCs-here window, the search's NPC page) whose spot the minimap shows gives it the route's
+    step's treatment: the mark pointing down with its tip on the NPC's spot, over the green ring that stays as it
+    was. It is drawn in the ring's colours (RING_FILL on RING_RIM) whatever colour the route's arrow is picked, so it
+    reads as the NPC and never as a step, and it needs no route."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["minimap_arrow_color"] = "blue"                               # the route's arrow's colour: never the NPC's
+    _place(loc, _here())
+    assert not w.isVisible()
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/1012100"))         # Athena Pierce, at (60, 45)
+    assert w.isVisible() and w._arrow is None and w._ring == QPointF(60, 45)
+    assert w._npc_arrow == QPointF(60, 45) and w._npc_arrow_angle == 0 and not w._npc_arrow_edge
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 37)                                      # on its shaft, 8 px above the NPC
+    assert c.alpha() == 255 and _near(c, portaldots.RING_FILL.name())     # the ring's green, not the route's blue
+    assert _near(img.pixelColor(60, 29), portaldots.RING_RIM.name(), tol=12)    # half over the shaft's top: its rim
+    for x, y in ((60, 51), (53, 45), (66, 45)):                     # the ring below the tip and either side of it
+        r = img.pixelColor(x, y)
+        assert r.alpha() == 255 and r.green() > 90 and r.red() < 90, (x, y)     # green, as it was
+
+
+def test_a_guided_npc_off_the_part_shown_is_pointed_at_from_the_panels_edge(dots, caplog):
+    """A third of Kerning City is off the minimap's panel at any time (live), and a guide's NPC can stand there: no
+    ring then, but the sign at the panel's edge the route's step gets, on the line from the player's dot toward the
+    NPC, in the ring's green and all of it inside the panel, the window up for it alone. The minimap scrolling the NPC
+    into the part shown brings the ring back with the mark on it, and off again the sign; the log says each change
+    once, as for the route's arrow. A follow that lost the picture takes it all away."""
+    import logging
+    import math
+
+    from PySide6.QtCore import QPointF
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the NPC's arrow alone
+    loc.set_box(dict(LIVE_BOX))
+    here = _live_read()
+    v = here.view
+    me = (v.x + 0.577 * v.w, v.y + 0.429 * v.h)                     # the player's dot: (221, 256)
+    npc = (v.x + 0.0427 * v.w, v.y + 0.7532 * v.h)                  # the NPC: (-123, 341), left of the panel
+    edge, on = "npc arrow: pointing from the edge: the NPC is off the part shown", "npc arrow: on the minimap"
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        _place(loc, here)
+        loc.set_guide(("010003000", (0.0427, 0.7532), "npc/1012100"))
+        assert w.isVisible() and w._ring is None and w._arrow is None and w._npc_arrow_edge
+        tip = w._npc_arrow
+        assert 10 <= tip.x() <= 20 and me[1] < tip.y() < npc[1]     # at the panel's left edge, on the way to it
+        assert 45 < w._npc_arrow_angle < 135                        # turned from pointing down to pointing left
+        n = math.hypot(npc[0] - me[0], npc[1] - me[1])
+        ux, uy = (npc[0] - me[0]) / n, (npc[1] - me[1]) / n         # that way, one pixel long
+        img = w.grab().toImage()
+        for back in (4, 16):                        # in the head just behind the tip, and on the shaft further back
+            c = img.pixelColor(int(tip.x() - back * ux), int(tip.y() - back * uy))
+            assert c.green() > 90 and c.red() < 90, back            # the ring's green, not the route's orange
+        x0, y0, x1, y1 = v.panel
+        assert not any(img.pixelColor(x, y).alpha() for x in range(img.width()) for y in range(img.height())
+                       if not (x0 <= x < x1 and y0 <= y < y1))     # none of it outside the panel, its name neither
+        loc.set_follow(("010003000", _live_read(-145.0).view))      # a frame on, the NPC still off: along the edge
+        assert w._ring is None and w._npc_arrow_edge
+        loc.set_follow(("010003000", _live_read(150.0).view))       # scrolled far enough: the NPC shows
+        spot = QPointF(150.0 + 0.0427 * 643, 143 + 0.7532 * 263)
+        assert w._ring == spot and w._npc_arrow == spot and not w._npc_arrow_edge and w._npc_arrow_angle == 0
+        loc.set_follow(("010003000", _live_read().view))            # and back off it
+        assert w._ring is None and w._npc_arrow_edge
+    assert [m for m in caplog.messages if m in (edge, on)] == [edge, on, edge]
+    loc.set_follow(("010003000", None))                             # the picture lost: all of it gone
+    assert not w.isVisible() and w._npc_arrow is None and w._npc_tag is None
+
+
+def test_the_guided_npcs_arrow_carries_its_name(dots, kb):
+    """Beside the NPC's arrow its name, as beside the route's (settings["minimap_arrow_label"], on by default): 💬 and
+    the NPC's name as the KB has it, or its id when the KB has none; a game name, one left-to-right block in a Hebrew
+    line and cut short with "…" past about 18 characters; on a pill just above the shaft in the arrow's colours, the
+    ring's green on its dark rim a little see-through. With the setting off the arrow shows without it."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper import bidi
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring and the NPC's arrow alone
+    s["language"] = "en"
+    _place(loc, _here())
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/1012100"))         # the fixture KB's Athena Pierce, at (60, 45)
+    tag = w._npc_tag
+    assert tag is not None and tag.text == "💬 Athena Pierce" and not tag.rtl and w._tag is None
+    r = tag.rect
+    assert r.left() < 60 < r.right() and r.bottom() <= 29 and r.top() > 0     # over the shaft's top, y=30
+    img = w.grab().toImage()
+    back = img.pixelColor(int(r.left() + 2.5), int(r.center().y()))     # in its rounded end, before its words
+    assert _near(back, portaldots.RING_RIM.name(), tol=4)
+    assert abs(back.alpha() - round(portaldots.TAG_ALPHA * 255)) <= 3
+    inner = range(int(r.left() + r.height() / 2), int(r.right() - r.height() / 2))     # past its rounded ends
+    assert max(img.pixelColor(x, y).green() for x in inner
+               for y in range(int(r.top()) + 2, int(r.bottom()) - 1)) > 120    # its words: green (the rim's: 48)
+    s["language"] = "he"                                            # "{name} 💬": the name first, as Hebrew reads
+    w.refresh()
+    assert w._npc_tag.rtl and w._npc_tag.text == bidi.LRI + "Athena Pierce" + bidi.PDI + " 💬"
+    s["language"] = "en"
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/303"))             # an NPC the KB doesn't have: its id
+    assert w._npc_tag.text == "💬 303"
+    kb.entities["npc/9100000"] = {"key": "npc/9100000", "id": "9100000", "name": LONG_NAME, "category": "npc"}
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/9100000"))         # past 18 characters: cut short, 💬 whole
+    text = w._npc_tag.text
+    shown = text[len("💬 "):]
+    assert text.startswith("💬 ") and shown.endswith("…") and LONG_NAME.startswith(shown[:-1])
+    assert 12 <= len(shown) <= 19
+    s["minimap_arrow_label"] = False                                # its setting off: the arrow without it
+    w.refresh()
+    assert w._npc_tag is None and w._npc_arrow == QPointF(60, 45)
+    img = w.grab().toImage()
+    assert _near(img.pixelColor(60, 37), portaldots.RING_FILL.name())     # the arrow as before
+    assert not any(img.pixelColor(x, y).alpha() for y in range(29) for x in range(200))     # nothing above the shaft
+
+
+def test_the_arrows_setting_off_leaves_the_guided_npc_its_ring_alone(dots):
+    """The NPC's arrow goes with the route's arrow's setting (settings["minimap_route_arrow"]): off, an NPC in the
+    part shown keeps its ring as it always had, with no arrow or name, and one off the part shown gets nothing (the
+    window hides, with nothing else to draw). Switched on again, the sign at the panel's edge points at it."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import View
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the NPC's marks alone
+    s["minimap_route_arrow"] = False
+    _place(loc, _here())
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/1012100"))         # at (60, 45)
+    assert w.isVisible() and w._ring == QPointF(60, 45) and w._npc_arrow is None and w._npc_tag is None
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 38)                                      # on the ring, 7 px above its centre
+    assert c.green() > 90 and c.red() < 90                          # the NPC's green, drawn
+    assert not any(img.pixelColor(x, y).alpha() for y in range(34) for x in range(200))    # no shaft, no name above
+    loc.set_follow(("010003000", View(-100, 20, 100, 50, (0, 0, 200, 200))))     # the NPC off the part shown
+    assert not w.isVisible() and w._ring is None and w._npc_arrow is None
+    s["minimap_route_arrow"] = True
+    w.refresh()
+    assert w.isVisible() and w._ring is None and w._npc_arrow is not None and w._npc_arrow_edge
+
+
+def test_a_route_and_a_guide_get_an_arrow_each_in_their_own_colours(dots):
+    """A guide here while the route leads to another map: both arrows at once, the route's on its step in the colour
+    picked (orange by default) and the NPC's on the NPC in the ring's green, each with its name; where they meet,
+    the NPC's is drawn over the route's."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrows and the ring alone
+    loc.set_route_dest("020000000")                                 # its step at (60, 45)
+    _place(loc, _here())
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/303"))             # the NPC at (100, 65)
+    assert w._arrow == QPointF(60, 45) and w._npc_arrow == QPointF(100, 65) and w._ring == QPointF(100, 65)
+    assert not w._arrow_edge and not w._npc_arrow_edge and w._tag is not None and w._npc_tag is not None
+    img = w.grab().toImage()
+    route, npc = img.pixelColor(60, 37), img.pixelColor(100, 53)    # each on its shaft, the NPC's above its ring
+    assert route.alpha() == 255 and _near(route, portaldots.ARROW_COLORS["orange"][1])
+    assert npc.alpha() == 255 and _near(npc, portaldots.RING_FILL.name())
+    loc.set_guide(("010003000", (0.5, 0.5), "npc/303"))             # the NPC on the route's step itself
+    assert w._arrow == w._npc_arrow == QPointF(60, 45)
+    assert _near(w.grab().toImage().pixelColor(60, 37), portaldots.RING_FILL.name())    # the NPC's over the route's
+
+
+def test_a_flash_beat_hides_both_arrows_and_their_names_and_nothing_else(dots):
+    """With the flash setting on, the NPC's arrow blinks on the route's beat: one timer for both, a beat hiding both
+    arrows and their names together while the dots and the NPC's ring stay drawn, the next showing them again."""
+    import math
+
+    w, s, loc = dots
+    s["minimap_arrow_flash"] = True
+    loc.set_route_dest("020000000")                                 # the route's arrow on the dot at (60, 45)
+    _place(loc, _here(panel=(15, 5, 200, 200)))                     # the dot at (10, 20) left of the panel
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/303"))             # the NPC's, ringed, on the dot at (100, 65)
+    timer, pills = w._flash_timer, (w._tag.rect, w._npc_tag.rect)
+
+    def drawn() -> tuple[bool, ...]:
+        """Each arrow on its shaft, then anything of each name's pill; the dots and the ring stay whatever they do."""
+        img = w.grab().toImage()
+        dot, ring = img.pixelColor(60, 47), img.pixelColor(100, 71)     # below the route's tip; below the NPC's
+        assert dot.blue() > 200 and dot.red() < 80                  # the dot, blue
+        assert ring.green() > 90 and ring.red() < 90                # the ring, green
+        names = [any(img.pixelColor(x, y).alpha() for x in range(int(r.left()), int(r.right()))
+                     for y in range(int(r.top()), int(r.bottom()))) for r in pills]
+        return (img.pixelColor(60, 37).alpha() > 0, img.pixelColor(100, 53).alpha() > 0, *names)
+
+    assert timer.isActive() and w._flash_on and drawn() == (True, True, True, True)
+    timer.timeout.emit()                                            # a beat: both arrows hidden, their names too
+    assert not w._flash_on and w._arrow is not None and w._npc_arrow is not None
+    assert drawn() == (False, False, False, False)
+    img = w.grab().toImage()
+    assert all(img.pixelColor(x, y).blue() > 200 for x, y in ((60, 45), (100, 65)))     # both dots whole again
+    assert all(math.hypot(x + 0.5 - 60, y + 0.5 - 45) <= 5 or math.hypot(x + 0.5 - 100, y + 0.5 - 65) <= 10
+               for y in range(img.height()) for x in range(img.width())
+               if img.pixelColor(x, y).alpha())                     # nothing but the dots and the ring
+    timer.timeout.emit()                                            # the next: all shown again
+    assert w._flash_on and drawn() == (True, True, True, True)
 
 
 def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isolated_store, kb, monkeypatch):

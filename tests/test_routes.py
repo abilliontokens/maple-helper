@@ -1,6 +1,7 @@
 """How to get there: the route graph (KB map connections, hidden teleports, taxis, boats, NPC trips), only through
-maps in the game; routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes); the ◎
-window's way from the player's map and a map card's way there."""
+maps in the game; routing; a map's shortcuts through its own hidden teleports; the AI's route context; the nightly
+routes.json (scrape, validation, patch notes) and the app's rebuild of an old one; the ◎ window's way from the
+player's map and a map card's way there."""
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,55 @@ def test_hidden_portals_are_spots_on_the_minimap(world):
     assert g.hidden_spots(PERION) == []
     # a map off the routes (not in the game, as the KB says) still has its dots: the player may stand on it anyway
     assert ORBIS not in g.maps and g.hidden_spots(ORBIS) == [(0.5, (400 - routes.PORTAL_MARK_RISE) / 800)]
+
+
+def _at(x, y):
+    """A map point as a spot on _map's minimap: 1600 x 800 map units, the point (0, 0) at (800, 400)."""
+    return ((x + 800) / 1600, (y + 400) / 800)
+
+
+def test_a_teleport_within_the_map_jumps_from_its_dot_to_where_it_lands(world):
+    """Graph.hidden_jumps: each hidden teleport with a landing point, from its blue dot (where hidden_spots puts it,
+    PORTAL_MARK_RISE above its point) to the point it lands on (not raised), both spots on the minimap picture. One
+    with no landing point (to another map) or with either end off the picture is none, and so is a map without any
+    or one the KB doesn't have. Worked out once per map."""
+    kb, _ = world
+    data = {"maps": [{**_map(HENESYS, "Henesys", town=True),
+                      "hidden": [{"name": "t001", "x": -400, "y": 0, "to_x": 400, "to_y": -200},
+                                 {"name": "hide01", "x": 0, "y": 0},
+                                 {"name": "far", "x": 0, "y": 100, "to_x": 5000, "to_y": 0},
+                                 {"name": "off", "x": 5000, "y": 0, "to_x": 0, "to_y": 0}]},
+                     _map(PERION, "Perion", town=True)]}
+    g = routes.Graph(kb, data)
+    jumps = g.hidden_jumps(HENESYS)
+    assert jumps == [routes.Jump((0.25, (400 - routes.PORTAL_MARK_RISE) / 800), (0.75, 0.25), "t001")]
+    assert jumps[0].frm in g.hidden_spots(HENESYS)                  # the pad's end is its blue dot
+    assert g.hidden_jumps(HENESYS) is jumps                         # worked out once
+    assert g.hidden_jumps(PERION) == [] and g.hidden_jumps("999999999") == []
+
+
+def test_the_shortcut_is_the_pad_that_saves_the_most_walking(world):
+    """Graph.shortcut: of the map's pads, the one that makes the walk from the player's dot to the next step the
+    shortest (to its dot, then on from where it lands), measured in map units; named only when that beats walking
+    straight there by the margin (SHORTCUT_MARGIN units unless said). None when no pad does, without the player's
+    dot, and on a map with no pads."""
+    kb, _ = world
+
+    def pad(name, x, to_x):
+        return {"name": name, "x": x, "y": 0, "to_x": to_x, "to_y": 0}
+    g = routes.Graph(kb, {"maps": [{**_map(HENESYS, "Henesys", town=True),
+                                    "hidden": [pad("near", -650, 200), pad("best", -600, 500), pad("hop", -500, -300)]},
+                                   _map(PERION, "Perion", town=True)]})
+    _, best, hop = g.hidden_jumps(HENESYS)
+    # 1400 units across: "near" (the first, and next to the player) saves ~830 of them, "best" ~1090
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == best
+    # 500 units on: "hop" saves ~190, too few under the margin, enough under a smaller one
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) is None
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=150) == hop
+    # next to the portal already: every pad is a detour
+    assert g.shortcut(HENESYS, _at(400, 0), _at(700, 0)) is None
+    assert g.shortcut(HENESYS, None, _at(700, 0)) is None                  # no player dot
+    assert g.shortcut(PERION, _at(-700, 0), _at(700, 0)) is None           # no pads
 
 
 def _secret(kb):
@@ -295,6 +345,7 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
     assert scrape_meowdb.scrape_routes() == 1
     data = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
     assert data["taxi"] == ["000000001", "000000002"]
+    assert data["landings"] is True             # it carries the landing points: the app never rebuilds a nightly file
     a = data["maps"][0]
     assert a["portals"] == [{"to": "000000002", "name": "out", "x": 1, "y": 2},      # none to a map it doesn't know
                             {"to": "000000002", "name": "door", "x": 5, "y": 6}]
@@ -312,10 +363,28 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
     assert scrape_meowdb.scrape_routes() == 0 and (tmp_path / "routes.json").exists()
 
 
+def test_a_hidden_teleport_within_the_map_keeps_where_it_lands():
+    """The site's intraPortals say where each one lands (toX, toY): kept as to_x, to_y, the point that lets the app
+    name the pad to take (Utah's Pig Farm's t001 lifts the player to st00). One on a spot already listed is still
+    dropped, and a hidden portal to another map, landing on no point of this one, keeps the shape it had."""
+    from maplehelper import mapdata
+    m = {"portals": [{"name": "out00", "type": 2, "toMapId": "010001080", "x": 1469, "y": -808},
+                     {"name": "hide00", "type": 1, "toMapId": "010001080", "x": 5, "y": 6}],
+         "intraPortals": [{"name": "t001", "type": 1, "x": -1463, "y": -155, "toName": "st00", "toX": -1480,
+                           "toY": -637},
+                          {"name": "again", "type": 3, "x": -1463, "y": -155, "toName": "st09", "toX": 9, "toY": 9},
+                          # landing at x 0: still a landing point
+                          {"name": "t004", "type": 1, "x": -141, "y": 86, "toName": "st03", "toX": 0, "toY": -630},
+                          {"name": "shown", "type": 2, "x": 11, "y": 12, "toName": "x", "toX": 1, "toY": 2}]}
+    assert mapdata.hidden_portals(m) == [{"name": "hide00", "x": 5, "y": 6},
+                                         {"name": "t001", "x": -1463, "y": -155, "to_x": -1480, "to_y": -637},
+                                         {"name": "t004", "x": -141, "y": 86, "to_x": 0, "to_y": -630}]
+
+
 def test_the_app_rebuilds_a_routes_file_without_the_hidden_teleports(tmp_path):
     """0.18.0's KB carried a routes.json built before the hidden teleports: no dots on any platform. The app rebuilds
-    it from the site's map data (its taxi towns kept), once: a file with them, even all empty, is left alone, and the
-    site down leaves the old file as it was."""
+    it from the site's map data (its taxi towns kept), once: the file it writes (marked "landings"), even with every
+    list empty, is left alone, and the site down leaves the old file as it was."""
     from maplehelper import mapdata
     old = {"source": "x", "taxi": ["000000001"],
            "maps": [{"id": "000000001", "name": "A", "minimap": [160, 80, 80, 40], "portals": [], "npcs": []}]}
@@ -343,6 +412,39 @@ def test_the_app_rebuilds_a_routes_file_without_the_hidden_teleports(tmp_path):
     # done once: the rebuilt file (and a nightly one with no teleports at all) is never fetched again
     asked.clear()
     assert not mapdata.needs_refresh(tmp_path) and mapdata.refresh(tmp_path, fetch=fetch, pause=lambda: None) is False
+    assert asked == []
+
+
+def test_the_app_rebuilds_a_routes_file_without_the_landing_points(kb_copy):
+    """A routes.json with the hidden teleports but not where they land (no "landings" mark: every KB built before
+    2026-10-14) is rebuilt once too. The new file says where each pad lands, so the route graph names the one that
+    shortens the walk to the way's next step, and carries the mark, so it is never fetched again."""
+    from maplehelper import mapdata
+    from maplehelper.kb import KnowledgeBase
+    old = {"source": "x", "taxi": [],
+           "maps": [{**_map(HENESYS, "Henesys", [HG1], town=True), "hidden": [{"name": "t001", "x": -600, "y": 0}]},
+                    {**_map(HG1, "Henesys Hunting Ground I"), "hidden": []}]}
+    mapdata.write_routes(kb_copy / "routes.json", old)
+    maps = [{"id": HENESYS, "name": "Henesys", "isTown": True, "hasMinimapImage": True, "minimapWidth": 1600,
+             "minimapHeight": 800, "miniMapCenterX": 800, "miniMapCenterY": 400, "npcs": [],
+             "portals": [{"name": "east00", "type": 2, "toMapId": HG1, "x": 700, "y": 0}],
+             "intraPortals": [{"name": "t001", "type": 1, "x": -600, "y": 0, "toName": "st00", "toX": 500, "toY": 0}]},
+            {"id": HG1, "name": "Henesys Hunting Ground I", "portals": [], "npcs": []}]
+    asked = []
+
+    def fetch(url):
+        asked.append(url)
+        return json.dumps(maps) if url == mapdata.MAPS_DATA else None
+    assert mapdata.needs_refresh(kb_copy)
+    assert mapdata.refresh(kb_copy, fetch=fetch, pause=lambda: None) is True
+    data = json.loads((kb_copy / "routes.json").read_text(encoding="utf-8"))
+    assert data["landings"] is True
+    assert data["maps"][0]["hidden"] == [{"name": "t001", "x": -600, "y": 0, "to_x": 500, "to_y": 0}]
+    g = routes.Graph(KnowledgeBase(kb_copy))
+    step = g.route(HENESYS, HG1).legs[0]                                    # east00, at the map's right edge
+    assert g.shortcut(HENESYS, _at(-700, 0), step.spot).name == "t001"
+    asked.clear()
+    assert not mapdata.needs_refresh(kb_copy) and mapdata.refresh(kb_copy, fetch=fetch, pause=lambda: None) is False
     assert asked == []
 
 

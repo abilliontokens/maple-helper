@@ -6,7 +6,9 @@ The graph:
   other map's own portal, when it has one.
 - hidden teleports: a portal the game's minimap never draws (routes.json "hidden": a press-up or touch teleport, the
   blue dots the app marks) is a hidden step (Leg.hidden), unless it is a building's door (DOOR). A way takes one only
-  where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route).
+  where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route). One
+  that lands on its own map ("to_x", "to_y": Utah's Pig Farm's pads) is no step, but a shortcut across that map
+  toward the way's next step (Graph.shortcut).
 - taxis: the Pathfinder's taxi towns (routes.json "taxi"), each with its cab NPC on the map.
 - boats: a KB guide that says so ("take the boat from Shanks at the dock to Lith Harbor"), one way.
 - NPC trips: an NPC whose own words offer one ("Want to head over to Florina Beach?"), and the NPC there who takes
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import heapq
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +34,12 @@ FOUND_MAX = 4096                # Graph.find's remembered texts (names; the AI's
 # 122-130 map units up on four live captures; dots that high read too high in game, and the owner set them lower in
 # game (2026-10-09: 125, then 100, 75, 50; 25 units is ~3 screen px at a x2 minimap) (hidden_spots)
 PORTAL_MARK_RISE = 50
+# Graph.shortcut names a hidden teleport within the map only when it saves at least this much walking (map units, in
+# straight lines on the minimap picture). A pad saves at most its own jump, and the site's 324 in-map pads jump 427
+# units at the median (2026-10-14): a whole screen's walk (~1366 units across) would name almost none, and none on
+# Utah's Pig Farm, whose best pad toward its way out saves ~460 (t003, from its left half). 300 is several times the
+# measure's own slack (the dot's PORTAL_MARK_RISE, ~16 units a minimap pixel): a pad barely shorter isn't named
+SHORTCUT_MARGIN = 300
 # a building's door, as the game names its portal: in00, in01_1, jobin00. The game's minimap doesn't draw it either,
 # but the building does: a step like any portal, never Leg.hidden (gamelookup and ui.npcoverlay find buildings by it)
 DOOR = re.compile(r"in\d")
@@ -84,10 +93,22 @@ class MapInfo:
     continent: str
     minimap: list | None
     npcs: list[dict]
-    hidden: list[dict] = field(default_factory=list)    # its invisible teleports ({"name", "x", "y"}), see hidden_spots
+    # its invisible teleports ({"name", "x", "y"}, see hidden_spots), one that lands on this map with that point too
+    # ("to_x", "to_y", see hidden_jumps)
+    hidden: list[dict] = field(default_factory=list)
     # a map with no minimap of its own (a shop, the hospital: the game folds its minimap there) has its picture as
     # the whole room: [width, height, x offset, y offset] in map units, like `minimap` (see picture_spot)
     scene: list | None = None
+
+
+@dataclass(frozen=True)
+class Jump:
+    """A hidden teleport that lands on its own map (a pad on Utah's Pig Farm: t001 lifts the player up to st00), from
+    its blue dot (frm, where hidden_spots puts it) to the point it lands on (to), both spots on the map's minimap
+    picture (Graph.hidden_jumps)."""
+    frm: tuple[float, float]
+    to: tuple[float, float]
+    name: str                            # its name in the game ("t001")
 
 
 class Graph:
@@ -373,6 +394,44 @@ class Graph:
             return []
         return [s for s in (self._spot(mid, {"x": p.get("x") or 0, "y": (p.get("y") or 0) - PORTAL_MARK_RISE})
                             for p in self.known[mid].hidden) if s is not None]
+
+    def hidden_jumps(self, mid: str) -> list[Jump]:
+        """The map's hidden teleports that land on the map itself, each a Jump from its blue dot (as hidden_spots
+        places it) to its landing point (that point itself, not raised). One with no landing point (to another map) or
+        with an end off the picture is left out; [] for a map the KB doesn't have, or one with no picture. Worked out
+        once per map, as shortcut asks for them on each call: the same list each time."""
+        if mid not in self.known:
+            return []
+        memo = self.__dict__.setdefault("_jumps", {})
+        if mid not in memo:
+            jumps = []
+            for p in self.known[mid].hidden:
+                if p.get("to_x") is None or p.get("to_y") is None:
+                    continue
+                frm = self._spot(mid, {"x": p.get("x") or 0, "y": (p.get("y") or 0) - PORTAL_MARK_RISE})
+                to = self._spot(mid, {"x": p["to_x"], "y": p["to_y"]})
+                if frm is not None and to is not None:
+                    jumps.append(Jump(frm, to, p.get("name") or ""))
+            memo[mid] = jumps
+        return memo[mid]
+
+    def shortcut(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
+                 margin: float = SHORTCUT_MARGIN) -> Jump | None:
+        """The pad that shortens the player's walk across the map to a spot (the next step's portal or NPC) the most:
+        `you` (the player's dot), `target` and the jumps are spots on its minimap picture, measured in map units (the
+        fractions times the picture's size, as npcoverlay.direction measures). A pad counts when the walk to its dot
+        and on from where it lands beats walking straight there by at least `margin` units. None without one, without
+        the player's dot or a target, and on a map with no pads (hidden_jumps)."""
+        jumps = self.hidden_jumps(mid)
+        if not jumps or you is None or target is None:
+            return None
+        w, h = self.known[mid].minimap[:2]
+
+        def far(a: tuple[float, float], b: tuple[float, float]) -> float:
+            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h)
+        best = min(jumps, key=lambda j: far(you, j.frm) + far(j.to, target))
+        return best if far(you, best.frm) + far(best.to, target) + margin <= far(you, target) else None
+
 
 def side(spot: tuple[float, float] | None) -> str:
     """'left', 'right' or 'middle' of the map, for a step's words."""

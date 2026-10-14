@@ -17,6 +17,7 @@ game's top left) and follows it until moved. Every colour is read from npcoverla
 a widget paints: light text on the dark glass tints, dark text on the white one."""
 from __future__ import annotations
 
+import re
 import time
 
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -69,6 +71,7 @@ from .npcoverlay import (
 )
 from .portaldots import ARROW_COLORS, ARROW_SIZE_MAX, ARROW_SIZE_MIN
 from .theme import ACCENTS, LIGHT_TINTS, TINTS
+from .widgets import tip_html
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
 FLOW_GAP = 6                                              # between the buttons, and between the rows they wrap into
@@ -92,11 +95,14 @@ AWAY_POLL_MS = 150      # ... checked this often while it is up (it takes no foc
 ICON_PX = 18            # an icon alone on its button (icons mode)
 WORD_ICON_PX = 15       # the small one beside the word
 TOOL_ICON_PX = 16       # the bar's ⚙ and ✕
-PANEL_W = 300 + 2 * SHADOW                                # the ⚙ panel's card ~300 px wide, its shadow around it
+PANEL_W = 600 + 2 * SHADOW                                # the ⚙ panel's card ~600 px wide, its shadow around it
 PANEL_SIDE = SHADOW + 16
+PANEL_COL_GAP = 32     # between the ⚙ panel's two columns, each PANEL_COL_W wide: the 268 px its one column had
+PANEL_COL_W = (PANEL_W - 2 * PANEL_SIDE - PANEL_COL_GAP) // 2
 PANEL_GUTTER = 4       # between the ⚙ panel's sections and their scrollbar, which shows in the side margin...
 PANEL_BAR = SCROLLBAR_W + PANEL_GUTTER   # ...this much of it: the sections keep their place and width either way
 PANEL_SPARE = 16       # the ⚙ panel's height stays this far inside its screen's room: past it, its sections scroll
+FIRST_SENTENCE = re.compile(r".+?[.!?](?=\s)")   # a ⚙ panel hint's line: to its first full stop with more after it
 FOLLOW_MS = 80         # a transparency or arrow-size drag: the windows over the game follow at most this often
 # what "Reset to default look" puts back (the hotkey is no look: it stays)
 LOOK_KEYS = ("overlay_tint", "overlay_accent", "npc_overlay_opacity", "game_toolbar_icons")
@@ -308,21 +314,58 @@ class _GlassSwitch(Switch):
         p.drawEllipse(QRectF(x, track.top() + 2, h - 4, h - 4))
 
 
+class _Hint(QLabel):
+    """A row's hint in the ⚙ panel: one muted line under the row, its first sentence (FIRST_SENTENCE), ending in "…"
+    where that is wider than the column (wrapped whole under every row, the hints took most of the panel's height).
+    As widgets.ElideLink's, its text() is what it says, not what fits: the whole hint, which is also its accessible
+    name and, wrapped, its tooltip; the panel gives the row's label and control the same tooltip."""
+
+    def __init__(self):
+        super().__init__(objectName="Hint")
+        self._hint, self._rtl = "", False
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)    # its column's width, however long it is
+
+    def set_hint(self, text: str, rtl: bool) -> None:
+        self._hint, self._rtl = text, rtl
+        self.setToolTip(tip_html(text, rtl))
+        self.setAccessibleName(text)
+        self._cut()
+
+    def text(self) -> str:          # what it says, not what fits
+        return bidi.plain(self._hint, self._rtl)
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._cut()
+
+    def _cut(self) -> None:
+        self.ensurePolished()
+        first = FIRST_SENTENCE.match(self._hint)
+        line = self.fontMetrics().elidedText(first.group(0) if first else self._hint, Qt.ElideRight,
+                                             max(1, self.contentsRect().width()))
+        line = bidi.plain(line, self._rtl)      # cut first: in Hebrew the "…" ends the line, not an English name in it
+        if line != super().text():
+            super().setText(line)
+
+
 class _SettingsPanel(QWidget):
-    """The bar's ⚙ panel, a small card in the same glass over the game. Look: the glass colour of every window
-    over the game as tiles of each tint and the lit buttons' accent as dots, the picked one ringed and named;
-    Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead of words, and the bar's
-    show/hide key in the same key box Settings has; Directions: Cabs & Teleports, whether the way to a found NPC or
-    map rides cabs and NPC teleports or walks, and Hidden teleport routes, whether it may take the invisible teleports
-    (the blue dots) when they make it shorter (the bar's rides_toggled: a way shown is found again); Minimap: the
-    hidden portals' blue dots and the route's arrow on the game's minimap, the arrow's colour as dots (the picked one
-    ringed and named), its size on a slider in whole pixels, the name beside it (the map its portal leads to, or the
-    NPC to talk to) and whether it flashes, a notice on reaching the map it leads to (the arrow turns itself off
-    then), and whether screenshots see the windows over the game (the bar's minimap_toggled: the app follows). Each
-    choice is written, applies at once and stays; "Reset to default look" puts the look back. ✕, the ⚙ again or Esc
-    closes it (Esc once the panel has been clicked into: like the search window it takes the keyboard only then, never
-    on opening). It is never taller than its screen: with too little room there for every section (a 1080p screen at
-    125 %), they scroll under the title row, which stays put to drag the panel by and close it."""
+    """The bar's ⚙ panel, one card in the same glass over the game, its sections in two columns read from the
+    leading edge (mirrored in Hebrew). The first holds the bar's own look and settings. Look: the glass colour of
+    every window over the game as tiles of each tint and the lit buttons' accent as dots, the picked one ringed and
+    named; Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead of words, and
+    the bar's show/hide key in the same key box Settings has. The second holds the way and the minimap. Directions:
+    Cabs & Teleports, whether the way to a found NPC or map rides cabs and NPC teleports or walks, and Hidden teleport
+    routes, whether it may take the invisible teleports (the blue dots) when they make it shorter (the bar's
+    rides_toggled: a way shown is found again); Minimap: the hidden portals' blue dots and the route's arrow on the
+    game's minimap, the arrow's colour as dots (the picked one ringed and named), its size on a slider in whole
+    pixels, the name beside it (the map its portal leads to, or the NPC to talk to) and whether it flashes, a notice
+    on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the windows over
+    the game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it in the row's
+    tooltip (_Hint). Each choice is written, applies at once and stays; "Reset to default look", under both columns,
+    puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like the search
+    window it takes the keyboard only then, never on opening). Side by side the sections fit a 1080p screen at 125 %
+    (about 800 px of room) whole; on a screen shorter than they need they scroll under the title row, which stays put
+    to drag the panel by and close it."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -333,6 +376,7 @@ class _SettingsPanel(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         keep_over_game(self)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_AlwaysShowToolTips)      # the rows' hints while the game has the keyboard too
         self._bar = bar
         self._settings = bar._settings
         self.t = bar.t
@@ -364,27 +408,39 @@ class _SettingsPanel(QWidget):
         self._scroll.viewport().setAutoFillBackground(False)      # the glass shows through
         outer.addWidget(self._scroll, 1)
         body = QWidget()
-        col = self._body_lay = QVBoxLayout(body)
-        col.setContentsMargins(PANEL_BAR, 0, PANEL_BAR, 0)
-        col.setSpacing(0)
+        lay = self._body_lay = QVBoxLayout(body)
+        lay.setContentsMargins(PANEL_BAR, 0, PANEL_BAR, 0)
+        lay.setSpacing(0)
         self._scroll.setWidget(body)
         body.setAutoFillBackground(False)                          # (setWidget turns it on: the glass shows through)
+        # the sections in two columns from the leading edge (the right in Hebrew: the row mirrors), the bar's own look
+        # and settings in the first, the way and the minimap in the second; each PANEL_COL_W wide, its strut and the
+        # gap between them filling the sections' width exactly, whatever their rows would take
+        cols = QHBoxLayout()
+        cols.setSpacing(PANEL_COL_GAP)
+        lay.addLayout(cols)
+        look, way = QVBoxLayout(), QVBoxLayout()
+        for col in (look, way):
+            col.setSpacing(0)
+            col.addStrut(PANEL_COL_W)
+            cols.addLayout(col)
         # Look: the glass tint as tiles, the accent as dots, each named beside its label
+        col = look
         self._look_head = self._section(col, first=True)
         self._tint_label, self._tint_name = self._label_row(col)
-        col.addSpacing(8)
+        col.addSpacing(6)
         self._tints = self._swatches("tint", TINTS, lambda k: "#{:02x}{:02x}{:02x}".format(*TINTS[k][1]),
                                      self._pick_tint, spacing=6)
         col.addWidget(self._tints)
-        col.addSpacing(16)
+        col.addSpacing(10)
         self._accent_label, self._accent_name = self._label_row(col)
-        col.addSpacing(8)
+        col.addSpacing(6)
         self._accents = self._swatches("accent", ACCENTS, lambda k: ACCENTS[k][1], self._pick_accent)
         col.addWidget(self._accents)
         # Transparency: the windows' glass opacity, any whole percent from OPACITY_MIN to OPACITY_MAX
         self._opacity_head = self._section(col)
         self._opacity_label, self._opacity_value = self._label_row(col, value="Value")
-        col.addSpacing(6)
+        col.addSpacing(4)
         self._slider = Slider(OPACITY_MIN, OPACITY_MAX, _edge, lambda: palette().light)
         self._slider.changed.connect(self._pick_opacity)
         self._slider.released.connect(self._opacity_settled)
@@ -393,18 +449,8 @@ class _SettingsPanel(QWidget):
         self._follow = QTimer(self, singleShot=True, interval=FOLLOW_MS, timeout=self.changed.emit)
         # Toolbar: icons instead of words, and the key that shows or hides the bar
         self._bar_head = self._section(col)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._icons_label = QLabel(objectName="Label")
-        self._icons = _GlassSwitch()
-        self._icons.setCursor(Qt.PointingHandCursor)
-        self._icons.clicked.connect(self._pick_icons)
-        row.addWidget(self._icons_label, 1)
-        row.addWidget(self._icons, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._icons_hint = self._hint(col)
-        col.addSpacing(14)
+        self._icons_label, self._icons, self._icons_hint = self._switch_row(col, self._pick_icons)
+        col.addSpacing(10)
         row = QHBoxLayout()
         row.setSpacing(12)
         self._hotkey_label = QLabel(objectName="Label")
@@ -413,131 +459,58 @@ class _SettingsPanel(QWidget):
         row.addWidget(self._hotkey_label, 1)
         row.addWidget(self._hotkey, 0, Qt.AlignVCenter)
         col.addLayout(row)
-        col.addSpacing(3)
         self._hotkey_hint = self._hint(col)
-        # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button)
-        self._way_head = self._section(col)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._rides_label = QLabel(objectName="Label")
-        self._rides = _GlassSwitch()
-        self._rides.setCursor(Qt.PointingHandCursor)
-        self._rides.clicked.connect(self._pick_rides)
-        row.addWidget(self._rides_label, 1)
-        row.addWidget(self._rides, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._rides_hint = self._hint(col)
-        # ... and whether that way may take the invisible teleports (the blue dots) where they make it shorter
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._hidden_routes_label = QLabel(objectName="Label")
-        self._hidden_routes = _GlassSwitch()
-        self._hidden_routes.setCursor(Qt.PointingHandCursor)
-        self._hidden_routes.clicked.connect(self._pick_hidden_routes)
-        row.addWidget(self._hidden_routes_label, 1)
-        row.addWidget(self._hidden_routes, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._hidden_routes_hint = self._hint(col)
+        col.addStretch(1)                           # (the shorter column's rows stay at its top)
+        # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button), and
+        # whether it may take the invisible teleports (the blue dots) where they make it shorter
+        col = way
+        self._way_head = self._section(col, first=True)
+        self._rides_label, self._rides, self._rides_hint = self._switch_row(col, self._pick_rides)
+        col.addSpacing(10)
+        (self._hidden_routes_label, self._hidden_routes,
+         self._hidden_routes_hint) = self._switch_row(col, self._pick_hidden_routes)
         # Minimap: the hidden portals' dots and the route's arrow on the game's minimap, each on or off, and whether
         # screenshots see the windows over the game (were on the Settings page)
         self._minimap_head = self._section(col)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._hidden_portals_label = QLabel(objectName="Label")
-        self._hidden_portals = _GlassSwitch()
-        self._hidden_portals.setCursor(Qt.PointingHandCursor)
-        self._hidden_portals.clicked.connect(self._pick_hidden)
-        row.addWidget(self._hidden_portals_label, 1)
-        row.addWidget(self._hidden_portals, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._hidden_portals_hint = self._hint(col)
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._route_arrow_label = QLabel(objectName="Label")
-        self._route_arrow = _GlassSwitch()
-        self._route_arrow.setCursor(Qt.PointingHandCursor)
-        self._route_arrow.clicked.connect(self._pick_route)
-        row.addWidget(self._route_arrow_label, 1)
-        row.addWidget(self._route_arrow, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._route_arrow_hint = self._hint(col)
+        (self._hidden_portals_label, self._hidden_portals,
+         self._hidden_portals_hint) = self._switch_row(col, self._pick_hidden)
+        col.addSpacing(10)
+        self._route_arrow_label, self._route_arrow, self._route_arrow_hint = self._switch_row(col, self._pick_route)
         # the route arrow's look, under its switch: its colour as dots (the picked one ringed and named), its size on
         # a slider in whole pixels (beside its label), the name beside it, and whether it flashes
-        col.addSpacing(14)
+        col.addSpacing(10)
         self._arrow_color_label, self._arrow_color_name = self._label_row(col)
-        col.addSpacing(8)
+        col.addSpacing(6)
         self._arrow_colors = self._swatches("arrow", ARROW_COLORS, lambda k: ARROW_COLORS[k][1], self._pick_arrow_color)
         col.addWidget(self._arrow_colors)
-        col.addSpacing(14)
+        col.addSpacing(10)
         self._arrow_size_label, self._arrow_size_value = self._label_row(col, value="Value")
-        col.addSpacing(6)
+        col.addSpacing(4)
         self._arrow_size = Slider(ARROW_SIZE_MIN, ARROW_SIZE_MAX, _edge, lambda: palette().light)
         self._arrow_size.changed.connect(self._pick_arrow_size)
         self._arrow_size.released.connect(self._arrow_size_settled)
         col.addWidget(self._arrow_size)
         # the app follows a drag of it once a moment, not at every pixel: minimap_toggled redraws windows too
         self._arrow_follow = QTimer(self, singleShot=True, interval=FOLLOW_MS, timeout=self._bar.minimap_toggled.emit)
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._arrow_label_label = QLabel(objectName="Label")
-        self._arrow_label = _GlassSwitch()
-        self._arrow_label.setCursor(Qt.PointingHandCursor)
-        self._arrow_label.clicked.connect(self._pick_arrow_label)
-        row.addWidget(self._arrow_label_label, 1)
-        row.addWidget(self._arrow_label, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._arrow_label_hint = self._hint(col)
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._arrow_flash_label = QLabel(objectName="Label")
-        self._arrow_flash = _GlassSwitch()
-        self._arrow_flash.setCursor(Qt.PointingHandCursor)
-        self._arrow_flash.clicked.connect(self._pick_arrow_flash)
-        row.addWidget(self._arrow_flash_label, 1)
-        row.addWidget(self._arrow_flash, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._arrow_flash_hint = self._hint(col)
+        col.addSpacing(10)
+        (self._arrow_label_label, self._arrow_label,
+         self._arrow_label_hint) = self._switch_row(col, self._pick_arrow_label)
+        col.addSpacing(10)
+        (self._arrow_flash_label, self._arrow_flash,
+         self._arrow_flash_hint) = self._switch_row(col, self._pick_arrow_flash)
         # a notice on reaching the map the arrow leads to (the arrow turns itself off then)
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._arrival_label = QLabel(objectName="Label")
-        self._arrival = _GlassSwitch()
-        self._arrival.setCursor(Qt.PointingHandCursor)
-        self._arrival.clicked.connect(self._pick_arrival)
-        row.addWidget(self._arrival_label, 1)
-        row.addWidget(self._arrival, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._arrival_hint = self._hint(col)
-        col.addSpacing(14)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self._overlay_shots_label = QLabel(objectName="Label")
-        self._overlay_shots = _GlassSwitch()
-        self._overlay_shots.setCursor(Qt.PointingHandCursor)
-        self._overlay_shots.clicked.connect(self._pick_shots)
-        row.addWidget(self._overlay_shots_label, 1)
-        row.addWidget(self._overlay_shots, 0, Qt.AlignVCenter)
-        col.addLayout(row)
-        col.addSpacing(3)
-        self._overlay_shots_hint = self._hint(col)
-        # Reset to default look, at the leading edge under a hairline
-        col.addSpacing(14)
+        col.addSpacing(10)
+        self._arrival_label, self._arrival, self._arrival_hint = self._switch_row(col, self._pick_arrival)
+        col.addSpacing(10)
+        (self._overlay_shots_label, self._overlay_shots,
+         self._overlay_shots_hint) = self._switch_row(col, self._pick_shots)
+        col.addStretch(1)
+        # Reset to default look, at the leading edge under a hairline across both columns
+        lay.addSpacing(12)
         rule = QFrame(objectName="Rule")
         rule.setFixedHeight(1)
-        col.addWidget(rule)
-        col.addSpacing(6)
+        lay.addWidget(rule)
+        lay.addSpacing(4)
         row = QHBoxLayout()
         self._reset = QToolButton(objectName="Reset")
         self._reset.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -548,18 +521,18 @@ class _SettingsPanel(QWidget):
         self._reset.clicked.connect(self._reset_look)
         row.addWidget(self._reset)
         row.addStretch(1)
-        col.addLayout(row)
+        lay.addLayout(row)
         self.refresh()
 
     # ------------------------------------------------------------ the panel
 
     @staticmethod
     def _section(col, first: bool = False) -> QLabel:
-        """A small muted head over a section, with room above it."""
-        col.addSpacing(12 if first else 20)
+        """A small muted head over a section, with room above it (less at the top of its column)."""
+        col.addSpacing(8 if first else 16)
         lb = QLabel(objectName="Section")
         col.addWidget(lb)
-        col.addSpacing(10)
+        col.addSpacing(8)
         return lb
 
     @staticmethod
@@ -574,15 +547,27 @@ class _SettingsPanel(QWidget):
         return label, picked
 
     @staticmethod
-    def _hint(col) -> QLabel:
-        """A one- or two-line hint under its row, muted."""
-        lb = QLabel(objectName="Hint")
-        lb.setWordWrap(True)
+    def _hint(col) -> _Hint:
+        """A row's hint: one muted line just under it (_Hint)."""
+        col.addSpacing(1)
+        lb = _Hint()
         col.addWidget(lb)
         return lb
 
+    def _switch_row(self, col, picked) -> tuple[QLabel, _GlassSwitch, _Hint]:
+        """A label at the leading edge, its switch at the trailing one (a click: picked), and its hint under them."""
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        label, switch = QLabel(objectName="Label"), _GlassSwitch()
+        switch.setCursor(Qt.PointingHandCursor)
+        switch.clicked.connect(picked)
+        row.addWidget(label, 1)
+        row.addWidget(switch, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        return label, switch, self._hint(col)
+
     def _swatches(self, kind: str, presets: dict, colour_of, picked, spacing: int = 0) -> QWidget:
-        """A row of colours, one per preset, across the panel's width: tiles side by side (spacing), or dots spread
+        """A row of colours, one per preset, across its column's width: tiles side by side (spacing), or dots spread
         evenly (no spacing: stretches between them)."""
         w = QWidget()
         row = QHBoxLayout(w)
@@ -623,33 +608,40 @@ class _SettingsPanel(QWidget):
         for lb, key in ((self._tint_label, "tbs_tint"), (self._tint_name, TINTS[tint][0]),
                         (self._accent_label, "tbs_accent"), (self._accent_name, ACCENTS[accent_key][0]),
                         (self._opacity_label, "tbs_opacity"), (self._icons_label, "tbs_icons"),
-                        (self._icons_hint, "tbs_icons_hint"), (self._hotkey_label, "tb_hotkey"),
-                        (self._hotkey_hint, "tb_hotkey_hint"), (self._rides_label, "tb_rides"),
-                        (self._rides_hint, "tb_rides_tip"),
+                        (self._hotkey_label, "tb_hotkey"), (self._rides_label, "tb_rides"),
                         (self._hidden_routes_label, "tb_hidden_routes"),
-                        (self._hidden_routes_hint, "tb_hidden_routes_tip"),
                         (self._hidden_portals_label, "minimap_hidden_portals"),
-                        (self._hidden_portals_hint, "minimap_hidden_portals_hint"),
                         (self._route_arrow_label, "minimap_route_arrow"),
-                        (self._route_arrow_hint, "minimap_route_arrow_hint"),
                         (self._arrow_color_label, "tbs_arrow_colour"),
                         (self._arrow_color_name, ARROW_COLORS[arrow_key][0]),
                         (self._arrow_size_label, "tbs_arrow_size"),
                         (self._arrow_label_label, "tbs_arrow_label"),
-                        (self._arrow_label_hint, "tbs_arrow_label_hint"),
                         (self._arrow_flash_label, "tbs_arrow_flash"),
-                        (self._arrow_flash_hint, "tbs_arrow_flash_hint"),
                         (self._arrival_label, "tbs_arrival"),
-                        (self._arrival_hint, "tbs_arrival_hint"),
-                        (self._overlay_shots_label, "overlays_in_screenshots"),
-                        (self._overlay_shots_hint, "overlays_in_screenshots_hint")):
+                        (self._overlay_shots_label, "overlays_in_screenshots")):
             lb.setText(bidi.plain(t(key), rtl))
-        for lb in (self._icons_hint, self._hotkey_hint, self._rides_hint, self._hidden_routes_hint,
-                   self._hidden_portals_hint, self._route_arrow_hint, self._arrow_label_hint, self._arrow_flash_hint,
-                   self._arrival_hint, self._overlay_shots_hint):
-            # Hebrew: two pixels' room at the right, where a line wrapped to the full width drew its first letter
-            # past the label's edge, cut off (the wrap measures whole pixels, the glyphs overhang)
-            lb.setContentsMargins(0, 0, 2 if rtl else 0, 0)
+        # each row's hint: its first sentence on the line under the row, all of it in the tooltip of that line, of the
+        # row's label and of its control (the key box keeps its own: how to pick a key)
+        for hint, key, label, control in (
+                (self._icons_hint, "tbs_icons_hint", self._icons_label, self._icons),
+                (self._hotkey_hint, "tb_hotkey_hint", self._hotkey_label, None),
+                (self._rides_hint, "tb_rides_tip", self._rides_label, self._rides),
+                (self._hidden_routes_hint, "tb_hidden_routes_tip", self._hidden_routes_label, self._hidden_routes),
+                (self._hidden_portals_hint, "minimap_hidden_portals_hint", self._hidden_portals_label,
+                 self._hidden_portals),
+                (self._route_arrow_hint, "minimap_route_arrow_hint", self._route_arrow_label, self._route_arrow),
+                (self._arrow_label_hint, "tbs_arrow_label_hint", self._arrow_label_label, self._arrow_label),
+                (self._arrow_flash_hint, "tbs_arrow_flash_hint", self._arrow_flash_label, self._arrow_flash),
+                (self._arrival_hint, "tbs_arrival_hint", self._arrival_label, self._arrival),
+                (self._overlay_shots_hint, "overlays_in_screenshots_hint", self._overlay_shots_label,
+                 self._overlay_shots)):
+            # Hebrew: two pixels' room at the right, where a line as wide as the column drew its first letter past
+            # the label's edge, cut off (the line is measured in whole pixels, the glyphs overhang)
+            hint.setContentsMargins(0, 0, 2 if rtl else 0, 0)
+            hint.set_hint(t(key), rtl)
+            for w in (label, control):
+                if w is not None:
+                    w.setToolTip(hint.toolTip())
         self._reset.setText(bidi.plain(t("tbs_reset"), rtl))
         for row, chosen, presets in ((self._tints, tint, TINTS), (self._accents, accent_key, ACCENTS),
                                      (self._arrow_colors, arrow_key, ARROW_COLORS)):
@@ -723,13 +715,16 @@ class _SettingsPanel(QWidget):
         return screen.availableGeometry().height() - PANEL_SPARE
 
     def _fit(self, room: int) -> None:
-        """As tall as the title row and every section need (the hints wrapped at the panel's width), at most `room`:
+        """As tall as the title row and the sections need (the taller column, then Reset under both), at most `room`:
         past it the sections scroll under the title row, their scrollbar in the side margin's PANEL_BAR (the right;
         the left in Hebrew, where Qt moves it), so they keep their place and width either way. With the room for
-        them all, no scrollbar."""
-        m, b = self.layout().contentsMargins(), self._body_lay.contentsMargins()
-        # the sections at their own width (the panel's less its side margins), whatever room the scrollbar has now
-        body = self._body_lay.totalHeightForWidth(PANEL_W - 2 * PANEL_SIDE + b.left() + b.right())
+        them all (a 1080p screen at 125 % has it), no scrollbar."""
+        m, lay = self.layout().contentsMargins(), self._body_lay
+        b = lay.contentsMargins()
+        # the sections at their own width (the panel's less its side margins), whatever room the scrollbar has now:
+        # no row wraps (a hint is one line, cut to its column), so it is their size hint's height
+        width = PANEL_W - 2 * PANEL_SIDE + b.left() + b.right()
+        body = lay.totalHeightForWidth(width) if lay.hasHeightForWidth() else lay.totalSizeHint().height()
         needed = m.top() + self._head.sizeHint().height() + body + m.bottom()
         scrolls = needed > room
         near = PANEL_GUTTER if scrolls else PANEL_BAR            # the sections' margin on the scrollbar's side
