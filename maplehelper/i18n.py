@@ -1130,6 +1130,13 @@ STRINGS = {
               "minimap's edge pointing the way when that step is off the part shown. It lights up on its own when "
               "you open a map in the Maps search or its ◎ window."},
     "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
+    # the name beside the route's arrow on the game's minimap (ui/portaldots.py): what to click there
+    "arrow_tag_portal": {"he": "{name} ←", "en": "→ {name}"},
+    "arrow_tag_hidden": {"he": "{name} ⚡", "en": "⚡ {name}"},
+    "arrow_tag_npc": {"he": "{name} 💬", "en": "💬 {name}"},
+    # ... and the word when the map it points to is reached (the arrow goes with it)
+    "route_arrived": {"he": "הגעתם — {name}", "en": "You're there — {name}"},
+    "route_arrived_body": {"he": "חץ המסלול כבה.", "en": "The route arrow is off."},
     "overlays_in_screenshots": {"he": "החלונות שמעל המשחק בצילומי מסך", "en": "Show the overlays in screenshots"},
     "overlays_in_screenshots_hint": {
         "he": "דלוק: צילום מסך (גם של Windows) רואה את הסרגל, החלונות והנקודות שמעל המשחק, כדי שתוכלו לצלם ולשתף אותם. "
@@ -2503,6 +2510,12 @@ STRINGS = {
     "tbs_arrow_flash": {"he": "חץ מהבהב", "en": "Flashing arrow"},
     "tbs_arrow_flash_hint": {"he": "החץ נדלק וכבה, כדי שיהיה קל למצוא אותו במיני-מפה עמוסה.",
                              "en": "The arrow blinks, so it is easy to spot on a busy minimap."},
+    "tbs_arrow_label": {"he": "שם ליד החץ", "en": "Name beside the arrow"},
+    "tbs_arrow_label_hint": {"he": "תווית קטנה ליד החץ: המפה שהפורטל מוביל אליה, או הדמות שמדברים איתה.",
+                             "en": "A small label by the arrow: the map the portal leads to, or the NPC to talk to."},
+    "tbs_arrival": {"he": "הודעה כשמגיעים", "en": "Say when you arrive"},
+    "tbs_arrival_hint": {"he": "הודעה קטנה כשמגיעים למפה שהחץ מוביל אליה, והחץ כבה מעצמו.",
+                         "en": "A small notice when you reach the map the arrow leads to, and the arrow turns itself off."},
     "tb_hidden_routes": {"he": "מסלולים דרך טלפורטים נסתרים", "en": "Hidden teleport routes"},
     "tb_hidden_routes_tip": {"he": "דלוק: הדרך עוברת גם בטלפורטים הנסתרים (הנקודות הכחולות) כשזה מקצר אותה. "
                                    "כבוי: משתמשים בהם רק כשאין דרך אחרת (למשל ליציאה מחנות).",

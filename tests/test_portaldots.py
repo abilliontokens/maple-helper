@@ -1,8 +1,8 @@
 """The hidden-portal dots and the route's arrow over the game's minimap (ui/portaldots.py): placed from each minimap
 read's view over the minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or their
 setting is off, the arrow pointing from the panel's edge at a step off the part shown, in the colour and at the size
-its settings pick and blinking with its flash setting; and the dots' switch, gone from Settings to the bar's ⚙
-panel."""
+its settings pick, with a name beside it saying what to click there, and blinking with its flash setting; and the
+dots' switch, gone from Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -13,6 +13,7 @@ pytest.importorskip("PySide6")
 
 BOX = {"x": 100, "y": 100, "w": 200, "h": 200}
 LIVE_BOX = {"x": 100, "y": 100, "w": 440, "h": 434}     # Kerning City's minimap window, as found live (_live_read)
+LONG_NAME = "Sleepywood Dungeon: Another Entrance to the Ant Tunnel"     # a map's name past the tag's 18 characters
 
 
 @pytest.fixture
@@ -39,22 +40,29 @@ def routed():
 
 @pytest.fixture
 def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
+    from maplehelper.routes import Leg
     from maplehelper.ui import portaldots
     spots = {"010003000": [(0.5, 0.5), (0.9, 0.9), (0.0, 0.0)]}
-    # the ways from the player's map (routes.Graph.route), by the map picked and the first step's spot there: through
-    # a portal at (0.5, 0.5); no step left to take; through an NPC with no spot on the minimap; through a portal at
-    # (0.0, 0.0); through a portal at the map's far left (Kerning City's west00 on its way to Henesys, live), off the
-    # live view of the map's middle (_live_read). No way known to any other map. Every ask is kept (routed).
-    ways = {"020000000": [SimpleNamespace(kind="portal", spot=(0.5, 0.5))], "030000000": [],
-            "040000000": [SimpleNamespace(kind="npc", spot=None)],
-            "050000000": [SimpleNamespace(kind="portal", spot=(0.0, 0.0))],
-            "060000000": [SimpleNamespace(kind="portal", spot=(0.0427, 0.7532))]}
+    # the ways from the player's map (routes.Graph.route), by the map picked, and their first steps (routes.Leg):
+    # through a portal at (0.5, 0.5) into Bush Road; no step left to take; through an NPC with no spot on the minimap;
+    # through a portal at (0.0, 0.0); through a portal at the map's far left into West Road (Kerning City's west00 on
+    # its way to Henesys, live), off the live view of the map's middle (_live_read); through a hidden teleport at
+    # (0.5, 0.5) into a map with a long name; on an NPC's trip, Shanks at (0.5, 0.5). No way known to any other map.
+    # Every ask is kept (routed); the maps' names are what the name beside the arrow says.
+    me = "010003000"
+    ways = {"020000000": [Leg(me, "010002000", "portal", "east00", spot=(0.5, 0.5))], "030000000": [],
+            "040000000": [Leg(me, "040000000", "npc", "Shanks", spot=None)],
+            "050000000": [Leg(me, "050000000", "portal", "west01", spot=(0.0, 0.0))],
+            "060000000": [Leg(me, "010001000", "portal", "west00", spot=(0.0427, 0.7532))],
+            "070000000": [Leg(me, "070000000", "portal", "tp00", spot=(0.5, 0.5), hidden=True)],
+            "080000000": [Leg(me, "080000000", "npc", "Shanks", spot=(0.5, 0.5))]}
+    names = {"010002000": "Bush Road", "010001000": "West Road", "020000000": "Henesys", "070000000": LONG_NAME}
 
     def route(frm, to, taxi=True, teleport=True, hidden=False):
         routed.append((frm, to, taxi, teleport))
         return SimpleNamespace(legs=ways[to]) if to in ways else None
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
-        hidden_spots=lambda m: spots.get(m, []), route=route))
+        hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m)))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -264,7 +272,7 @@ def test_no_next_step_to_point_at_hides_the_arrow(dots, kb, monkeypatch, change)
     else:
         monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(hidden_spots=lambda m: []))
         w.set_kb(kb)                                                # another KB, its graph one that can't route
-    assert not w.isVisible() and w._arrow is None
+    assert not w.isVisible() and w._arrow is None and w._tag is None
 
 
 def test_a_next_step_off_the_part_shown_is_pointed_at_from_the_panels_edge(dots):
@@ -453,6 +461,7 @@ def test_the_arrows_size_setting_draws_it_bigger_or_smaller(dots):
     lo, hi = portaldots.ARROW_SIZE_MIN, portaldots.ARROW_SIZE_MAX
     assert (lo, hi) == (12, 40) and s["minimap_arrow_size"] == 22
     s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["minimap_arrow_label"] = False                                # ... without its name: _span measures all drawn
     loc.set_route_dest("020000000")
     _place(loc, _here())
     spans = {}
@@ -548,6 +557,133 @@ def test_the_arrow_blinks_with_its_flash_setting_and_nothing_else_does(dots):
     assert timer.isActive() and w._flash_on and arrow_drawn()
     loc.set_follow(("010003000", None))                             # the picture lost: all of it hidden, the blink too
     assert not w.isVisible() and not timer.isActive() and w._flash_on
+
+
+def test_the_arrow_carries_the_name_of_the_map_its_portal_leads_to(dots):
+    """Beside the arrow a small name says what to click there (settings["minimap_arrow_label"], on by default): for
+    a portal, the map it leads to (the way's next map, not the route's own), on a pill centred just above the
+    shaft's top, the arrow's rim a little see-through with the words in its fill. The arrow is drawn as before, and
+    with the setting off it shows without the name."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    assert s["minimap_arrow_label"] is True
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["language"] = "en"
+    loc.set_route_dest("020000000")                                 # Henesys: the way's first portal into Bush Road
+    _place(loc, _here())
+    tag = w._tag
+    assert w._arrow == QPointF(60, 45) and tag is not None and tag.text == "→ Bush Road" and not tag.rtl
+    r = tag.rect
+    assert abs(r.center().x() - 60) < 0.5 and 26 <= r.bottom() <= 29 and r.top() > 0    # over the shaft's top, y=30
+    _, fill, rim = portaldots.ARROW_COLORS["orange"]
+    img = w.grab().toImage()
+    back = img.pixelColor(int(r.left() + 2.5), int(r.center().y()))     # in its rounded end, before its words
+    assert _near(back, rim, tol=4) and abs(back.alpha() - round(portaldots.TAG_ALPHA * 255)) <= 3
+    inner = range(int(r.left() + r.height() / 2), int(r.right() - r.height() / 2))     # past its rounded ends
+    assert max(img.pixelColor(x, y).red() for x in inner
+               for y in range(int(r.top()) + 2, int(r.bottom()) - 1)) > 150    # its words: orange (the rim's red: 58)
+    c = img.pixelColor(60, 37)                                      # on the shaft, 8 px above the step
+    assert c.alpha() == 255 and _near(c, fill)                      # the arrow as before
+    assert all(r.left() - 1 <= x <= r.right() + 1 and r.top() - 1 <= y <= r.bottom() + 1
+               for y in range(29) for x in range(200) if img.pixelColor(x, y).alpha())    # above the shaft: the pill
+    s["minimap_arrow_label"] = False                                # its setting off: the arrow without it
+    w.refresh()
+    assert w._tag is None and w._arrow == QPointF(60, 45)
+    img = w.grab().toImage()
+    assert _near(img.pixelColor(60, 37), fill)
+    assert not any(img.pixelColor(x, y).alpha() for y in range(29) for x in range(200))     # nothing above the shaft
+
+
+@pytest.mark.parametrize("dest, lang", [("070000000", "en"), ("070000000", "he"), ("070000000", None),
+                                        ("080000000", "en"), ("080000000", "he")])
+def test_a_hidden_teleport_or_an_npc_says_so_beside_the_arrow(dots, dest, lang):
+    """A first step through a hidden teleport has words of its own beside the arrow (⚡ and the map it leads to), and
+    a cab's, a boat's or an NPC's trip names the NPC to talk to (💬), in the app's language (Hebrew until one is
+    picked). The name is a game name: one left-to-right block in a Hebrew line, and past about 18 characters cut
+    short with "…", its glyph never."""
+    from maplehelper import bidi
+    w, s, loc = dots
+    s["language"] = lang
+    loc.set_route_dest(dest)
+    _place(loc, _here())
+    tag = w._tag
+    assert w._arrow is not None and tag is not None and tag.rtl == (lang != "en")
+    glyph, name = ("⚡", LONG_NAME) if dest == "070000000" else ("💬", "Shanks")
+    if lang == "en":
+        assert tag.text.startswith(glyph + " ")
+        shown = tag.text[len(glyph) + 1:]
+    else:                                                           # "{name} ⚡": the name first, as Hebrew reads
+        after = bidi.PDI + " " + glyph
+        assert tag.text.startswith(bidi.LRI) and tag.text.endswith(after)
+        shown = tag.text[len(bidi.LRI):-len(after)]
+    if name == LONG_NAME:                                           # cut short to about 18 characters, its glyph whole
+        assert shown.endswith("…") and LONG_NAME.startswith(shown[:-1]) and 12 <= len(shown) <= 19
+    else:
+        assert shown == name
+
+
+def test_the_name_by_the_sign_at_the_panels_edge_stays_inside_the_panel(dots):
+    """By the sign at the panel's edge the name sits inward of it, past its tail, and by a corner of the panel too
+    (the player's dot by its bottom-left corner, the way leaving off its left, and the biggest arrow, so the biggest
+    letters): all of the pill stays inside the panel, slid along the arrow's tail rather than pushed over it, and
+    nothing is drawn over the minimap's frame."""
+    import math
+
+    from PySide6.QtGui import QPolygonF, QTransform
+
+    from maplehelper.minimap import Here
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["language"] = "en"
+    loc.set_box(dict(LIVE_BOX))
+    v = _live_read().view
+    x0, y0, x1, y1 = v.panel
+    loc.set_route_dest("060000000")                                 # its first step at (-123, 341), into West Road
+    for spot, size in (((0.577, 0.429), 22), ((0.2644, 0.9772), 22), ((0.2644, 0.9772), portaldots.ARROW_SIZE_MAX)):
+        s["minimap_arrow_size"] = size
+        _place(loc, Here("010003000", spot, v))                     # the player's dot mid-panel, then by the corner
+        w.refresh()
+        tag, tip = w._tag, w._arrow
+        assert w._arrow_edge and tag is not None and tag.text == "→ West Road", (spot, size)
+        r = tag.rect
+        assert x0 <= r.left() and r.right() <= x1 and y0 <= r.top() and r.bottom() <= y1, (spot, size)    # inside
+        arrow = QTransform().rotate(w._arrow_angle).map(
+            portaldots._shape(portaldots.EDGE_ARROW_PX, w._arrow_scale / w._ratio)).translated(tip)
+        assert not arrow.intersects(QPolygonF(r)), (spot, size)    # clear of the arrow, its head and its tail
+        a = math.radians(w._arrow_angle)                            # the way it points: down, turned so
+        assert (r.center().x() - tip.x()) * -math.sin(a) + (r.center().y() - tip.y()) * math.cos(a) < 0    # behind it
+        img = w.grab().toImage()
+        assert not any(img.pixelColor(x, y).alpha() for x in range(img.width()) for y in range(img.height())
+                       if not (x0 <= x < x1 and y0 <= y < y1)), (spot, size)    # nothing over the minimap's frame
+
+
+def test_a_flash_off_beat_leaves_the_name_out_with_the_arrow(dots):
+    """The name blinks with the arrow (settings["minimap_arrow_flash"]): a beat that hides the arrow leaves its pill
+    out too, so with the arrow alone on the minimap nothing is drawn at all, and the next beat shows both again."""
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["minimap_arrow_flash"] = True
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    timer, r = w._flash_timer, w._tag.rect
+
+    def drawn() -> tuple[bool, bool]:
+        """The arrow on its shaft, 8 px above its step, and anything of its pill."""
+        img = w.grab().toImage()
+        pill = any(img.pixelColor(x, y).alpha() for x in range(int(r.left()), int(r.right()))
+                   for y in range(int(r.top()), int(r.bottom())))
+        return img.pixelColor(60, 37).alpha() > 0, pill
+
+    assert timer.isActive() and w._flash_on and drawn() == (True, True)
+    timer.timeout.emit()                                            # a beat: the arrow hidden, its name with it
+    assert not w._flash_on and w._tag is not None
+    img = w.grab().toImage()
+    assert not any(img.pixelColor(x, y).alpha() for x in range(img.width()) for y in range(img.height()))
+    timer.timeout.emit()                                            # the next: both shown again
+    assert w._flash_on and drawn() == (True, True)
 
 
 def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isolated_store, kb, monkeypatch):

@@ -179,6 +179,8 @@ DEFAULT_SETTINGS = {
     "minimap_arrow_color": "orange",   # ... its colour, a key of ui/portaldots.ARROW_COLORS
     "minimap_arrow_size": 22,     # ... how long it is drawn, in screen pixels (ARROW_SIZE_MIN to ARROW_SIZE_MAX)
     "minimap_arrow_flash": False,  # ... and whether it blinks, to be easy to spot on a busy minimap
+    "minimap_arrow_label": True,  # ... a small name beside it: the portal's map, or the NPC to talk to
+    "minimap_arrival_notice": True,   # a word when the map the arrow points to is reached, and the arrow goes
     # a way takes the invisible teleports (the blue dots) when they make it shorter; off, only where nothing else goes
     "route_hidden_teleports": False,
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)

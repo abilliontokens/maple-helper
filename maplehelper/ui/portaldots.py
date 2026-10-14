@@ -11,8 +11,12 @@ the portal dots also need their setting, the ring only a guide on the player's o
 (minimap_route_arrow) and a way known from the player's map to another one, its first step on this map's minimap
 picture. The arrow looks as the bar's ⚙ panel picks, read at every refresh: its colour (minimap_arrow_color, a name
 in ARROW_COLORS: orange unless another is picked), its size (minimap_arrow_size: its length in screen pixels, from
-ARROW_SIZE_MIN to ARROW_SIZE_MAX, both its shapes scaled alike) and whether it blinks (minimap_arrow_flash: hidden
-and shown again every FLASH_MS, to catch the eye on a busy minimap; the dots and the ring never blink)."""
+ARROW_SIZE_MIN to ARROW_SIZE_MAX, both its shapes scaled alike), a small name beside it saying what to click there
+(minimap_arrow_label, in the app's language: the map its portal leads to, a hidden teleport's in words of its own, or
+the NPC to talk to for a cab, a boat or an NPC's trip; on a pill in the arrow's colours, its letters sized with the
+arrow, just above the mark's shaft or inward of the sign at the edge, all of it inside the panel) and whether it
+blinks (minimap_arrow_flash: hidden and shown again every FLASH_MS, its name with it, to catch the eye on a busy
+minimap; the dots and the ring never blink)."""
 from __future__ import annotations
 
 import logging
@@ -20,11 +24,12 @@ import math
 import sys
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPolygonF, QTransform
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QWidget
 
-from .. import routes
+from .. import bidi, routes
+from ..i18n import I18n
 from ..kb import KnowledgeBase
 from ..minimap import View
 from ..store import Settings
@@ -65,13 +70,19 @@ ARROW_PX = ((0, 1), (-7, -7), (-3, -7), (-3, -15), (3, -15), (3, -7), (7, -7))
 EDGE_ARROW_PX = ((0, 0), (-9, -10), (-4, -10), (-4, -22), (4, -22), (4, -10), (9, -10))
 EDGE_GAP_PX = 3     # how far inside the panel's edge all of it stays: its dark rim whole, a sliver of map off the frame
 FLASH_MS = 550      # the arrow's blink, with its flash setting on: shown this long, then hidden as long
+# the name beside the route's arrow (minimap_arrow_label), saying what to click there, on a pill in its colours
+TAG_FONT_K, TAG_FONT_MIN_PX = 0.45, 9   # its letters' size: this much of the arrow's length, never under 9 px
+TAG_CHARS = 18                  # a name longer than this many characters is cut short with "…" to about their width
+TAG_PAD_X, TAG_PAD_Y = 0.5, 0.1     # the pill's room around its words, across and above/below, in its letters' size
+TAG_ALPHA = 0.85                # how opaque the pill's fill (the arrow's rim) is, the minimap a touch through it
+TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen pixels
 
 
 def _name(graph, mid: str) -> str:
-    """A map's name for the log; its id when the graph doesn't know it."""
+    """A map's name for the log and the name beside the arrow; its id when the graph doesn't know it."""
     try:
         return graph.name(mid)
-    except Exception:  # noqa: BLE001 - a log line must never break a redraw
+    except Exception:  # noqa: BLE001 - a log line or the arrow's name must never break a redraw
         return mid
 
 
@@ -81,6 +92,14 @@ class _Aim(NamedTuple):
     y: float
     angle: float    # the degrees it turns clockwise from pointing down, about that point: 0 as the shapes are drawn
     edge: bool      # the step is off the part shown, and the arrow points toward it from the panel's edge
+
+
+class _Tag(NamedTuple):
+    """The name beside the route's arrow (PortalDots._make_tag), in the window's pixels."""
+    text: str       # what it says: its glyph and the name, cut short and kept one block (bidi.ltr_block)
+    rect: QRectF    # its pill (_tag_rect)
+    font: QFont
+    rtl: bool       # its language reads right to left (Hebrew): its words laid out so
 
 
 def _box_px(view: View, spot: tuple[float, float]) -> tuple[float, float]:
@@ -149,11 +168,58 @@ def _aim(view: View, step: tuple[float, float], spot: tuple[float, float] | None
     return _Aim(min(max(ox + t * dx, lo_x), hi_x), min(max(oy + t * dy, lo_y), hi_y), angle, True)
 
 
+def _tag_words(graph, leg: routes.Leg) -> tuple[str, str]:
+    """What the name beside the route's arrow says for its step, an i18n key and the name it carries: the map a
+    portal leads to (arrow_tag_hidden for a teleport the game's minimap never draws), or the NPC to talk to for a
+    cab, a boat or an NPC's trip (Leg.via)."""
+    if leg.kind == "portal":
+        return ("arrow_tag_hidden" if leg.hidden else "arrow_tag_portal"), _name(graph, leg.to)
+    return "arrow_tag_npc", leg.via
+
+
+def _tag_rect(at: QPointF, angle: float, back: float, front: float, w: float, h: float,
+              box: tuple[float, float, float, float], gap: float, flip: bool) -> QRectF:
+    """Where the name beside the route's arrow goes, its pill (w x h) in the window's pixels: on the arrow's line
+    just behind its tail (`back` behind its point `at`, the arrow turned `angle` degrees from pointing down, as
+    drawn), `gap` clear of it, so above the shaft of the mark on a step and inward of the sign at the panel's edge.
+    Its top-left corner kept in `box` (lo_x, hi_x, lo_y, hi_y: the room the panel leaves it); when that pushes it
+    back against the arrow (the sign by a corner of the panel), slid along the line of places just clear of the
+    tail to the nearest one that fits. With no room behind the tail at all, past the tip (`front` ahead of `at`)
+    when `flip` allows it; else where the box puts it, the arrow drawn over it."""
+    a = math.radians(angle)
+    ux, uy = -math.sin(a), math.cos(a)          # the way the arrow points: down, turned as it is drawn
+    lo_x, hi_x, lo_y, hi_y = box
+    fallback = None
+    for side, end in ((-1.0, back), (1.0, front))[:2 if flip else 1]:
+        dx, dy = side * ux, side * uy           # out from the arrow's point, past this end of it
+        reach = end + gap + (abs(dx) * w + abs(dy) * h) / 2     # to the pill's middle, its near side `gap` clear
+        x, y = at.x() + reach * dx - w / 2, at.y() + reach * dy - h / 2
+        cx, cy = min(max(x, lo_x), hi_x), min(max(y, lo_y), hi_y)
+        if fallback is None:
+            fallback = QRectF(cx, cy, w, h)
+        # its nearest corner still `gap` past this end, along the arrow?
+        if (cx - at.x()) * dx + (cy - at.y()) * dy + min(0.0, dx * w) + min(0.0, dy * h) >= end + gap - 1e-6:
+            return QRectF(cx, cy, w, h)
+        lo, hi = -math.inf, math.inf            # along the places just clear of it, (x - s dy, y + s dx): in the box
+        for p, step, low, high in ((x, -dy, lo_x, hi_x), (y, dx, lo_y, hi_y)):
+            if abs(step) > 1e-9:
+                s1, s2 = sorted(((low - p) / step, (high - p) / step))
+                lo, hi = max(lo, s1), min(hi, s2)
+            elif not low <= p <= high:
+                lo, hi = math.inf, -math.inf
+        if lo <= hi:
+            s = min(max(0.0, lo), hi)
+            return QRectF(x - s * dy, y + s * dx, w, h)
+    return fallback
+
+
 class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and the route's arrow's window over the minimap box. Never takes a click,
     the focus, or a place in the minimap reads. Each refresh takes the arrow's look from the settings: its colour
-    (minimap_arrow_color), its size (minimap_arrow_size) and its blink (minimap_arrow_flash): a timer on the window
-    hiding and showing the arrow alone every FLASH_MS, while one is placed and the setting is on."""
+    (minimap_arrow_color), its size (minimap_arrow_size), the name beside it (minimap_arrow_label, in the language
+    the app's settings pick: the window is made without one) and its blink (minimap_arrow_flash): a timer on the
+    window hiding and showing the arrow and its name alone every FLASH_MS, while one is placed and the setting is
+    on."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -172,15 +238,16 @@ class PortalDots(QWidget):
         self._arrow_angle = 0.0
         self._arrow_edge = False
         # the way _next_step last routed, (player's map, route's map, cabs & teleports, hidden teleports), and its
-        # first step's spot
+        # first step when it has a spot on the minimap
         self._arrow_key: tuple[str, str, bool, bool] | None = None
-        self._arrow_spot: tuple[float, float] | None = None
+        self._arrow_leg: routes.Leg | None = None
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say_arrow)
         self._ratio = 1.0
         # the arrow's look, from the settings at each refresh: how many times its drawn size (_size_scale), its fill
         # and its rim (_arrow_colors)
         self._arrow_scale = 1.0
         self._arrow_fill, self._arrow_rim = _arrow_colors(settings)
+        self._tag: _Tag | None = None   # the name beside it (_make_tag), while one is placed and its setting is on
         # its blink while its flash setting is on (_flash): a beat of the timer hides it, the next shows it again
         self._flash_on = True
         self._flash_timer = QTimer(self)
@@ -200,9 +267,9 @@ class PortalDots(QWidget):
     def refresh(self, _what: object = None) -> None:
         """Place the dots, the guided NPC's ring and the route's arrow over LOCATION.box from the live follow of the
         player's map (a Qt slot too: LOCATION's signals carry what it re-reads), the arrow in the colour and at the
-        size its settings pick, blinking or not: read here every time, so a change shows at the next refresh. Never
-        from a read's own view: it can be the last map's while the reads wait to confirm a new one, and entering a
-        shop flashed the street's dots back for a second (live)."""
+        size its settings pick, with the name beside it or not and blinking or not: read here every time, so a change
+        shows at the next refresh. Never from a read's own view: it can be the last map's while the reads wait to
+        confirm a new one, and entering a shop flashed the street's dots back for a second (live)."""
         region = LOCATION.box
         here = LOCATION.here
         if not isinstance(region, dict) or here is None:
@@ -221,9 +288,9 @@ class PortalDots(QWidget):
         at = [p for p in (view.at(s) for s in spots) if p is not None]
         guide = LOCATION.guide
         at_ring = view.at(guide[1]) if guide is not None and guide[0] == here.map else None
-        step = self._next_step(graph, here.map)
+        leg = self._next_step(graph, here.map)
         scale = _size_scale(self._settings)     # the edge arrow's room in the panel depends on its size
-        aim = _aim(view, step, here.spot, scale) if step is not None else None
+        aim = _aim(view, leg.spot, here.spot, scale) if leg is not None else None
         self._say_arrow(aim)
         if not at and at_ring is None and aim is None:
             self._clear()
@@ -241,6 +308,9 @@ class PortalDots(QWidget):
         self._arrow_angle, self._arrow_edge = (aim.angle, aim.edge) if aim is not None else (0.0, False)
         self._arrow_scale = scale
         self._arrow_fill, self._arrow_rim = _arrow_colors(self._settings)
+        # the name beside it, with its setting on: placed by the arrow just placed, inside the panel shown
+        self._tag = (self._make_tag(graph, leg, view.panel)
+                     if aim is not None and self._settings["minimap_arrow_label"] else None)
         self._flash(self._arrow is not None and bool(self._settings["minimap_arrow_flash"]))
         if self.geometry() != rect:
             self.setGeometry(rect)
@@ -249,15 +319,16 @@ class PortalDots(QWidget):
             set_capturable(self, self._settings)     # off the minimap reads' shots, unless the player asked
         self.update()
 
-    def _next_step(self, graph, here_map: str) -> tuple[float, float] | None:
-        """Where the way to the map the player picked (LOCATION.route_dest) starts on their map's minimap picture: its
-        first step's portal or NPC (routes.Leg.spot). The way on foot, or with cabs and NPC teleports when the
-        toolbar's switch says so (settings["game_rides"]), through the hidden teleports where they make it shorter
-        when the player allows them (settings["route_hidden_teleports"]), as the search's page and the ◎ window draw
-        it. None with the arrow's setting off, no route picked or already on its map, no way known, or a first step
-        with no spot on the minimap. Routed only when the player's map, the route's map or a switch changes, the
-        step's spot kept for the refreshes after (set_kb forgets it): refresh runs on the GUI thread for every follow
-        frame while the minimap scrolls, and Graph.route is a Dijkstra search over the whole map graph."""
+    def _next_step(self, graph, here_map: str) -> routes.Leg | None:
+        """The first step of the way to the map the player picked (LOCATION.route_dest) when it has a spot on their
+        map's minimap picture: its portal or NPC (routes.Leg.spot), where the arrow points, and what the name beside
+        it says (_tag_words). The way on foot, or with cabs and NPC teleports when the toolbar's switch says so
+        (settings["game_rides"]), through the hidden teleports where they make it shorter when the player allows them
+        (settings["route_hidden_teleports"]), as the search's page and the ◎ window draw it. None with the arrow's
+        setting off, no route picked or already on its map, no way known, or a first step with no spot on the
+        minimap. Routed only when the player's map, the route's map or a switch changes, the step kept for the
+        refreshes after (set_kb forgets it): refresh runs on the GUI thread for every follow frame while the minimap
+        scrolls, and Graph.route is a Dijkstra search over the whole map graph."""
         dest = LOCATION.route_dest
         if not self._settings["minimap_route_arrow"] or not dest or dest == here_map:
             return None
@@ -273,14 +344,52 @@ class PortalDots(QWidget):
             route = getattr(graph, "route", None)     # a stand-in graph that can't route (an older test's): no arrow
             way = route(here_map, dest, taxi=rides, teleport=rides, hidden=hidden) if route is not None else None
             leg = way.legs[0] if way is not None and way.legs else None
-            self._arrow_key, self._arrow_spot = key, leg.spot if leg is not None else None
+            self._arrow_key, self._arrow_leg = key, leg if leg is not None and leg.spot is not None else None
             self._arrow_said = None
             log.info("route arrow: to %s, %s", _name(graph, dest),
                      f"next step: {getattr(leg, 'kind', '')} {getattr(leg, 'via', '')}".strip()
                      if leg is not None and leg.spot is not None
                      else "its first step has no spot on this minimap" if leg is not None
                      else "no way known from here")
-        return self._arrow_spot
+        return self._arrow_leg
+
+    def _make_tag(self, graph, leg: routes.Leg, panel: tuple[float, float, float, float]) -> _Tag | None:
+        """The name beside the arrow just placed (settings["minimap_arrow_label"]), in the language the app's settings
+        pick (Hebrew until one is): what to click there (_tag_words). A game name, so one left-to-right block in a
+        Hebrew line, cut short with "…" past about TAG_CHARS characters or what the panel's width leaves it, never
+        its glyph. Its letters sized with the arrow, its pill just behind the arrow's tail (_tag_rect) and all of it
+        EDGE_GAP_PX inside the panel (`panel`: the view's, in box pixels), as the sign at the edge keeps. None when
+        the step has no name or the panel no room for it."""
+        t = I18n(self._settings["language"] or "he")
+        key, name = _tag_words(graph, leg)
+        if not name:
+            return None
+        k = 1.0 / self._ratio       # screen pixels to the window's, as every measure here
+        px = max(TAG_FONT_MIN_PX, TAG_FONT_K * self._arrow_scale * ARROW_SIZE_PX)     # in screen pixels
+        font = theme.app_font(max(1, round(px * k)))
+        font.setBold(True)
+        fm = QFontMetricsF(font)
+        pad_x, pad_y = TAG_PAD_X * font.pixelSize(), TAG_PAD_Y * font.pixelSize()
+        x0, y0, x1, y1 = (c * k for c in panel)
+        inset = EDGE_GAP_PX * k
+        # the name's room: as wide as its first TAG_CHARS characters (a pixel spare, so a name that short is never
+        # cut for a rounding), less in a panel too narrow for them beside its glyph
+        room = min(fm.horizontalAdvance(name[:TAG_CHARS]) + 1,
+                   x1 - x0 - 2 * inset - 2 * pad_x - fm.horizontalAdvance(t(key, name="")))
+        shown = fm.elidedText(name, Qt.ElideRight, room) if room > 0 else ""
+        if shown in ("", "…"):
+            return None
+        text = t(key, name=bidi.ltr_block(shown, t.rtl))
+        w, h = fm.horizontalAdvance(text) + 2 * pad_x, fm.height() + 2 * pad_y
+        box = (x0 + inset, x1 - inset - w, y0 + inset, y1 - inset - h)     # where its top-left corner may go
+        if box[0] > box[1] or box[2] > box[3]:
+            return None
+        ys = [y * self._arrow_scale * k for _, y in (EDGE_ARROW_PX if self._arrow_edge else ARROW_PX)]
+        # the mark on a step may have it below its tip instead (no room above it, by the panel's top); the sign at
+        # the edge never: past its tip is the panel's edge
+        rect = _tag_rect(self._arrow, self._arrow_angle, -min(ys), max(ys), w, h, box, TAG_GAP_PX * k,
+                         flip=not self._arrow_edge)
+        return _Tag(text, rect, font, t.rtl)
 
     def _say_arrow(self, aim: _Aim | None) -> None:
         """One line in the log whenever the arrow moves between its step and the panel's edge (the way's next step
@@ -301,6 +410,7 @@ class PortalDots(QWidget):
         self._arrow = None
         self._arrow_angle = 0.0
         self._arrow_edge = False
+        self._tag = None
         self._flash(False)
         if self.isVisible():
             self.hide()
@@ -316,7 +426,8 @@ class PortalDots(QWidget):
             self._flash_timer.start()
 
     def _blink(self) -> None:
-        """The flash timer's beat: the arrow hidden, or shown again (it alone: the dots and the ring stay)."""
+        """The flash timer's beat: the arrow and its name hidden, or shown again (they alone: the dots and the ring
+        stay)."""
         self._flash_on = not self._flash_on
         self.update()
 
@@ -339,6 +450,21 @@ class PortalDots(QWidget):
             p.setPen(QPen(RING_FILL, RING_PEN / self._ratio))
             p.drawEllipse(self._ring, rr, rr)
         if arrow is not None:
+            tag = self._tag
+            if tag is not None:
+                # its name first (shown and left out with it), so the arrow is drawn whole over a pill the panel's
+                # edge left nowhere else: the words in the arrow's fill on its rim a little see-through, edged in the
+                # fill, laid out as their language reads whatever the window's direction
+                line = 1.0 / self._ratio
+                back = QColor(self._arrow_rim)
+                back.setAlphaF(TAG_ALPHA)
+                p.setPen(QPen(self._arrow_fill, line))
+                p.setBrush(back)
+                pill = tag.rect.adjusted(line / 2, line / 2, -line / 2, -line / 2)     # its edge inside its rect
+                p.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
+                p.setFont(tag.font)
+                p.setLayoutDirection(Qt.RightToLeft if tag.rtl else Qt.LeftToRight)
+                p.drawText(tag.rect, Qt.AlignCenter, tag.text)
             p.setPen(QPen(self._arrow_rim, 1.0 / self._ratio))
             p.setBrush(self._arrow_fill)
             # at the size its setting picks, in the window's pixels, about its own origin (the step's spot, the edge

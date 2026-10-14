@@ -5,8 +5,8 @@ and its place on the screen — above the minimap's box (LOCATION.box) and with 
 kept after a drag. Its width is the player's too: the buttons wrap into as many rows as the width leaves room for.
 Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
 tint, the accent, the transparency, icons instead of words, the bar's key, Cabs & Teleports and the hidden-teleport
-routes, the Minimap switches and the route arrow's colour, size and flashing, Reset) are written and followed live;
-the panel is no taller than its screen, its sections scrolling under its title row."""
+routes, the Minimap switches and the route arrow's colour, size, name and flashing, Reset) are written and followed
+live; the panel is no taller than its screen, its sections scrolling under its title row."""
 import os
 
 import pytest
@@ -712,8 +712,15 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
         assert sl._x(portaldots.ARROW_SIZE_MIN) > sl._x(portaldots.ARROW_SIZE_MAX)   # the shortest arrow on the right
         assert p._arrow_size_value.text() == bidi.ltr_block("22 px", True)
         assert p._arrow_flash_label.text() == bidi.plain("חץ מהבהב", True)
+        # the name beside the arrow and the notice on arriving: labelled, hinted and named in Hebrew too
+        assert p._arrow_label_label.text() == bidi.plain("שם ליד החץ", True)
+        assert p._arrival_label.text() == bidi.plain("הודעה כשמגיעים", True)
+        assert [p._arrow_label.accessibleName(), p._arrival.accessibleName()] == ["שם ליד החץ", "הודעה כשמגיעים"]
+        assert p._arrow_label_hint.text() == bidi.plain(w.t("tbs_arrow_label_hint"), True)
+        assert p._arrival_hint.text() == bidi.plain(w.t("tbs_arrival_hint"), True)
         # the new hints keep every hint's two pixels at the right (a wrapped Hebrew line's first letter overhangs)
-        assert [h.contentsMargins().right() for h in (p._hidden_routes_hint, p._arrow_flash_hint)] == [2, 2]
+        hints = (p._hidden_routes_hint, p._arrow_label_hint, p._arrow_flash_hint, p._arrival_hint)
+        assert [h.contentsMargins().right() for h in hints] == [2, 2, 2, 2]
     finally:
         w.close()
         w._panel.close()
@@ -772,41 +779,54 @@ def test_a_panel_choice_signals_the_app_to_restyle_every_window(bar):
 
 
 def test_the_minimap_switches_are_in_the_gear_panel_and_signal_the_app(bar):
-    """The ⚙ panel's Minimap section (Settings had these): the hidden portals' dots and the route's arrow on at first,
-    the overlays in screenshots off. Each click writes its setting and says so with the bar's minimap_toggled (the app
-    redraws the dots, the windows' captures and the pickers' pages); a setting changed elsewhere is back on its switch
-    at the next refresh."""
+    """The ⚙ panel's Minimap section (Settings had its first two switches and its last): the hidden portals' dots,
+    the route's arrow, the name beside it and the notice on reaching its map on at first, the overlays in screenshots
+    off. Each click writes its setting and says so with the bar's minimap_toggled (the app redraws the dots, the
+    arrow, the windows' captures and the pickers' pages); a setting changed elsewhere is back on its switch at the
+    next refresh, every switch in the accent picked."""
+    from maplehelper.ui import npcoverlay
     w, s = bar
+    keys = ("minimap_hidden_portals", "minimap_route_arrow", "minimap_arrow_label", "minimap_arrival_notice",
+            "overlays_in_screenshots")
     seen = []
-    w.minimap_toggled.connect(lambda: seen.append((s["minimap_hidden_portals"], s["minimap_route_arrow"],
-                                                   s["overlays_in_screenshots"])))
+    w.minimap_toggled.connect(lambda: seen.append(tuple(s[k] for k in keys)))
     w.refresh()
     w._gear.click()
     p = w._panel
-    switches = (p._hidden_portals, p._route_arrow, p._overlay_shots)
-    names = ["Hidden portals on the minimap", "Route arrow on the minimap", "Show the overlays in screenshots"]
+    switches = (p._hidden_portals, p._route_arrow, p._arrow_label, p._arrival, p._overlay_shots)
+    labels = (p._hidden_portals_label, p._route_arrow_label, p._arrow_label_label, p._arrival_label,
+              p._overlay_shots_label)
+    names = ["Hidden portals on the minimap", "Route arrow on the minimap", "Name beside the arrow",
+             "Say when you arrive", "Show the overlays in screenshots"]
     assert p._minimap_head.text() == "MINIMAP"
-    assert [p._hidden_portals_label.text(), p._route_arrow_label.text(), p._overlay_shots_label.text()] == names
+    assert [lb.text() for lb in labels] == names
     assert [b.accessibleName() for b in switches] == names
-    assert [b.isChecked() for b in switches] == [True, True, False]
+    assert [b.isChecked() for b in switches] == [True, True, True, True, False]
     p._hidden_portals.click()
-    assert s["minimap_hidden_portals"] is False and seen == [(False, True, False)]
+    assert s["minimap_hidden_portals"] is False and seen == [(False, True, True, True, False)]
     p._route_arrow.click()
-    assert s["minimap_route_arrow"] is False and seen == [(False, True, False), (False, False, False)]
+    assert s["minimap_route_arrow"] is False and seen[1:] == [(False, False, True, True, False)]
+    p._arrow_label.click()
+    assert s["minimap_arrow_label"] is False and seen[2:] == [(False, False, False, True, False)]
+    p._arrival.click()
+    assert s["minimap_arrival_notice"] is False and seen[3:] == [(False, False, False, False, False)]
     p._overlay_shots.click()
-    assert s["overlays_in_screenshots"] is True and seen == [(False, True, False), (False, False, False),
-                                                             (False, False, True)]
-    s["minimap_hidden_portals"], s["minimap_route_arrow"], s["overlays_in_screenshots"] = True, True, False
-    w.refresh()                         # changed elsewhere: each switch follows
-    assert [b.isChecked() for b in switches] == [True, True, False]
+    assert s["overlays_in_screenshots"] is True and seen[4:] == [(False, False, False, False, True)]
+    for key, on in zip(keys, (True, True, True, True, False)):
+        s[key] = on
+    s["overlay_accent"] = "blue"
+    w.refresh()                         # changed elsewhere: each switch follows, in the new accent
+    assert [b.isChecked() for b in switches] == [True, True, True, True, False]
+    assert all(b._accent == QColor(npcoverlay.ACCENTS["blue"][1]) for b in switches)
 
 
 def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_signal_the_app(bar):
     """Under the route arrow's switch: its colour as dots (orange at first, the picked one ringed in itself and named
-    beside its label), its size on a slider in whole pixels (22 at first, its px beside its label) and whether it
-    flashes (off at first). Each choice is written and said with the bar's minimap_toggled (the app redraws the arrow,
-    the search's page and the ◎ window); a drag of the size is written at every pixel but said only once a moment and
-    once more on letting go. A setting changed elsewhere is back on its control at the next refresh."""
+    beside its label), its size on a slider in whole pixels (22 at first, its px beside its label), the name beside
+    it, whether it flashes (off at first) and the notice on reaching its map, each switch over its hint, then the
+    overlays in screenshots. Each choice is written and said with the bar's minimap_toggled (the app redraws the
+    arrow, the search's page and the ◎ window); a drag of the size is written at every pixel but said only once a
+    moment and once more on letting go. A setting changed elsewhere is back on its control at the next refresh."""
     from maplehelper.ui import gametoolbar, portaldots
     w, s = bar
     seen = []
@@ -816,11 +836,16 @@ def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_sign
     w._gear.click()
     p = w._panel
     y = lambda widget: widget.mapTo(p, QPoint(0, 0)).y()  # noqa: E731
-    assert (y(p._route_arrow_hint) < y(p._arrow_color_label) < y(p._arrow_colors) < y(p._arrow_size_label)
-            < y(p._arrow_size) < y(p._arrow_flash_label) < y(p._overlay_shots_label))
+    assert (y(p._route_arrow) < y(p._route_arrow_hint) < y(p._arrow_color_label) < y(p._arrow_colors)
+            < y(p._arrow_size_label) < y(p._arrow_size) < y(p._arrow_label_label) < y(p._arrow_label_hint)
+            < y(p._arrow_flash_label) < y(p._arrow_flash_hint) < y(p._arrival_label) < y(p._arrival_hint)
+            < y(p._overlay_shots_label))
     assert [p._arrow_color_label.text(), p._arrow_size_label.text(), p._arrow_flash_label.text()] == [
         "Route arrow colour", "Route arrow size", "Flashing arrow"]
-    assert p._arrow_flash_hint.text() == "The arrow blinks, so it is easy to spot on a busy minimap."
+    assert [p._arrow_label_hint.text(), p._arrow_flash_hint.text(), p._arrival_hint.text()] == [
+        "A small label by the arrow: the map the portal leads to, or the NPC to talk to.",
+        "The arrow blinks, so it is easy to spot on a busy minimap.",
+        "A small notice when you reach the map the arrow leads to, and the arrow turns itself off."]
     # the colour: a dot in each ARROW_COLORS fill, named from its i18n key, the picked one ringed in itself
     dots = {b.property("key"): b for b in p._arrow_colors.findChildren(QPushButton)}
     picked = lambda: [key for key, b in dots.items() if b.isChecked()]  # noqa: E731

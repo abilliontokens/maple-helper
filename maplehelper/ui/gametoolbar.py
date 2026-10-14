@@ -10,11 +10,11 @@ upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in 
 words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙ beside the ✕ opens the
 panel with the look of every window over the game, the icons mode, the bar's show/hide key, Cabs & Teleports, the
 hidden-teleport routes and Minimap: the hidden portals' dots and the route's arrow on the game's minimap (its colour,
-size and flashing), and the overlays in screenshots (_SettingsPanel below); the ✕ hides the bar (the app then says
-how to bring it back). Where the player left it is kept in game_toolbar_pos; with none saved it opens just above the
-game's minimap window (found at the game's top left) and follows it until moved. Every colour is read from
-npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark text on the
-white one."""
+size, the name beside it and its flashing), a notice on reaching the map it points to, and the overlays in
+screenshots (_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the player
+left it is kept in game_toolbar_pos; with none saved it opens just above the game's minimap window (found at the
+game's top left) and follows it until moved. Every colour is read from npcoverlay.palette() when a style is built or
+a widget paints: light text on the dark glass tints, dark text on the white one."""
 from __future__ import annotations
 
 import time
@@ -316,12 +316,13 @@ class _SettingsPanel(QWidget):
     map rides cabs and NPC teleports or walks, and Hidden teleport routes, whether it may take the invisible teleports
     (the blue dots) when they make it shorter (the bar's rides_toggled: a way shown is found again); Minimap: the
     hidden portals' blue dots and the route's arrow on the game's minimap, the arrow's colour as dots (the picked one
-    ringed and named), its size on a slider in whole pixels and whether it flashes, and whether screenshots see the
-    windows over the game (the bar's minimap_toggled: the app follows). Each choice is written, applies at once and
-    stays; "Reset to default look" puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been
-    clicked into: like the search window it takes the keyboard only then, never on opening). It is never taller than
-    its screen: with too little room there for every section (a 1080p screen at 125 %), they scroll under the title
-    row, which stays put to drag the panel by and close it."""
+    ringed and named), its size on a slider in whole pixels, the name beside it (the map its portal leads to, or the
+    NPC to talk to) and whether it flashes, a notice on reaching the map it leads to (the arrow turns itself off
+    then), and whether screenshots see the windows over the game (the bar's minimap_toggled: the app follows). Each
+    choice is written, applies at once and stays; "Reset to default look" puts the look back. ✕, the ⚙ again or Esc
+    closes it (Esc once the panel has been clicked into: like the search window it takes the keyboard only then, never
+    on opening). It is never taller than its screen: with too little room there for every section (a 1080p screen at
+    125 %), they scroll under the title row, which stays put to drag the panel by and close it."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -467,7 +468,7 @@ class _SettingsPanel(QWidget):
         col.addSpacing(3)
         self._route_arrow_hint = self._hint(col)
         # the route arrow's look, under its switch: its colour as dots (the picked one ringed and named), its size on
-        # a slider in whole pixels (beside its label), and whether it flashes
+        # a slider in whole pixels (beside its label), the name beside it, and whether it flashes
         col.addSpacing(14)
         self._arrow_color_label, self._arrow_color_name = self._label_row(col)
         col.addSpacing(8)
@@ -485,6 +486,18 @@ class _SettingsPanel(QWidget):
         col.addSpacing(14)
         row = QHBoxLayout()
         row.setSpacing(12)
+        self._arrow_label_label = QLabel(objectName="Label")
+        self._arrow_label = _GlassSwitch()
+        self._arrow_label.setCursor(Qt.PointingHandCursor)
+        self._arrow_label.clicked.connect(self._pick_arrow_label)
+        row.addWidget(self._arrow_label_label, 1)
+        row.addWidget(self._arrow_label, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        col.addSpacing(3)
+        self._arrow_label_hint = self._hint(col)
+        col.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(12)
         self._arrow_flash_label = QLabel(objectName="Label")
         self._arrow_flash = _GlassSwitch()
         self._arrow_flash.setCursor(Qt.PointingHandCursor)
@@ -494,6 +507,19 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         col.addSpacing(3)
         self._arrow_flash_hint = self._hint(col)
+        # a notice on reaching the map the arrow leads to (the arrow turns itself off then)
+        col.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._arrival_label = QLabel(objectName="Label")
+        self._arrival = _GlassSwitch()
+        self._arrival.setCursor(Qt.PointingHandCursor)
+        self._arrival.clicked.connect(self._pick_arrival)
+        row.addWidget(self._arrival_label, 1)
+        row.addWidget(self._arrival, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        col.addSpacing(3)
+        self._arrival_hint = self._hint(col)
         col.addSpacing(14)
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -609,13 +635,18 @@ class _SettingsPanel(QWidget):
                         (self._arrow_color_label, "tbs_arrow_colour"),
                         (self._arrow_color_name, ARROW_COLORS[arrow_key][0]),
                         (self._arrow_size_label, "tbs_arrow_size"),
+                        (self._arrow_label_label, "tbs_arrow_label"),
+                        (self._arrow_label_hint, "tbs_arrow_label_hint"),
                         (self._arrow_flash_label, "tbs_arrow_flash"),
                         (self._arrow_flash_hint, "tbs_arrow_flash_hint"),
+                        (self._arrival_label, "tbs_arrival"),
+                        (self._arrival_hint, "tbs_arrival_hint"),
                         (self._overlay_shots_label, "overlays_in_screenshots"),
                         (self._overlay_shots_hint, "overlays_in_screenshots_hint")):
             lb.setText(bidi.plain(t(key), rtl))
         for lb in (self._icons_hint, self._hotkey_hint, self._rides_hint, self._hidden_routes_hint,
-                   self._hidden_portals_hint, self._route_arrow_hint, self._arrow_flash_hint, self._overlay_shots_hint):
+                   self._hidden_portals_hint, self._route_arrow_hint, self._arrow_label_hint, self._arrow_flash_hint,
+                   self._arrival_hint, self._overlay_shots_hint):
             # Hebrew: two pixels' room at the right, where a line wrapped to the full width drew its first letter
             # past the label's edge, cut off (the wrap measures whole pixels, the glyphs overhang)
             lb.setContentsMargins(0, 0, 2 if rtl else 0, 0)
@@ -648,7 +679,9 @@ class _SettingsPanel(QWidget):
                                   (self._hidden_routes, "route_hidden_teleports", "tb_hidden_routes"),
                                   (self._hidden_portals, "minimap_hidden_portals", "minimap_hidden_portals"),
                                   (self._route_arrow, "minimap_route_arrow", "minimap_route_arrow"),
+                                  (self._arrow_label, "minimap_arrow_label", "tbs_arrow_label"),
                                   (self._arrow_flash, "minimap_arrow_flash", "tbs_arrow_flash"),
+                                  (self._arrival, "minimap_arrival_notice", "tbs_arrival"),
                                   (self._overlay_shots, "overlays_in_screenshots", "overlays_in_screenshots")):
             switch.setChecked(bool(s[key]))
             switch.set_accent(accent)
@@ -787,9 +820,21 @@ class _SettingsPanel(QWidget):
             self._arrow_follow.stop()
             self._bar.minimap_toggled.emit()
 
+    def _pick_arrow_label(self, _=False) -> None:
+        """The name beside the arrow: written, and the small label by the arrow on the game's minimap (the map its
+        portal leads to, or the NPC to talk to) comes or goes (minimap_toggled)."""
+        self._settings["minimap_arrow_label"] = self._arrow_label.isChecked()
+        self._bar.minimap_toggled.emit()
+
     def _pick_arrow_flash(self, _=False) -> None:
         """The flashing arrow: written, and the arrow on the game's minimap blinks or holds still (minimap_toggled)."""
         self._settings["minimap_arrow_flash"] = self._arrow_flash.isChecked()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_arrival(self, _=False) -> None:
+        """The notice on arriving: written, and reaching the map the arrow leads to says so in a small notice, or
+        passes without one (minimap_toggled)."""
+        self._settings["minimap_arrival_notice"] = self._arrival.isChecked()
         self._bar.minimap_toggled.emit()
 
     def _pick_shots(self, _=False) -> None:
@@ -943,10 +988,11 @@ class GameToolbar(EdgeResize, QWidget):
     longer (its width; its height upright, the ◯ before the grip turning it), the buttons wrapping into lines and
     showing icons alone once the words would take more than WORD_LINES_MAX lines; Tools opens a little card with the
     tool windows (_ToolsMenu); the ⚙ opens the panel with the look, the icons mode, the bar's key, Cabs & Teleports,
-    the hidden-teleport routes and Minimap: the hidden portals, the route arrow (its colour, size and flashing) and
-    the overlays in screenshots (rides_toggled and minimap_toggled stay the bar's signals). Clicks work but it never
-    takes the keyboard from the game, and the minimap reads never see it. Its place is kept in game_toolbar_pos, its
-    length in game_toolbar_width (or game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
+    the hidden-teleport routes and Minimap: the hidden portals, the route arrow (its colour, size, the name beside it
+    and its flashing, and a notice on reaching its map) and the overlays in screenshots (rides_toggled and
+    minimap_toggled stay the bar's signals). Clicks work but it never takes the keyboard from the game, and the
+    minimap reads never see it. Its place is kept in game_toolbar_pos, its length in game_toolbar_width (or
+    game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
 
     search_requested = Signal(str)     # which search to open: "monster_npc" | "map" | "item" | "sell"
     npc_toggled = Signal()             # settings["npc_overlay"] flipped: the NPCs-here window follows

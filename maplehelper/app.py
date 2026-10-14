@@ -218,6 +218,10 @@ class MapleHelperApp:
         self.portal_dots = PortalDots(self.kb, self.settings)
         self.portal_dots.refresh()
         self._ensure_routes()      # an old KB's routes.json, without the hidden teleports: rebuilt from the site
+        # the route's arrow on the game's minimap let go, with a word saying so, once the player stands on the map it
+        # points to (_route_arrived)
+        from .ui.location import LOCATION
+        LOCATION.changed.connect(self._route_arrived)
         # the "NPCs on this map" window over the game itself (ui/npcoverlay.py), shown from its own setting; the
         # guide it sets is what the ring above draws on the game's minimap. Before any of the windows over the
         # game are made: the glass tint they all paint is taken from the settings (the ⚙ panel re-takes it live).
@@ -467,6 +471,30 @@ class MapleHelperApp:
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
             where.redraw()      # ... and in the ◎ window (drawn again, never armed again)
+
+    def _route_arrived(self, here) -> None:
+        """A minimap read (LOCATION.changed) on the map the route arrow points to: the route is let go
+        (LOCATION.set_route_dest(None): the arrow on the game's minimap and the search's way page follow on
+        LOCATION.routed), and a toast says so, naming the map, while its setting (minimap_arrival_notice) is on.
+        Off, the route goes all the same: the arrow must not outlive the arrival, only the word is the setting's.
+        Said once: with the route gone, the next read there (the dot moved) finds no route to end. No wait of its own:
+        the scanner only moves the player to another map once minimapscan.CONFIRM reads in a row name it, so one
+        misread never ends a route. The route is let go before the map's name is looked up, and a lookup that fails
+        names the map by its id: neither the clear nor the word is lost to it."""
+        from .ui.location import LOCATION
+        dest = LOCATION.route_dest
+        if here is None or dest is None or here.map != dest:
+            return
+        LOCATION.set_route_dest(None)
+        if not self.settings["minimap_arrival_notice"]:
+            return
+        from . import bidi, routes
+        t = I18n(self.settings["language"] or "he")
+        try:
+            name = routes.of(self.kb).name(here.map)
+        except Exception:  # noqa: BLE001 - a name lookup must not lose the word: the map's id says it
+            name = here.map
+        self.toast(t("route_arrived", name=bidi.ltr_block(name, t.rtl)), t("route_arrived_body"))
 
     def _grind_toggled(self) -> None:
         """The toolbar's Grind button (or the bar's own Hide) flipped settings["grind_bar"]: the bar shows or hides,
