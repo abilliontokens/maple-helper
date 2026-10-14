@@ -2,8 +2,11 @@
 never draws), a green ring around the NPC the player asked to be guided to (LOCATION.guide: ui/npcoverlay.py, the
 search's NPC page) with a green arrow pointing down at it, and an arrow pointing down at the next portal or NPC on
 the way to the map the player picked a route to (LOCATION.route_dest). Either arrow points at the pad of a hidden
-teleport on the player's own map instead when one cuts their walk to its spot (routes.Graph.shortcut: its blue dot,
-where to stand), the guided NPC's ring staying on the NPC. The minimap often shows only part of the map: an NPC, a
+teleport on the player's own map instead when one cuts their walk to its spot (routes.Graph.shortcut_path: its blue dot,
+where to stand), the guided NPC's ring staying on the NPC. When that cheapest way takes more than one pad in a row,
+every later pad shown gets a smaller numbered marker in the arrow's colours (2, 3, 4: at most the search's own
+SHORTCUT_PADS in all), so the whole chain reads in order on the player's own map; a later pad off the part shown,
+or one the arrow's name pill would cover, is left out. The minimap often shows only part of the map: an NPC, a
 step or a pad off the part shown gets a bigger arrow just inside the edge of the part shown instead, pointing toward
 it (the NPC no ring then). All of it on a click-through window laid over the minimap's box (LOCATION.box: the game's
 minimap window found at its top left, else the box the player drew), and moved with it. The map comes from each
@@ -90,9 +93,15 @@ TAG_CHARS = 18                  # a name longer than this many characters is cut
 TAG_PAD_X, TAG_PAD_Y = 0.5, 0.1     # the pill's room around its words, across and above/below, in its letters' size
 TAG_ALPHA = 0.85                # how opaque the pill's fill (the arrow's rim) is, the minimap a touch through it
 TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen pixels
+# a later pad of a chain (_chain_marks), numbered in the arrow's colours beside the first pad's arrow
+CHAIN_MARK_PX = 14                  # its marker's width in screen pixels: smaller than the arrow (ARROW_SIZE_PX
+                                    # long), wider than a blue dot, its bright fill on its dark rim and its order
+                                    # number in the rim inside it, so it reads on a busy minimap
+CHAIN_MARKS_MAX = 4                 # at most this many pads of a chain are marked in all (the first by its arrow):
+                                    # the search's own depth (routes.SHORTCUT_PADS), so never a fifth marker
 # an arrow's shortcut (_ask_shortcut: the route's toward its next step, the guided NPC's toward the NPC):
-# routes.Graph.shortcut asked from the player's own spot (LOCATION.here.spot) by the cell it falls in, this many
-# across and down the map's picture: asked again only once a read has their dot in another cell (it moves a little on
+# routes.Graph.shortcut_path asked from the player's own spot (LOCATION.here.spot) by the cell it falls in, this
+# many across and down the map's picture: asked again only once a read has their dot in another cell (it moves a
 # every read, and never on the follow frames between)
 SHORTCUT_CELLS = 50
 # ... and the pad picked kept, nothing asked, while their spot is this near it either way (fractions of the picture:
@@ -123,6 +132,13 @@ class _Tag(NamedTuple):
     rect: QRectF    # its pill (_tag_rect)
     font: QFont
     rtl: bool       # its language reads right to left (Hebrew): its words laid out so
+
+
+class _Mark(NamedTuple):
+    """A later pad of a chain (PortalDots._chain_marks), in the window's pixels: where its marker goes and the
+    order number it carries (2 for the second pad taken, and so on)."""
+    at: QPointF
+    n: int
 
 
 def _box_px(view: View, spot: tuple[float, float]) -> tuple[float, float]:
@@ -208,25 +224,37 @@ def _on_pad(you: tuple[float, float], jump: routes.Jump) -> bool:
             and math.dist(you, jump.frm) < math.dist(you, jump.to))
 
 
+def _shortcut_path(graph, here: Here, you: tuple[float, float], target: tuple[float, float]) -> list:
+    """The pads of the cheapest way across the player's map to `target`, in order (routes.Graph.shortcut_path);
+    a graph that only knows Graph.shortcut (a stand-in) gives its one pad, or none. The one search the first pad
+    and every later numbered marker come from: no extra routing for the chain."""
+    path = getattr(graph, "shortcut_path", None)
+    if callable(path):
+        return list(path(here.map, you, target) or [])
+    jump = graph.shortcut(here.map, you, target)
+    return [jump] if jump is not None else []
+
+
 def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -> tuple:
-    """The hidden teleport on the player's own map that cuts their walk to a spot on it (`target`: the way's next
-    step, PortalDots._shortcut; the guided NPC, PortalDots._npc_shortcut), as routes.Graph.shortcut picks it from
-    their own spot (LOCATION.here.spot, the read's dot): an arrow points at its pad (Jump.frm) then; None when no
-    teleport beats the walk. `kept` is the last pick and the cell of their spot it was asked from (SHORTCUT_CELLS
-    each way; None: to be asked), both handed back as they are now: asked only with their spot known (a read that
-    didn't see the dot keeps the last pick), and again only once a read has it in another of the picture's cells,
-    never for a follow frame, a read a step on or one while they stand on the pad picked (_on_pad), where it stays
-    picked so the arrow never flickers between the pad and the spot as their dot jitters about it. The first read
-    off the pad asks again: the one that lands them past the jump gets the spot back (or the next pad), that jump
-    saving nothing from there."""
-    jump, cell = kept
+    """The hidden teleports on the player's own map that cut their walk to a spot on it, in the order they are
+    taken (`target`: the way's next step, PortalDots._shortcut; the guided NPC, PortalDots._npc_shortcut), as
+    routes.Graph.shortcut_path picks them from their own spot (LOCATION.here.spot, the read's dot): an arrow
+    points at the first pad (Jump.frm) then, the later pads get their numbered markers; [] when no teleport beats
+    the walk. `kept` is the last chain and the cell of their spot it was asked from (SHORTCUT_CELLS each way;
+    None: to be asked), both handed back as they are now: asked only with their spot known (a read that didn't see
+    the dot keeps the last chain), and again only once a read has it in another of the picture's cells, never for a
+    follow frame, a read a step on or one while they stand on the first pad picked (_on_pad), where it stays picked
+    so the arrow never flickers between the pad and the spot as their dot jitters about it. The first read off the
+    pad asks again: the one that lands them past the jump gets the spot back (or the next pad), that jump saving
+    nothing from there."""
+    chain, cell = kept
     you = here.spot
     if you is None:
         return kept
-    if jump is not None and _on_pad(you, jump):
-        return jump, None       # standing on it: kept, and the first read off it asks again
+    if chain and _on_pad(you, chain[0]):
+        return chain, None       # standing on it: kept, and the first read off it asks again
     now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
-    return kept if now == cell else (graph.shortcut(here.map, you, target), now)
+    return kept if now == cell else (_shortcut_path(graph, here, you, target), now)
 
 
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:
@@ -310,17 +338,19 @@ def _tag_rect(at: QPointF, angle: float, back: float, front: float, w: float, h:
 class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and arrow's and the route's arrow's window over the minimap box. Never
     takes a click, the focus, or a place in the minimap reads. The route's arrow points at its way's next step, or at
-    the pad of a hidden teleport on the player's map that cuts the walk there (_next_step, _shortcut): the way routed
-    once for the player's map, the route's map and the switches. The guided NPC's points at the NPC, or likewise at
-    the pad of one that cuts the walk to it (_npc_shortcut: the hidden teleport's words with the NPC's name beside
-    it, the ring staying on the NPC), its pick kept for the guide and the switch. Either shortcut is asked only with
-    the Hidden teleport routes switch on and the player's dot read, and again only as that dot moves from cell to
-    cell, never while they stand on the pad (_ask_shortcut). Each refresh takes the arrows' look from the settings:
-    the route's colour (minimap_arrow_color; the guided NPC's is the ring's green, whatever is picked), their size
+    the first pad of a hidden-teleport chain on the player's map that cuts the walk there (_next_step, _shortcut),
+    its later pads numbered in order (_chain_marks): the way routed once for the player's map, the route's map and
+    the switches, and the chain from that same cached answer, no extra routing a frame. The guided NPC's points at
+    the NPC, or likewise at the first pad of a chain that cuts the walk to it (_npc_shortcut: the hidden teleport's
+    words with the NPC's name beside it, the ring staying on the NPC), its later pads numbered too, its pick kept
+    for the guide and the switch. Either chain is asked only with the Hidden teleport routes switch on and the
+    player's dot read, and again only as that dot moves from cell to cell, never while they stand on its first pad
+    (_ask_shortcut). Each refresh takes the arrows' look from the settings: the route's colour
+    (minimap_arrow_color; the guided NPC's is the ring's green, whatever is picked), their size
     (minimap_arrow_size), the name beside each (minimap_arrow_label, in the language the app's settings pick: the
     window is made without one) and their blink (minimap_arrow_flash): one timer on the window hiding and showing
-    both arrows and their names alone every FLASH_MS, together, while either is placed and the setting is on. The
-    guided NPC's is drawn over the route's."""
+    both arrows, their names and their chains' numbered markers alone every FLASH_MS, together, while either is
+    placed and the setting is on. The guided NPC's is drawn over the route's."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -343,9 +373,13 @@ class PortalDots(QWidget):
         # first step when it has a spot on the minimap
         self._arrow_key: tuple[str, str, bool, bool] | None = None
         self._arrow_leg: routes.Leg | None = None
-        # ... and its shortcut through a hidden teleport on the player's map while one cuts the walk to that step
-        # (_shortcut), with the cell of their spot it was last asked from (SHORTCUT_CELLS; None: to be asked)
+        # ... and its shortcut chain through hidden teleports on the player's map while one cuts the walk to that
+        # step (_shortcut: its first pad, where the arrow points, kept as _arrow_jump too), with the cell of their
+        # spot it was last asked from (SHORTCUT_CELLS; None: to be asked), and the later pads' numbered markers
+        # placed from it at each refresh (_chain_marks: _arrow_marks)
         self._arrow_jump: routes.Jump | None = None
+        self._arrow_chain: list[routes.Jump] = []
+        self._arrow_marks: list[_Mark] = []
         self._jump_cell: tuple[int, int] | None = None
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say)
         self._ratio = 1.0
@@ -363,11 +397,14 @@ class PortalDots(QWidget):
         self._npc_arrow_edge = False
         self._npc_tag: _Tag | None = None
         self._npc_said: tuple | None = None
-        # ... and its shortcut, as the route's (_npc_shortcut): what it was asked for (the guide, its map, the NPC's
-        # spot and key, and the Hidden teleport routes switch), the pad picked while one cuts the walk to the NPC, and
-        # the cell of the player's spot it was last asked from (SHORTCUT_CELLS; None: to be asked)
+        # ... and its shortcut chain, as the route's (_npc_shortcut): what it was asked for (the guide, its map, the
+        # NPC's spot and key, and the Hidden teleport routes switch), the pads picked while they cut the walk to the
+        # NPC (its first kept as _npc_jump too), the later pads' numbered markers (_npc_marks), and the cell of the
+        # player's spot it was last asked from (SHORTCUT_CELLS; None: to be asked)
         self._npc_key: tuple | None = None
         self._npc_jump: routes.Jump | None = None
+        self._npc_chain: list[routes.Jump] = []
+        self._npc_marks: list[_Mark] = []
         self._npc_cell: tuple[int, int] | None = None
         # the arrows' blink while its flash setting is on (_flash): a beat of the timer hides both, the next shows
         # them again
@@ -452,6 +489,10 @@ class PortalDots(QWidget):
         self._tag = self._make_tag(_tag_words(graph, leg, jump), aim, view.panel) if aim is not None and label else None
         self._npc_tag = (self._make_tag(_npc_words(self._kb, guide[2], npc_jump), npc_aim, view.panel)
                          if npc_aim is not None and label else None)
+        # the later pads of each arrow's chain, numbered in order: only the ones the part shown has, and none the
+        # arrow's name pill would cover (_chain_marks); a one-pad chain (or none) has none
+        self._arrow_marks = self._chain_marks(view, self._arrow_chain, self._tag) if aim is not None else []
+        self._npc_marks = self._chain_marks(view, self._npc_chain, self._npc_tag) if npc_aim is not None else []
         self._flash((self._arrow is not None or self._npc_arrow is not None)
                     and bool(self._settings["minimap_arrow_flash"]))
         if self.geometry() != rect:
@@ -464,15 +505,16 @@ class PortalDots(QWidget):
     def _next_step(self, graph, here: Here) -> tuple[routes.Leg, routes.Jump | None] | None:
         """The first step of the way to the map the player picked (LOCATION.route_dest) when it has a spot on their
         map's minimap picture: its portal or NPC (routes.Leg.spot) and what the name beside the arrow says
-        (_tag_words); with it the hidden teleport on their own map that cuts the walk there (_shortcut: its pad,
-        where the arrow points then), None when none does. The way on foot, or with cabs and NPC teleports when the
-        toolbar's switch says so (settings["game_rides"]), through the hidden teleports where they make it shorter
-        when the player allows them (settings["route_hidden_teleports"], which the shortcut needs too: off, never a
-        pad), as the search's page and the ◎ window draw it. None with the arrow's setting off, no route picked or
-        already on its map, no way known, or a first step with no spot on the minimap. Routed only when the player's
-        map, the route's map or a switch changes, the step kept for the refreshes after (set_kb forgets it) and its
-        shortcut asked anew: refresh runs on the GUI thread for every follow frame while the minimap scrolls, and
-        Graph.route is a Dijkstra search over the whole map graph."""
+        (_tag_words); with it the first pad of the hidden-teleport chain on their own map that cuts the walk there
+        (_shortcut: its pad, where the arrow points then, the chain kept in _arrow_chain for its numbered markers),
+        None when none does. The way on foot, or with cabs and NPC teleports when the toolbar's switch says so
+        (settings["game_rides"]), through the hidden teleports where they make it shorter when the player allows
+        them (settings["route_hidden_teleports"], which the shortcut needs too: off, never a pad), as the search's
+        page and the ◎ window draw it. None with the arrow's setting off, no route picked or already on its map, no
+        way known, or a first step with no spot on the minimap. Routed only when the player's map, the route's map
+        or a switch changes, the step kept for the refreshes after (set_kb forgets it) and its shortcut asked anew:
+        refresh runs on the GUI thread for every follow frame while the minimap scrolls, and Graph.route is a
+        Dijkstra search over the whole map graph."""
         dest = LOCATION.route_dest
         if not self._settings["minimap_route_arrow"] or not dest or dest == here.map:
             return None
@@ -483,7 +525,7 @@ class PortalDots(QWidget):
             way = route(here.map, dest, taxi=rides, teleport=rides, hidden=hidden) if route is not None else None
             leg = way.legs[0] if way is not None and way.legs else None
             self._arrow_key, self._arrow_leg = key, leg if leg is not None and leg.spot is not None else None
-            self._arrow_jump, self._jump_cell = None, None     # a new way: its shortcut asked anew
+            self._arrow_jump, self._arrow_chain, self._jump_cell = None, [], None     # a new way: its chain asked anew
             self._arrow_said = None
             log.info("route arrow: to %s, %s", _name(graph, dest),
                      f"next step: {getattr(leg, 'kind', '')} {getattr(leg, 'via', '')}".strip()
@@ -493,44 +535,70 @@ class PortalDots(QWidget):
         leg = self._arrow_leg
         if leg is None:
             return None
-        return leg, (self._shortcut(graph, here, leg) if hidden else None)
+        if not hidden:
+            self._arrow_jump, self._arrow_chain = None, []
+            return leg, None
+        return leg, self._shortcut(graph, here, leg)
 
     def _shortcut(self, graph, here: Here, leg: routes.Leg) -> routes.Jump | None:
-        """The hidden teleport on the player's own map that cuts their walk to the way's next step (`leg`), as
-        _ask_shortcut picks it from their own spot: the route's arrow points at its pad (Jump.frm) then, and the name
-        beside it says it takes them toward the step's map; None when no teleport beats the walk. The log says when
-        the arrow takes a shortcut and when it goes back to the step. Kept with the way: _next_step asks anew for a
-        new one."""
-        jump, self._jump_cell = _ask_shortcut(graph, here, leg.spot, (self._arrow_jump, self._jump_cell))
-        if jump != self._arrow_jump:
+        """The first pad of the hidden-teleport chain on the player's own map that cuts their walk to the way's next
+        step (`leg`), as _ask_shortcut picks the chain from their own spot: the route's arrow points at its first
+        pad (Jump.frm) then, its later pads kept in _arrow_chain for their numbered markers, and the name beside it
+        says it takes them toward the step's map; None when no teleport beats the walk. The log says when the arrow
+        takes a shortcut — how many pads its chain has, when more than one — and when it goes back to the step. Kept
+        with the way: _next_step asks anew for a new one."""
+        chain, self._jump_cell = _ask_shortcut(graph, here, leg.spot, (self._arrow_chain, self._jump_cell))
+        jump = chain[0] if chain else None
+        if chain != self._arrow_chain:
             log.info("route arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
-                     f"{_name(graph, leg.to)}" if jump is not None
-                     else "no shortcut from here, pointing at its next step")
-        self._arrow_jump = jump
+                     f"{_name(graph, leg.to)}" + (f", the first of {len(chain)} pads" if len(chain) > 1 else "")
+                     if jump is not None else "no shortcut from here, pointing at its next step")
+        self._arrow_chain, self._arrow_jump = chain, jump
         return jump
 
     def _npc_shortcut(self, graph, here: Here, guide: tuple) -> routes.Jump | None:
-        """The hidden teleport on the player's own map that cuts their walk to the guided NPC (`guide`: its map, the
-        NPC's spot and key, LOCATION.guide on their map), as _ask_shortcut picks it from their own spot, the same as
-        for the route's step (_shortcut): the NPC's arrow points at its pad (Jump.frm) then, the ring staying on the
-        NPC, and the name beside it says it takes them toward the NPC (_npc_words). None when no teleport beats the
-        walk, and with the Hidden teleport routes switch off (settings["route_hidden_teleports"]: the arrow on the
-        NPC as ever, the graph never asked). Kept for the guide and the switch, asked anew for another guide or the
-        switch flipped (set_kb forgets it too), and in between as the route's is: never for a follow frame, a read a
-        step on or one while they stand on the pad. The log says when the arrow takes a shortcut and when it goes
-        back to the NPC."""
+        """The first pad of the hidden-teleport chain on the player's own map that cuts their walk to the guided NPC
+        (`guide`: its map, the NPC's spot and key, LOCATION.guide on their map), as _ask_shortcut picks the chain
+        from their own spot, the same as for the route's step (_shortcut): the NPC's arrow points at its first pad
+        (Jump.frm) then, its later pads kept in _npc_chain for their numbered markers, the ring staying on the NPC,
+        and the name beside it says it takes them toward the NPC (_npc_words). None when no teleport beats the walk,
+        and with the Hidden teleport routes switch off (settings["route_hidden_teleports"]: the arrow on the NPC as
+        ever, the graph never asked). Kept for the guide and the switch, asked anew for another guide or the switch
+        flipped (set_kb forgets it too), and in between as the route's is: never for a follow frame, a read a step on
+        or one while they stand on the first pad. The log says when the arrow takes a shortcut — how many pads its
+        chain has, when more than one — and when it goes back to the NPC."""
         hidden = _switch(self._settings, "route_hidden_teleports")
         if (guide, hidden) != self._npc_key:
-            self._npc_key, self._npc_jump, self._npc_cell = (guide, hidden), None, None
+            self._npc_key, self._npc_jump, self._npc_chain, self._npc_cell = (guide, hidden), None, [], None
         if not hidden:
+            self._npc_jump, self._npc_chain = None, []
             return None
-        jump, self._npc_cell = _ask_shortcut(graph, here, guide[1], (self._npc_jump, self._npc_cell))
-        if jump != self._npc_jump:
+        chain, self._npc_cell = _ask_shortcut(graph, here, guide[1], (self._npc_chain, self._npc_cell))
+        jump = chain[0] if chain else None
+        if chain != self._npc_chain:
             log.info("npc arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
-                     f"{_npc_name(self._kb, guide[2])}" if jump is not None
-                     else "no shortcut from here, pointing at the NPC")
-        self._npc_jump = jump
+                     f"{_npc_name(self._kb, guide[2])}" + (f", the first of {len(chain)} pads" if len(chain) > 1 else "")
+                     if jump is not None else "no shortcut from here, pointing at the NPC")
+        self._npc_chain, self._npc_jump = chain, jump
         return jump
+
+    def _chain_marks(self, view: View, chain: list, tag: _Tag | None) -> list[_Mark]:
+        """The later pads of an arrow's chain (`chain`, _shortcut or _npc_shortcut), numbered from 2, as markers to
+        draw at this refresh: at most CHAIN_MARKS_MAX pads in all (the first already has the arrow), each later pad
+        only when the part of the minimap shown has its spot (View.at), and left out when the arrow's name pill
+        (`tag`, when its setting placed one) would cover its marker — the pill already names the way, and a number
+        under it would only clutter the minimap. From the chain the one search already picked: no routing here."""
+        marks: list[_Mark] = []
+        r = CHAIN_MARK_PX / 2 / self._ratio
+        for n, jump in enumerate(chain[1:CHAIN_MARKS_MAX], start=2):
+            at = view.at(jump.frm)
+            if at is None:
+                continue
+            mark = _Mark(QPointF(at[0] / self._ratio, at[1] / self._ratio), n)
+            if tag is not None and QRectF(mark.at.x() - r, mark.at.y() - r, 2 * r, 2 * r).intersects(tag.rect):
+                continue
+            marks.append(mark)
+        return marks
 
     def _make_tag(self, words: tuple[str, str], aim: _Aim, panel: tuple[float, float, float, float]) -> _Tag | None:
         """The name beside an arrow just placed at `aim` (settings["minimap_arrow_label"]), in the language the app's
@@ -578,10 +646,12 @@ class PortalDots(QWidget):
         self._arrow_angle = 0.0
         self._arrow_edge = False
         self._tag = None
+        self._arrow_marks = []
         self._npc_arrow = None
         self._npc_arrow_angle = 0.0
         self._npc_arrow_edge = False
         self._npc_tag = None
+        self._npc_marks = []
         self._flash(False)
         if self.isVisible():
             self.hide()
@@ -597,14 +667,14 @@ class PortalDots(QWidget):
             self._flash_timer.start()
 
     def _blink(self) -> None:
-        """The flash timer's beat: both arrows and their names hidden, or shown again (they alone: the dots and the
-        ring stay)."""
+        """The flash timer's beat: both arrows, their names and their chains' numbered markers hidden, or shown
+        again (they alone: the dots and the ring stay)."""
         self._flash_on = not self._flash_on
         self.update()
 
     def paintEvent(self, e) -> None:
-        shown = self._flash_on      # blinking (_flash): both arrows, their names with them, left out every other beat
-        route = shown and self._arrow is not None
+        shown = self._flash_on      # blinking (_flash): both arrows, their names and chain markers with them, left
+        route = shown and self._arrow is not None     # out every other beat
         npc = shown and self._npc_arrow is not None
         if not self._dots and self._ring is None and not route and not npc:
             return
@@ -625,10 +695,28 @@ class PortalDots(QWidget):
         if route:
             self._draw_arrow(p, self._arrow, self._arrow_angle, self._arrow_edge, self._tag, self._arrow_fill,
                              self._arrow_rim)
+            for mark in self._arrow_marks:
+                self._draw_mark(p, mark, self._arrow_fill, self._arrow_rim)
         if npc:     # over the route's where they meet, in the ring's green: it reads as the NPC, never as a step
             self._draw_arrow(p, self._npc_arrow, self._npc_arrow_angle, self._npc_arrow_edge, self._npc_tag,
                              RING_FILL, RING_RIM)
+            for mark in self._npc_marks:
+                self._draw_mark(p, mark, RING_FILL, RING_RIM)
         p.end()
+
+    def _draw_mark(self, p: QPainter, mark: _Mark, fill: QColor, rim: QColor) -> None:
+        """One later pad's numbered marker (paintEvent), in its arrow's colours: a smaller bright disc on its dark
+        rim (CHAIN_MARK_PX across), its order number in the rim inside it — the pill's dark-on-bright treatment, so
+        the number reads on a busy minimap. Drawn and left out with its arrow (paintEvent's beat)."""
+        r = CHAIN_MARK_PX / 2 / self._ratio
+        p.setPen(QPen(rim, 1.0 / self._ratio))
+        p.setBrush(fill)
+        p.drawEllipse(mark.at, r, r)
+        font = theme.app_font(max(1, round(TAG_FONT_MIN_PX / self._ratio)))
+        font.setBold(True)
+        p.setFont(font)
+        p.setPen(rim)
+        p.drawText(QRectF(mark.at.x() - r, mark.at.y() - r, 2 * r, 2 * r), Qt.AlignCenter, str(mark.n))
 
     def _draw_arrow(self, p: QPainter, at: QPointF, angle: float, edge: bool, tag: _Tag | None, fill: QColor,
                     rim: QColor) -> None:

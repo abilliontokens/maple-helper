@@ -137,7 +137,7 @@ def test_the_shortcut_is_the_pad_that_saves_the_most_walking(world):
     shortest (to its dot, then on from where it lands), measured in map units with a step up or down counted
     SHORTCUT_CLIMB times (the dots sit PORTAL_MARK_RISE up); named only when that beats walking straight there by the
     margin (SHORTCUT_MARGIN units unless said). None when no pad does, without the player's dot, and on a map with no
-    pads."""
+    pads. Graph.shortcut_path is that pad alone here, and [] where shortcut is None."""
     kb, _ = world
 
     def pad(name, x, to_x):
@@ -146,23 +146,29 @@ def test_the_shortcut_is_the_pad_that_saves_the_most_walking(world):
                                     "hidden": [pad("near", -650, 200), pad("best", -600, 500), pad("hop", -500, -300)]},
                                    _map(PERION, "Perion", town=True)]})
     _, best, hop = g.hidden_jumps(HENESYS)
-    # 1400 units across: "near" (the first, and next to the player) saves ~765 of them, "best" ~1040
+    # 1400 units across: "near" (the first, and next to the player) saves ~645 of them, "best" ~930
     assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == best
-    # 500 units on: "hop" saves ~165, too few under the margin, enough under a smaller one
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [best]
+    # 500 units on: "hop" saves ~80, too few under the margin, enough under a smaller one
     assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) is None
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=150) == hop
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0)) == []
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=50) == hop
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0), margin=50) == [hop]
     # next to the portal already: every pad is a detour
     assert g.shortcut(HENESYS, _at(400, 0), _at(700, 0)) is None
+    assert g.shortcut_path(HENESYS, _at(400, 0), _at(700, 0)) == []
     assert g.shortcut(HENESYS, None, _at(700, 0)) is None                  # no player dot
+    assert g.shortcut_path(HENESYS, None, _at(700, 0)) == []
     assert g.shortcut(PERION, _at(-700, 0), _at(700, 0)) is None           # no pads
+    assert g.shortcut_path(PERION, _at(-700, 0), _at(700, 0)) == []
 
 
 def test_the_shortcut_is_the_first_pad_of_pads_in_a_row(world, monkeypatch):
-    """Graph.shortcut takes the map's pads in a row: the cheapest way from the player's dot to the next step may be
-    two, the first landing on the second's dot, and the pad named is the first, when the whole way beats walking
-    straight there by the margin even where neither pad alone does. Walking still wins when the way saves less; a pad
-    that leads away is never named, nor any of a map's pads that only lead away, and two pads landing on each other's
-    dots end the search (no pad taken twice; at most SHORTCUT_PADS in a row)."""
+    """Graph.shortcut_path takes the map's pads in a row, in the order they are taken: the cheapest way from the
+    player's dot to the next step may be two, the first landing on the second's dot, and Graph.shortcut is the
+    first of them, when the whole way beats walking straight there by the margin. Walking still wins when the way
+    saves less; a pad that leads away is never named, nor any of a map's pads that only lead away, and two pads
+    landing on each other's dots end the search (no pad taken twice; at most SHORTCUT_PADS in a row)."""
     kb, _ = world
 
     def pad(name, x, to_x, y=0, to_y=0):
@@ -179,26 +185,59 @@ def test_the_shortcut_is_the_first_pad_of_pads_in_a_row(world, monkeypatch):
         # each lands on the other's dot
         {**_map(PERION, "Perion", town=True),
          "hidden": [pad("east", -600, 400, to_y=-50), pad("west", 400, -600, to_y=-50)]}]})
-    _, t001, _ = g.hidden_jumps(HENESYS)
-    # 1400 units across: alone (each on a map of its own) t001 saves ~210 of them and t002 ~230, the two in a row
-    # ~465: t001 is named, not t002 and not "back", the nearest pad
+    _, t001, t002 = g.hidden_jumps(HENESYS)
+    # 1400 units across, at SHORTCUT_CLIMB 5: alone (each on a map of its own) t001 saves ~65 of them and t002
+    # ~170, the two in a row ~345: on Henesys the chain is named, its first pad t001, not t002 and not "back", the
+    # nearest pad; t001 alone saves too little to be named, t002 alone enough
     assert g.shortcut(HG2, _at(-700, 0), _at(700, 0)) is None
-    assert g.shortcut(GARDEN, _at(-700, 0), _at(700, 0)) is None
+    assert g.shortcut_path(HG2, _at(-700, 0), _at(700, 0)) == []
+    assert g.shortcut(GARDEN, _at(-700, 0), _at(700, 0)) == t002
+    assert g.shortcut_path(GARDEN, _at(-700, 0), _at(700, 0)) == [t002]
     assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == t001
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [t001, t002]
     assert g.shortcut(HENESYS, _at(-700, -50), _at(700, 0)) == t001        # on "back"'s dot: t001, behind them
-    # 500 units on: the two in a row save ~265, too few under the margin, enough under a smaller one (t001 alone ~170)
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) is None
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=250) == t001
-    # pads, but every way through them is longer than the walk
+    assert g.shortcut_path(HENESYS, _at(-700, -50), _at(700, 0)) == [t001, t002]
+    # 500 units on: the two in a row save ~145, enough under the margin now, too few under a bigger one
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) == t001
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0)) == [t001, t002]
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=250) is None
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0), margin=250) == []
+    # pads, but every way through them is longer than the walk: a pad that leads away is never named
     assert g.shortcut(HG1, _at(-700, 0), _at(700, 0)) is None
+    assert g.shortcut_path(HG1, _at(-700, 0), _at(700, 0)) == []
     # a loop: each way names its own pad and never goes round; none where going round only brings them back
     east, west = g.hidden_jumps(PERION)
     assert g.shortcut(PERION, _at(-700, 0), _at(700, 0)) == east
+    assert g.shortcut_path(PERION, _at(-700, 0), _at(700, 0)) == [east]
     assert g.shortcut(PERION, _at(700, 0), _at(-700, 0)) == west
+    assert g.shortcut_path(PERION, _at(700, 0), _at(-700, 0)) == [west]
     assert g.shortcut(PERION, _at(-700, 0), _at(-600, 0)) is None
-    # one pad at most: the two in a row are out of reach
+    assert g.shortcut_path(PERION, _at(-700, 0), _at(-600, 0)) == []
+    # one pad at most: the two in a row are out of reach, and t002 alone is the answer instead of the chain
     monkeypatch.setattr(routes, "SHORTCUT_PADS", 1)
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) is None
+    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == t002
+    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [t002]
+
+
+def test_shortcut_is_the_first_of_shortcut_path_in_every_case(world):
+    """Graph.shortcut is Graph.shortcut_path's first pad, or None where the path is [] (walking wins, no pads, no
+    player dot): the one search, asked both ways over the same spots, never two answers."""
+    kb, _ = world
+
+    def pad(name, x, to_x, y=0, to_y=0):
+        return {"name": name, "x": x, "y": y, "to_x": to_x, "to_y": to_y}
+    g = routes.Graph(kb, {"maps": [
+        {**_map(HENESYS, "Henesys", town=True),
+         "hidden": [pad("t001", -650, -350, to_y=-50), pad("t002", -350, -100), pad("hop", -500, -300)]},
+        _map(PERION, "Perion", town=True)]})
+    cases = [(HENESYS, _at(-700, 0), _at(700, 0)), (HENESYS, _at(-700, 0), _at(-200, 0)),
+             (HENESYS, _at(400, 0), _at(700, 0)), (HENESYS, None, _at(700, 0)),
+             (HENESYS, _at(-700, 0), None), (PERION, _at(-700, 0), _at(700, 0))]
+    for mid, you, target in cases:
+        for margin in (routes.SHORTCUT_MARGIN, 50, 250):
+            path = g.shortcut_path(mid, you, target, margin=margin)
+            assert g.shortcut(mid, you, target, margin=margin) == (path[0] if path else None), (mid, you, target, margin)
+            assert len(path) <= routes.SHORTCUT_PADS
 
 
 def _secret(kb):

@@ -2,9 +2,13 @@
 character card says it under the level, and the map windows draw the way from there."""
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Signal
 
 from ..minimap import Here
+
+log = logging.getLogger("maplehelper")
 
 
 class _Location(QObject):
@@ -52,11 +56,22 @@ class _Location(QObject):
     def set_guide(self, guide: tuple | None) -> None:
         if guide != self.guide:
             self.guide = guide
+            if guide is None:
+                log.info("guide: none")
+            else:
+                try:
+                    log.info("guide: %s on %s", guide[2], guide[0])
+                except (TypeError, IndexError, KeyError):
+                    log.info("guide: %s", guide)
             self.guided.emit(guide)
 
     def set_route_dest(self, dest: str | None) -> None:
         if dest != self.route_dest:
             self.route_dest = dest
+            if dest is None:
+                log.info("route: none")
+            else:
+                log.info("route: to %s", dest)
             self.routed.emit(dest)
 
     def set_box(self, box: dict | None) -> None:

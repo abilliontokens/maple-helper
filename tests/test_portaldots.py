@@ -42,11 +42,13 @@ def routed():
 
 @pytest.fixture
 def shortcuts():
-    """The dots' stand-in graph's hidden teleports (routes.Graph.hidden_jumps, Graph.shortcut): `jump`, the shortcut
-    it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets one), unless
-    `toward` has one for the spot it is asked toward (the way's next step's or the guided NPC's: its own pad, or None
-    for none there); and `asked`, each time it was asked, in order: (the player's map, their spot, that spot)."""
-    return SimpleNamespace(jump=None, toward={}, asked=[])
+    """The dots' stand-in graph's hidden teleports (routes.Graph.hidden_jumps, Graph.shortcut_path): `jump`, the
+    shortcut it offers wherever it is asked (None, as on most maps: no hidden teleport cuts the walk; a test sets
+    one), unless `toward` has one for the spot it is asked toward (the way's next step's or the guided NPC's: its
+    own pad, or None for none there); `path`, the chain it offers wherever asked, or `paths` by the spot asked
+    toward, when a test sets a chain of more than one pad (its first pad is then the shortcut too); and `asked`,
+    each time it was asked, in order: (the player's map, their spot, that spot)."""
+    return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[])
 
 
 @pytest.fixture
@@ -78,10 +80,19 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
     def shortcut(mid, you, target, margin=None):
         shortcuts.asked.append((mid, you, target))
         return shortcuts.toward.get(target, shortcuts.jump)
+
+    def shortcut_path(mid, you, target, margin=None):
+        shortcuts.asked.append((mid, you, target))
+        if target in shortcuts.paths:
+            return list(shortcuts.paths[target])
+        if shortcuts.path is not None:
+            return list(shortcuts.path)
+        jump = shortcuts.toward.get(target, shortcuts.jump)
+        return [jump] if jump is not None else []
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
         hidden_jumps=lambda m: [j for j in (shortcuts.jump, *shortcuts.toward.values()) if j is not None],
-        shortcut=shortcut))
+        shortcut=shortcut, shortcut_path=shortcut_path))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -685,6 +696,154 @@ def test_a_hidden_teleport_that_cuts_the_walk_gets_the_arrow_on_its_pad(dots, sh
     s["language"] = "he"                                            # "{name} ⚡": the name first, as Hebrew reads
     w.refresh()
     assert w._tag.rtl and w._tag.text == bidi.LRI + "West Road" + bidi.PDI + " ⚡" and len(shortcuts.asked) == 1
+
+
+def test_a_two_pad_chain_draws_the_arrow_on_the_first_pad_and_a_numbered_marker_on_the_second(dots, shortcuts, caplog):
+    """A cheapest way through two pads in a row (routes.Graph.shortcut_path, the one cached answer the first pad
+    comes from): the route's arrow keeps its pad and its name on the first, and the second pad gets a smaller
+    numbered marker in the same colours, its order number inside it, so the whole chain reads in order on the
+    player's own map. The log says how many pads the chain has."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow and its chain alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
+    second = Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name="t002")     # its pad at (100, 65)
+    shortcuts.path = [first, second]
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_route_dest("020000000")                             # its step at (60, 45), into Bush Road
+        _place(loc, _here())
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5))]     # asked once: no extra routing a frame
+    assert w.isVisible() and w._arrow == QPointF(60, 45) and w._tag.text == "⚡ Bush Road"
+    assert w._arrow_chain == [first, second] and len(w._arrow_marks) == 1
+    assert w._arrow_marks[0].at == QPointF(100, 65) and w._arrow_marks[0].n == 2
+    assert ("route arrow: pointing at a shortcut, the hidden teleport t001 toward Bush Road, the first of 2 pads"
+            in caplog.messages)
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 37)                                      # on the arrow's shaft, 8 px above the first pad
+    assert c.alpha() == 255 and _near(c, portaldots.ARROW_COLORS["orange"][1])
+    m = img.pixelColor(105, 65)                                     # inside the marker, clear of its number
+    assert m.alpha() == 255 and _near(m, portaldots.ARROW_COLORS["orange"][1])
+
+
+def test_a_two_pad_chain_to_the_guided_npc_numbers_its_second_pad_in_green(dots, shortcuts, caplog):
+    """As the route's, for the guided NPC's chain: its arrow on the first pad in green, a numbered green marker on
+    the second, the ring staying on the NPC, and the log saying how many pads the chain has."""
+    import logging
+
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the ring, the NPC's arrow and its chain alone
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    first = Jump(frm=(0.5, 0.5), to=(0.2, 0.8), name="t001")        # its pad at (60, 45)
+    second = Jump(frm=(0.2, 0.8), to=(0.85, 0.85), name="t002")     # its pad at (30, 60)
+    shortcuts.paths = {(0.9, 0.9): [first, second]}
+    _place(loc, _here())
+    with caplog.at_level(logging.INFO, logger="maplehelper"):
+        loc.set_guide(("010003000", (0.9, 0.9), "npc/1012100"))     # Athena Pierce, at (100, 65)
+    assert w._npc_arrow == QPointF(60, 45) and w._ring == QPointF(100, 65)
+    assert w._npc_chain == [first, second] and len(w._npc_marks) == 1
+    assert w._npc_marks[0].at == QPointF(30, 60) and w._npc_marks[0].n == 2
+    assert ("npc arrow: pointing at a shortcut, the hidden teleport t001 toward Athena Pierce, the first of 2 pads"
+            in caplog.messages)
+    m = w.grab().toImage().pixelColor(35, 60)                       # inside the marker, clear of its number
+    assert m.alpha() == 255 and _near(m, portaldots.RING_FILL.name())
+
+
+def test_a_one_pad_answer_draws_no_numbers(dots, shortcuts):
+    """A chain of one pad is the shortcut as ever: the arrow on it, its name beside it, and no numbered markers."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    shortcuts.jump = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    assert w._arrow == QPointF(60, 45) and w._arrow_chain == [shortcuts.jump]
+    assert w._arrow_marks == [] and w._npc_marks == []
+
+
+def test_a_second_pad_off_the_part_shown_or_under_the_name_pill_is_skipped(dots, shortcuts):
+    """A later pad is drawn only where the minimap shows it: one off the part shown gets no marker, and neither
+    does one the arrow's name pill would cover (the pill already names the way; a number under it is clutter). At
+    most CHAIN_MARKS_MAX pads are marked in all, however long a chain a graph hands back."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import Here, View
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45), in the part shown
+    off = Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name="t002")        # its pad at (100, 65), off a panel ending at 80
+    shortcuts.path = [first, off]
+    loc.set_route_dest("020000000")
+    _place(loc, Here("010003000", (0.3, 0.3), View(10, 20, 100, 50, (0, 0, 80, 200))))
+    assert w._arrow == QPointF(60, 45) and w._arrow_marks == []     # the second pad skipped, the arrow as ever
+    under = Jump(frm=(0.5, 0.1), to=(0.85, 0.85), name="t002")      # its pad at (60, 25), under the name's pill
+    shortcuts.path = [first, under]
+    w._arrow_chain, w._jump_cell = [], None                         # asked anew, as a new way's chain would be
+    _place(loc, _here())                                            # the whole picture shown, its pill placed
+    w.refresh()                                                     # forced: LOCATION only emits on change
+    assert w._tag is not None and w._arrow_marks == []
+    many = [first] + [Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name=f"t00{n}") for n in range(2, 7)]
+    shortcuts.path = many
+    w._arrow_chain, w._jump_cell = [], None
+    _place(loc, _here())                                            # the whole picture shown again (an unchanged read)
+    w.refresh()                                                     # forced: LOCATION only emits on change
+    assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5))] * 3     # every case's chain actually asked
+    assert [m.n for m in w._arrow_marks] == [2, 3, 4][:portaldots.CHAIN_MARKS_MAX - 1]
+
+
+def test_the_chain_markers_blink_with_the_arrow_and_go_with_its_settings(dots, shortcuts):
+    """The numbered markers are the arrow's: a flash beat that hides the arrow hides them too, the Hidden teleport
+    routes switch off takes them with the pad (the arrow back on its step), and _clear resets them."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.routes import Jump
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["route_hidden_teleports"] = True
+    s["language"] = "en"
+    first = Jump(frm=(0.2, 0.2), to=(0.85, 0.85), name="t001")      # its pad at (30, 30)
+    second = Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name="t002")     # its pad at (100, 65)
+    shortcuts.path = [first, second]
+    loc.set_route_dest("020000000")                                 # its step at (60, 45)
+    _place(loc, _here())
+
+    def drawn() -> tuple[bool, bool]:
+        img = w.grab().toImage()
+        return img.pixelColor(30, 22).alpha() > 0, img.pixelColor(105, 65).alpha() > 0    # shaft; marker's fill
+    assert w._arrow == QPointF(30, 30) and [m.n for m in w._arrow_marks] == [2] and drawn() == (True, True)
+    s["minimap_arrow_flash"] = True
+    w.refresh()
+    w._flash_timer.timeout.emit()                                 # a beat: both hidden
+    assert not w._flash_on and drawn() == (False, False)
+    w._flash_timer.timeout.emit()                                 # the next: both shown again
+    assert w._flash_on and drawn() == (True, True)
+    s["route_hidden_teleports"] = False                             # the switch off: no pad, no numbers
+    w.refresh()
+    assert w._arrow == QPointF(60, 45) and w._arrow_marks == [] and drawn() == (True, False)
+    s["route_hidden_teleports"] = True
+    w.refresh()
+    assert w._arrow == QPointF(30, 30) and [m.n for m in w._arrow_marks] == [2]
+    w._clear()                                                      # reset with everything else it places
+    assert not w.isVisible() and w._arrow_marks == [] and w._npc_marks == []
 
 
 def test_with_hidden_teleport_routes_off_the_arrow_never_takes_a_pad(dots, shortcuts):
