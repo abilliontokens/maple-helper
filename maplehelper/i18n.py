@@ -2490,6 +2490,7 @@ STRINGS = {
     "tbs_opacity": {"he": "אטימות הזכוכית", "en": "Glass opacity"},
     "tbs_bar": {"he": "הסרגל", "en": "Toolbar"},
     "tbs_way": {"he": "איך מגיעים", "en": "Directions"},
+    "tbs_minimap": {"he": "מיני-מפה", "en": "Minimap"},
     "tbs_reset": {"he": "חזרה למראה ברירת המחדל", "en": "Reset to default look"},
     "tbs_tint_dark": {"he": "כהה", "en": "Dark"},
     "tbs_tint_midnight": {"he": "כחול חצות", "en": "Midnight blue"},

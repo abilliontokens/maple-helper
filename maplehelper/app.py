@@ -234,6 +234,7 @@ class MapleHelperApp:
         self.npc_overlay.closed.connect(self.game_toolbar.refresh)
         self.game_toolbar.search_requested.connect(self._open_game_search)
         self.game_toolbar.rides_toggled.connect(self._game_rides_toggled)
+        self.game_toolbar.minimap_toggled.connect(self._minimap_toggled)        # its ⚙ panel's Minimap switches
         self.game_toolbar.look_changed.connect(self._overlay_look_changed)
         self.game_toolbar.closed.connect(self._game_toolbar_closed)            # its ✕: how to bring it back
         self.game_toolbar.hotkey_changed.connect(self._toolbar_hotkey_changed)  # its ⚙ panel's key box
@@ -451,6 +452,21 @@ class MapleHelperApp:
         dots = getattr(self, "portal_dots", None)
         if dots is not None:
             dots.refresh()          # the route's arrow on the game's minimap points along the new way
+
+    def _minimap_toggled(self) -> None:
+        """The toolbar's ⚙ panel's Minimap switches (the hidden portals, the route arrow, the overlays in screenshots):
+        the dots and the arrow on the game's minimap, every window over the game in screen captures or out of them, and
+        the pickers' Guide me there button (the search's page, the ◎ window) follow at once."""
+        dots = getattr(self, "portal_dots", None)
+        if dots is not None:
+            dots.refresh()          # the hidden-portal dots and the route's arrow switched on or off
+        self._apply_overlay_capture()
+        search = getattr(self, "game_search", None)
+        if search is not None:
+            search.rides_changed()  # the page shown drawn again: its Guide me there button only with the arrow on
+        where = self.__dict__.get("_windows", {}).get("map")
+        if where is not None and where.isVisible() and where.key:
+            where.show_map(where.key)   # ... and in the ◎ window
 
     def _grind_toggled(self) -> None:
         """The toolbar's Grind button (or the bar's own Hide) flipped settings["grind_bar"]: the bar shows or hides,
@@ -1123,18 +1139,15 @@ class MapleHelperApp:
         scanner = getattr(self, "minimap_scanner", None)
         if scanner is not None:
             scanner.restart()       # the scan interval (or nothing) changed: pick it up, no restart needed
-        dots = getattr(self, "portal_dots", None)
-        if dots is not None:
-            dots.refresh()          # the hidden-portal dots switched on or off
         from .ui import npcoverlay
         npcoverlay.apply_look(self.settings)     # the tint every window's glass paints, before they repaint
         self._overlay_look_changed()
 
     def _overlay_look_changed(self) -> None:
         """Every window over the game at the colours, icons and transparency the settings give now, not on the
-        next restart: the ⚙ panel's choices land here (look_changed), and so does a Save in Settings (the bar or
-        the screenshots switch). Each window re-reads the opacity, re-styles its own lit buttons in the accent, and
-        repaints its glass in the tint _paint_glass takes (the NPCs window's guide and the search's page window too)."""
+        next restart: the ⚙ panel's choices land here (look_changed), and so does a Save in Settings (the bar's
+        switch). Each window re-reads the opacity, re-styles its own lit buttons in the accent, and repaints its glass
+        in the tint _paint_glass takes (the NPCs window's guide and the search's page window too)."""
         npc = getattr(self, "npc_overlay", None)
         if npc is not None:
             npc.refresh()          # the NPCs-on-this-map window switched on or off
@@ -1160,16 +1173,17 @@ class MapleHelperApp:
                 self.grind_window.refresh()
         for w in self.__dict__.get("_tool_windows", {}).values():
             w.refresh()            # each Tools card window at the windows' look and opacity
-        self._apply_overlay_capture()
 
     def _apply_overlay_capture(self) -> None:
-        """Settings' "Show the overlays in screenshots": every window over the game that exists takes it now (each
-        also takes it whenever it shows), not on the next restart."""
+        """The ⚙ panel's "Show the overlays in screenshots" (_minimap_toggled): every window over the game that exists
+        takes it now (each also takes it whenever it shows), not on the next restart."""
         from .ui.npcoverlay import set_capturable
         search = getattr(self, "game_search", None)
         npc = getattr(self, "npc_overlay", None)
+        game = getattr(self, "game_toolbar", None)
         for w in (getattr(self, "portal_dots", None), npc, getattr(npc, "_guide", None),
-                  getattr(self, "game_toolbar", None), search, getattr(search, "_detail", None),
+                  # the bar and its ⚙ panel, up while the player flips the switch in it
+                  game, getattr(game, "_panel", None), search, getattr(search, "_detail", None),
                   getattr(self, "loot_overlay", None), getattr(self, "grind_bar", None),
                   getattr(self, "grind_window", None), *self.__dict__.get("_tool_windows", {}).values(),
                   # the crafting advisor's Forge plan window beside it

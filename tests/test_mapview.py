@@ -321,9 +321,10 @@ def test_the_window_shows_the_way_from_the_live_map(tiny, isolated_store):
 
 
 def test_guide_me_there_picks_the_ways_map_for_the_route_arrow_and_stop_lets_it_go(tiny, isolated_store):
-    """Perion's ◎ with the player on Henesys: "Guide me there" under the way picks Perion for the game minimap's
-    route arrow (LOCATION.route_dest), the button then "Stop the route arrow", which lets it go; a pick on the
-    search's map page shows here too. No button with ⚙'s route arrow off, or once the player is on Perion."""
+    """Perion's ◎ with the player on Henesys: "Guide me there", over the way's first step (no scrolling past the
+    steps' pictures to reach it), picks Perion for the game minimap's route arrow (LOCATION.route_dest), the button
+    then "Stop the route arrow", which lets it go; a pick on the search's map page shows here too. No button with
+    ⚙'s route arrow off, or once the player is on Perion."""
     kb, _ = tiny
     settings = isolated_store.Settings()
     old = LOCATION.route_dest
@@ -335,8 +336,11 @@ def test_guide_me_there_picks_the_ways_map_for_the_route_arrow_and_stop_lets_it_
         d.show_map(f"map/{PERION}")
         app.processEvents()
         assert d.route_btn is not None and d.route_btn.text() == "Guide me there"
+        assert d.lay.indexOf(d.route_btn) == 0                # the body's first piece: seen without scrolling
+        assert d.lay.itemAt(1).widget().findChild(QLabel, "TagAccent").text() == "1"     # right over the first step
         d.route_btn.click()
         assert LOCATION.route_dest == PERION and d.route_btn.text() == "Stop the route arrow"
+        assert d.lay.indexOf(d.route_btn) == 0                # shown again (_on_routed): still on top
         d.route_btn.click()
         assert LOCATION.route_dest is None and d.route_btn.text() == "Guide me there"
         LOCATION.set_route_dest(PERION)                       # picked on the search's map page: the button follows

@@ -385,7 +385,7 @@ def test_settings_keeps_the_bars_switch_and_key_and_leaves_its_look_to_the_bar(a
     assert dlg.toolbar_hotkey.key() == app.settings["game_toolbar_hotkey"]
     app.settings["overlay_tint"], app.settings["npc_overlay"], app.settings["npc_overlay_opacity"] = "wine", True, 0.5
     app.settings["game_toolbar_icons"], app.settings["overlay_accent"] = True, "teal"
-    dlg.hidden_portals.setChecked(not dlg.hidden_portals.isChecked())
+    dlg.instant.setChecked(not dlg.instant.isChecked())     # a change of Settings' own to save
     dlg._save()
     assert (app.settings["overlay_tint"], app.settings["npc_overlay"], app.settings["npc_overlay_opacity"],
             app.settings["game_toolbar_icons"], app.settings["overlay_accent"]) == ("wine", True, 0.5, True, "teal")

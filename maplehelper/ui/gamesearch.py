@@ -734,7 +734,7 @@ class DetailWindow(EdgeResize, QWidget):
     and chips, a muted line — over its titled blocks. Its views are a history — a row's click pushes one, ‹ Back
     pops, a new search click starts it over. While it shows an NPC on the player's map it guides them: the sentence
     and the picture's blue dot follow the player, and the game's own minimap rings the spot (LOCATION.guide). The way
-    to another map ends in "Guide me there" (Settings' route arrow on): the game minimap's arrow along it (LOCATION.route_dest).
+    to another map starts with "Guide me there" (toolbar panel's route arrow on): the game minimap's arrow along it (LOCATION.route_dest).
     Its edges resize it (EdgeResize): the size the player drags it to is kept (game_detail_size) and its pictures
     follow the width; until then it is DETAIL_W wide and as tall as its page, up to DETAIL_H."""
 
@@ -1140,8 +1140,9 @@ class DetailWindow(EdgeResize, QWidget):
         the step's number and map, what to do there, and the map's picture with the portal (orange) or the NPC
         (green) marked, the player's blue dot on the first; already there, no way known, or their map not read
         yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"]).
-        Under the steps, while Settings has the minimap's route arrow on (settings["minimap_route_arrow"]), the button that
-        points it along this way (_route_button)."""
+        While the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), the button that
+        points it along this way (_route_button) heads it, under its title and over the steps: never a scroll away
+        below a long way's pictures."""
         o = self._owner
         t = o.t
         here = LOCATION.here
@@ -1155,6 +1156,8 @@ class DetailWindow(EdgeResize, QWidget):
             block.add(self._note(t("lk_here")))
         else:
             g = routes.of(o._kb)
+            if o._settings["minimap_route_arrow"]:
+                self._route_button(block, g, to_map)
             for i, leg in enumerate(way.legs, 1):
                 w = QLabel(objectName="StepMap")
                 w.setText(bidi.plain(f"{i} · {bidi.ltr_block(self._map_name(g, leg.frm), t.rtl)}", t.rtl))
@@ -1165,15 +1168,14 @@ class DetailWindow(EdgeResize, QWidget):
                 pic = self._picture_label(g.minimap(leg.frm), leg.spot, leg.kind != "portal", you, 2 * BLOCK_PAD)
                 if pic is not None:
                     block.add(pic)
-            if o._settings["minimap_route_arrow"]:
-                self._route_button(block, g, to_map)
         self._add(block)
 
     def _route_button(self, block: _Block, g, to_map: str) -> None:
-        """The way's last row: "Guide me there", which has the game's minimap point its orange route arrow at each
-        next step to this map (LOCATION.route_dest, ui/portaldots.py); while it already does, a muted line saying so
-        over "Stop the route arrow", which lets it go. A click needs no redraw of its own: the pick is LOCATION.routed,
-        which draws the page again (_moved), so the button always says what a click does now."""
+        """Heads the way, under its title and over the steps, so it needs no scrolling however long the way: "Guide
+        me there", which has the game's minimap point its orange route arrow at each next step to this map
+        (LOCATION.route_dest, ui/portaldots.py); while it already does, a muted line saying so over "Stop the route
+        arrow", which lets it go. A click needs no redraw of its own: the pick is LOCATION.routed, which draws the
+        page again (_moved), so the button always says what a click does now."""
         t = self._owner.t
         guiding = LOCATION.route_dest == to_map
         if guiding:

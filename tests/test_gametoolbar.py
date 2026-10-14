@@ -4,7 +4,8 @@ on the button that opened it, the ✕ turning the bar off (and saying so, for th
 and its place on the screen — above the minimap's box (LOCATION.box) and with it, at the saved spot, and the spot
 kept after a drag. Its width is the player's too: the buttons wrap into as many rows as the width leaves room for.
 Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
-tint, the accent, the transparency, icons instead of words, the bar's key, Reset) are written and followed live."""
+tint, the accent, the transparency, icons instead of words, the bar's key, the Minimap switches, Reset) are written
+and followed live."""
 import os
 
 import pytest
@@ -695,6 +696,36 @@ def test_a_panel_choice_signals_the_app_to_restyle_every_window(bar):
     w._gear.click()
     w._panel._pick_accent("teal")
     assert seen == [True]
+
+
+def test_the_minimap_switches_are_in_the_gear_panel_and_signal_the_app(bar):
+    """The ⚙ panel's Minimap section (Settings had these): the hidden portals' dots and the route's arrow on at first,
+    the overlays in screenshots off. Each click writes its setting and says so with the bar's minimap_toggled (the app
+    redraws the dots, the windows' captures and the pickers' pages); a setting changed elsewhere is back on its switch
+    at the next refresh."""
+    w, s = bar
+    seen = []
+    w.minimap_toggled.connect(lambda: seen.append((s["minimap_hidden_portals"], s["minimap_route_arrow"],
+                                                   s["overlays_in_screenshots"])))
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    switches = (p._hidden_portals, p._route_arrow, p._overlay_shots)
+    names = ["Hidden portals on the minimap", "Route arrow on the minimap", "Show the overlays in screenshots"]
+    assert p._minimap_head.text() == "MINIMAP"
+    assert [p._hidden_portals_label.text(), p._route_arrow_label.text(), p._overlay_shots_label.text()] == names
+    assert [b.accessibleName() for b in switches] == names
+    assert [b.isChecked() for b in switches] == [True, True, False]
+    p._hidden_portals.click()
+    assert s["minimap_hidden_portals"] is False and seen == [(False, True, False)]
+    p._route_arrow.click()
+    assert s["minimap_route_arrow"] is False and seen == [(False, True, False), (False, False, False)]
+    p._overlay_shots.click()
+    assert s["overlays_in_screenshots"] is True and seen == [(False, True, False), (False, False, False),
+                                                             (False, False, True)]
+    s["minimap_hidden_portals"], s["minimap_route_arrow"], s["overlays_in_screenshots"] = True, True, False
+    w.refresh()                         # changed elsewhere: each switch follows
+    assert [b.isChecked() for b in switches] == [True, True, False]
 
 
 def test_the_default_look_is_todays(bar):

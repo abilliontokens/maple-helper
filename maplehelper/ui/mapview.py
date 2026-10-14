@@ -412,7 +412,7 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         self._way: WayFromHere | None = None
         self._first = None                    # (picture, map, leg|None, npc spot|None) of the first card
         self._legend = None                   # the first card's legend of the dots (MapLegend)
-        self.route_btn: QPushButton | None = None    # "Guide me there" / "Stop the route arrow" under a way
+        self.route_btn: QPushButton | None = None    # "Guide me there" / "Stop the route arrow" heading a way
         outer = QVBoxLayout(self.content)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll = scroll = QScrollArea()
@@ -492,8 +492,9 @@ class MapLocationDialog(EdgeResize, GlassDialog):
 
     def show_map(self, key: str) -> None:
         """Where a map, an NPC or a quest's NPCs are (one window: a second ◎ shows its thing here instead of opening
-        another). With the player's live map known, the way from there instead of the generic ways in, and under it,
-        while Settings has the minimap's route arrow on (settings["minimap_route_arrow"]), Guide me there (_route_button)."""
+        another). With the player's live map known, the way from there instead of the generic ways in; over its first
+        step, while the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]), Guide me
+        there (_route_button), seen without scrolling."""
         t, rtl, g = self.t, self.t.rtl, routes.of(self.kb)
         self.key = key
         self._shown_cap = self._picture_cap()     # the width the new cards' pictures draw at
@@ -525,6 +526,8 @@ class MapLocationDialog(EdgeResize, GlassDialog):
             if not way.route.legs:
                 self.lay.addWidget(self._here_card(g, way, you))
             else:
+                if self.settings is None or self.settings["minimap_route_arrow"]:    # no settings (a test): on
+                    self._route_button(way.dest)
                 for i, leg in enumerate(way.route.legs, 1):
                     self.lay.addWidget(self._route_card(g, str(i), leg.frm, leg, you if i == 1 else None, i == 1))
                 role = None
@@ -537,8 +540,6 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                         role = spot.role
                         self.lay.addWidget(QLabel(bidi.plain(t(role), rtl), objectName="ToolHeader"))
                     self.lay.addWidget(self._card(g, spot))
-                if self.settings is None or self.settings["minimap_route_arrow"]:    # no settings (a test): on
-                    self._route_button(way.dest)
         self.lay.addStretch(1)
         self._fit_height()
 
@@ -691,10 +692,10 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         return card
 
     def _route_button(self, dest: str) -> None:
-        """Under the way: "Guide me there", which has the game's minimap point its orange route arrow at each next
-        step to this map (LOCATION.route_dest, ui/portaldots.py), or "Stop the route arrow" while it already does,
-        which lets it go. A click needs no rebuild of its own: the pick is LOCATION.routed, which shows the way
-        again (_on_routed)."""
+        """Heading the way, over its first step's card, so it needs no scrolling however long the way: "Guide me
+        there", which has the game's minimap point its orange route arrow at each next step to this map
+        (LOCATION.route_dest, ui/portaldots.py), or "Stop the route arrow" while it already does, which lets it go. A
+        click needs no rebuild of its own: the pick is LOCATION.routed, which shows the way again (_on_routed)."""
         t = self.t
         said = "route_arrow_stop" if LOCATION.route_dest == dest else "route_arrow_pick"
         btn = QPushButton(bidi.button(t(said), t.rtl), objectName="Secondary")

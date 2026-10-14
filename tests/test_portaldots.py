@@ -1,6 +1,6 @@
 """The hidden-portal dots and the route's arrow over the game's minimap (ui/portaldots.py): placed from each minimap
 read's view over the minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or their
-setting is off; and the dots' Settings switch."""
+setting is off; and the dots' switch, gone from Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -334,7 +334,10 @@ def test_the_arrows_way_is_routed_once_not_on_every_follow_frame(dots, routed, k
     assert w._arrow == QPointF(10, 20) and routed[4:] == [("010003001", "050000000", True, True)]
 
 
-def test_the_switch_is_on_by_default_and_saves(qapp, isolated_store, kb, monkeypatch):
+def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isolated_store, kb, monkeypatch):
+    """The dots are on by default, and their switch is the bar's ⚙ panel's (its Minimap section, beside the route's
+    arrow and the overlays in screenshots), which applies at once: Settings keeps none of the three, so its Save
+    never puts back what the panel picked meanwhile."""
     from maplehelper import providers
     from maplehelper.ui.dialogs import SettingsDialog
     for name in ("claude", "codex"):
@@ -347,9 +350,10 @@ def test_the_switch_is_on_by_default_and_saves(qapp, isolated_store, kb, monkeyp
     assert s["minimap_hidden_portals"] is True
     dlg = SettingsDialog(s, isolated_store.Profiles(), kb, lambda *_: "")
     try:
-        assert dlg.hidden_portals.isChecked() and not dlg.unsaved()
-        dlg.hidden_portals.setChecked(False)
-        assert dlg.unsaved()
+        for gone in ("hidden_portals", "route_arrow", "overlay_shots"):
+            assert not hasattr(dlg, gone), gone
+        s["minimap_hidden_portals"] = False                         # turned off in the panel, Settings still open
+        assert not dlg.unsaved()
         dlg._save()
         assert s["minimap_hidden_portals"] is False
     finally:

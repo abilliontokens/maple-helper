@@ -1270,10 +1270,11 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         sec.add_row(t("instant_answers"), self.instant, hint=t.p("instant_answers_hint", settings["provider"]))
         lay.addWidget(sec)
 
-        # the minimap: how often its box is read (where the player is, under the level on the character card), the
-        # hidden-portal dots drawn over it, and the bar over the game with the key that shows or hides it. The bar's
-        # look and its windows (their colours, transparency, icons, the NPCs-here window) live in the bar itself and
-        # its ⚙ panel, which apply at once: here, a window open meanwhile would have put back the old ones on Save
+        # the minimap: how often its box is read (where the player is, under the level on the character card), and the
+        # bar over the game with the key that shows or hides it. The bar's look and its windows (their colours,
+        # transparency, icons, the NPCs-here window) live in the bar itself and its ⚙ panel, and so do the
+        # hidden-portal dots, the route's arrow and the overlays in screenshots (the panel's Minimap section). They
+        # apply at once there, and moved out of here so a window open meanwhile can't put back the old ones on Save
         sec = Section(t("sec_minimap"), rtl)
         # (a few set choices in the app's own pop-up: a bare number box with arrows didn't match anything else)
         try:
@@ -1289,17 +1290,11 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
                                              "scan_every_10")])   # (SCAN_CHOICES, in order)
         self.scan.setCurrentIndex(SCAN_CHOICES.index(scan_value))
         sec.add_row(t("minimap_scan_interval"), self.scan, hint=t("minimap_scan_hint"), hint_below=True)
-        self.hidden_portals = Switch(settings["minimap_hidden_portals"])
-        sec.add_row(t("minimap_hidden_portals"), self.hidden_portals, hint=t("minimap_hidden_portals_hint"))
-        self.route_arrow = Switch(settings["minimap_route_arrow"])
-        sec.add_row(t("minimap_route_arrow"), self.route_arrow, hint=t("minimap_route_arrow_hint"))
         self.game_toolbar = Switch(settings["game_toolbar"])
         sec.add_row(t("game_toolbar"), self.game_toolbar, hint=t("game_toolbar_hint"))
         # the key that shows or hides the bar from any program (the bar's ✕ toast and the tray item name it too)
         self.toolbar_hotkey = HotkeyBox(settings["game_toolbar_hotkey"], t)
         sec.add_row(t("tb_hotkey"), self.toolbar_hotkey, hint=t("tb_hotkey_hint"), hint_below=True)
-        self.overlay_shots = Switch(settings["overlays_in_screenshots"])
-        sec.add_row(t("overlays_in_screenshots"), self.overlay_shots, hint=t("overlays_in_screenshots_hint"))
         lay.addWidget(sec)
 
         # AI account: the provider and the model wait for Save like every other setting ("Don't save" kept a
@@ -2103,11 +2098,8 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
             "voice_language": self.voice_lang.value(),
             "instant_answers": self.instant.isChecked(),
             "minimap_scan_interval": SCAN_CHOICES[max(0, self.scan.currentIndex())],
-            "minimap_hidden_portals": self.hidden_portals.isChecked(),
-            "minimap_route_arrow": self.route_arrow.isChecked(),
             "game_toolbar": self.game_toolbar.isChecked(),
             "game_toolbar_hotkey": self.toolbar_hotkey.key(),
-            "overlays_in_screenshots": self.overlay_shots.isChecked(),
             "saver_mode": self.saver.isChecked(),
             "answer_length": self.length.value(),
             "start_with_windows": self.autostart.isChecked(),
