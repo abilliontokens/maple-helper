@@ -3,9 +3,9 @@ and where a monster lives, and its life as a window — opened in a mode (the sa
 as the player types (each row its picture, its tag chips, its muted line, a price on its end; every search
 listed before anything is typed, Safe to sell?'s switch narrowing it), a click opening the thing's own
 page in the detail window beside it (a header card over titled blocks — an NPC: where it stands and the way there;
-a monster: its maps; an item: who drops and sells it; a map: its monsters; Safe to sell?: the verdict and what
-needs it), the history those pages push gone back through, the accent lighting the open page's row, and the
-place on the screen the search is kept in."""
+a monster: its maps; an item: which quest gives it and who drops and sells it; a map: its monsters; Safe to
+sell?: the verdict and what needs it), the history those pages push gone back through, the accent lighting the
+open page's row, and the place on the screen the search is kept in."""
 import os
 import time
 from pathlib import Path
@@ -499,6 +499,66 @@ def test_an_item_nothing_drops_or_sells_says_so(win, qapp, clean_location, graph
     pump(qapp, 200)
     win._rows[0].clicked.emit()
     assert _texts(win._detail) == ["No known drops or shops"]     # the fixture KB gives Red Potion no type line
+
+
+def _rewards(monkeypatch, rows, quests=()):
+    """The KB's rewards (and quests) tables answered with these rows, every other table read as it really is."""
+    from maplehelper import tables
+    real = tables.rows
+    tables_by_name = {"rewards": list(rows), "quests": list(quests)}
+    monkeypatch.setattr(tables, "rows", lambda kb, name, build=True: (
+        tables_by_name[name] if name in tables_by_name else real(kb, name, build=build)))
+
+
+def test_an_item_a_quest_gives_lists_that_quest_on_its_page(win, qapp, clean_location, graph, monkeypatch):
+    """"Where do I get this?" answered by a quest: the quests that hand the item over (rewards.tsv's "sure" rows —
+    Arcon's Blood comes from no monster and no shop), each with its NPC and its level, a click opening it in the
+    Quests window. A quest the KB doesn't count as open is no source, and one of a roll isn't a sure one."""
+    from types import SimpleNamespace
+
+    from maplehelper import availability, gamelookup
+    from maplehelper.ui.toolwindow import NAV
+    monkeypatch.setattr(gamelookup, "item_sources", lambda kb, key: ([], []))
+    monkeypatch.setattr(availability, "of",
+                        lambda kb: SimpleNamespace(quest_open=lambda k: k != "quest/404"))
+    _rewards(monkeypatch,
+             [{"quest": "Arcon's Blood?", "quest_level": 21, "quest_key": "quest/10109",
+               "item_key": "item/2000000", "kind": "sure", "count": 1},
+              {"quest": "Closed Business", "quest_level": 30, "quest_key": "quest/404",
+               "item_key": "item/2000000", "kind": "sure", "count": 1},      # not in the game: never a source
+              {"quest": "Lucky Roll", "quest_level": 5, "quest_key": "quest/10200",
+               "item_key": "item/2000000", "kind": "random", "count": 1},    # a roll, not what it always gives
+              {"quest": "Someone Else's", "quest_level": 9, "quest_key": "quest/10300",
+               "item_key": "item/999", "kind": "sure", "count": 1}],
+             [{"key": "quest/10109", "npc": "Manji"}])
+    win.open("item")
+    win._box.setText("red")
+    pump(qapp, 200)
+    win._rows[0].clicked.emit()
+    d = win._detail
+    assert _texts(d) == ["Quest reward"]           # its own titled block, where no drop and no shop has it
+    assert [(_seen(r), r.toolTip()) for r in _links(d)] == [
+        (("Arcon's Blood?", ["Lv. 21"], "Manji", "", ""), "Click to open this quest in the Quests window")]
+    asked = []
+    NAV.tool_requested.connect(lambda key, arg: asked.append((key, arg)))
+    try:
+        _links(d)[0].clicked.emit()                # the row opens that quest
+    finally:
+        NAV.tool_requested.disconnect()
+    assert asked == [("quest_tool", "quest/10109")]
+
+
+def test_an_item_no_quest_gives_lists_nothing_extra(win, qapp, clean_location, graph, monkeypatch):
+    from maplehelper import gamelookup
+    monkeypatch.setattr(gamelookup, "item_sources", lambda kb, key: ([], []))
+    _rewards(monkeypatch, [{"quest": "Someone Else's", "quest_level": 9, "quest_key": "quest/10300",
+                            "item_key": "item/999", "kind": "sure", "count": 1}])
+    win.open("item")
+    win._box.setText("red")
+    pump(qapp, 200)
+    win._rows[0].clicked.emit()
+    assert _texts(win._detail) == ["No known drops or shops"]
+    assert _links(win._detail) == []
 
 
 def test_a_tradeable_items_page_links_to_its_free_market_prices(win, qapp, kb, clean_location, graph, monkeypatch):

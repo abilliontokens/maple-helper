@@ -3,9 +3,9 @@ and its count, 40 cards at a time, a level's chip; the search through every ques
 (a Citizenship one: its own window); Mark done / Back to the list saved, and the offer to mark a step's earlier
 steps; a card's chain strip opening its line, a step opening its quest; the Chains tab, started lines first with the
 next step's card; what a card says (prerequisites a tap away, Fame and fee, gender rewards, droppers' levels in the
-UI's words); daily quests back on open; Hebrew mirrored; and the lists the window reads (quests.for_level and the
-parse under it). Ported from the old Play tools' quest tests (test_followup, test_play_tools, test_tools_windows,
-test_ui_wording, test_farm)."""
+UI's words, the quest that hands a needed item over); daily quests back on open; Hebrew mirrored; and the lists the
+window reads (quests.for_level and the parse under it). Ported from the old Play tools' quest tests (test_followup,
+test_play_tools, test_tools_windows, test_ui_wording, test_farm)."""
 import re
 import time
 import warnings
@@ -24,6 +24,8 @@ REAL_KB = Path(__file__).resolve().parent.parent / "data" / "kb"
 needs_kb = pytest.mark.skipif(not (REAL_KB / "index.json").exists(), reason="no real knowledge base")
 LEVEL = 30
 MAYA, DELIVERING, FIRST, SECOND = "quest/10106", "quest/10112", "quest/10115", "quest/10116"
+# "Getting Arcon's Blood" asks for Arcon's Blood x 1; only "Arcon's Blood?" (Manji) hands it over
+BLOOD_ASKS, BLOOD_GIVES, BLOOD, POTION = "quest/10110", "quest/10109", "item/448", "item/273"
 MARKS = dict.fromkeys(map(ord, "\u2066\u2067\u2069\u200e\u200f\u202a\u202b\u202c\ufffc"), None) | {0xa0: " "}
 
 
@@ -361,6 +363,37 @@ def test_droppers_say_the_level_in_the_uis_words(qapp, real_kb, settings, profil
     if lang == "he":
         assert "Lv" not in text
     w.deleteLater()
+
+
+@needs_kb
+def test_an_item_only_a_quest_gives_names_that_quest_and_opens_it(make, real_kb):
+    """The owner hunted Arcon's Blood as a drop: nothing drops it, "Arcon's Blood?" hands it over (QUEST-01)."""
+    from maplehelper.ui.questcard import QuestCard
+    w = make()
+    card = QuestCard(w, quests.quest(real_kb, BLOOD_ASKS))
+    text = plain(card._droppers.text())
+    assert "Arcon's Blood?" in text and "Manji" in text and "You get it from the quest" in text
+    card._droppers.linkActivated.emit(f"quest:{quote(BLOOD_GIVES)}")
+    assert lit(w) == [BLOOD_GIVES]
+
+
+@needs_kb
+def test_a_plain_drop_says_nothing_about_quests(make, real_kb):
+    """Squishy Liquid is a drop: the item keeps its droppers and gets no quest line, and no empty row either."""
+    from maplehelper.ui.questcard import QuestCard
+    w = make()
+    card = QuestCard(w, quests.Quest("quest/x", "Test", 10, needs=["Squishy Liquid x 30"]))
+    text = plain(card._droppers.text())
+    assert "Squishy Liquid" in text and "quest" not in text.lower()
+    assert not quests.item_givers(real_kb, "item/353", BLOOD_ASKS)
+
+
+@needs_kb
+def test_the_giver_on_the_same_line_comes_first(real_kb):
+    """Dozens of quests hand out Blue Potion; the one named is the step of this quest's own line."""
+    givers = quests.item_givers(real_kb, POTION, BLOOD_ASKS)
+    assert len(givers) > 1 and givers[0] == BLOOD_GIVES and BLOOD_ASKS not in givers
+    assert quests.item_givers(real_kb, BLOOD, BLOOD_ASKS) == [BLOOD_GIVES]
 
 
 @needs_kb

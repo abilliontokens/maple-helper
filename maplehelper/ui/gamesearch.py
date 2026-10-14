@@ -4,10 +4,10 @@ an equip's or a map's levels) and a muted line under it (HP and EXP, the NPC's r
 street), an item's NPC price on the end. A click opens the thing's own page in the detail window docked beside the
 search, the row lit in the accent while it shows: a header card with a larger picture, the name and its chips, then
 titled blocks — an NPC: where it stands and the way there; a monster: where it lives and the active character's Hit &
-damage on it (hit chance, ACC, damage, hits and kills; combat.matchup); an item: who drops and who sells it; a map:
-the way there and its monsters — with a way back through what was opened. Every search lists its
-first rows before anything is typed (the monsters by level, then the NPCs; the maps and items by name); Safe to sell?
-lists the items, the ones a current quest or recipe still needs first (NiaMeowDB's list,
+damage on it (hit chance, ACC, damage, hits and kills; combat.matchup); an item: which quest gives it, who drops
+and who sells it; a map: the way there and its monsters — with a way back through what was opened. Every search
+lists its first rows before anything is typed (the monsters by level, then the NPCs; the maps and items by name);
+Safe to sell? lists the items, the ones a current quest or recipe still needs first (NiaMeowDB's list,
 sitedata.sell_list, sorted as its page sorts: the most needed first), each with its why-keep chips (quests,
 recipes, Repeatable) or a green Safe to sell and what an NPC pays; an All / Safe to sell / Keep switch narrows it,
 and a row opens the verdict with what needs it. The search is the one window over the game that takes the keyboard
@@ -23,7 +23,7 @@ from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
-from .. import availability, bidi, combat, gamelookup, itemterms, market, routes, sitedata, tables
+from .. import availability, bidi, combat, gamelookup, itemdetails, itemterms, market, routes, sitedata, tables
 from ..i18n import I18n
 from ..kb import KnowledgeBase, memo
 from ..store import Profiles, Settings
@@ -1021,6 +1021,12 @@ class DetailWindow(EdgeResize, QWidget):
         from .toolwindow import NAV
         NAV.tool_requested.emit("grind_spots", "")
 
+    def _open_quest(self, key: str) -> None:
+        """A quest row's click (the quests that give an item): the Quests window on that quest (toolwindow builds
+        on this module, so it is imported when used)."""
+        from .toolwindow import NAV
+        NAV.tool_requested.emit("quest_tool", key)
+
     def character_changed(self) -> None:
         """Another character, or the active one's level, EXP or stats changed: a monster's page is drawn again (its
         Hit & damage is the character's), the scroll kept."""
@@ -1031,18 +1037,32 @@ class DetailWindow(EdgeResize, QWidget):
             bar.setValue(at)
 
     def _item_body(self, key: str) -> None:
-        """The item's page: its type and level chips and what an NPC pays in the header, then the monsters that
-        drop it and the NPCs that sell it, each a click away (a dozen of each, then "and N more")."""
+        """The item's page: its type and level chips and what an NPC pays in the header, then the quests that hand
+        it over (itemdetails.from_quests: an item no monster drops and no shop sells comes from one — Arcon's
+        Blood), the monsters that drop it and the NPCs that sell it, each a click away (a dozen of each, then
+        "and N more")."""
         o = self._owner
         t, kb, rtl = o.t, o._kb, o.t.rtl
         price = market.npc_prices(kb, key).sell_back
         self._set_head(key, self._name(key), self._item_chips(key),
                        bidi.plain(t("sell_npc_pays", n=f"{price:,}") if price else t("sell_no_npc_price"), rtl))
         self._market(key)                  # its player prices, under what an NPC pays
+        gives = itemdetails.from_quests(kb, key)
         drop, sell = gamelookup.item_sources(kb, key)
-        if not drop and not sell:
+        if not gives and not drop and not sell:
             self._line(t("lk_no_sources"), muted=True)
             return
+        if gives:
+            block = _Block(bidi.plain(t("lk_quest_reward"), rtl))
+            for q in gives[:SRC_CAP]:
+                lv = q["level"]
+                row = _Row(bidi.ltr_name(q["name"], rtl), bidi.ltr_name(q["npc"], rtl) if q["npc"] else "",
+                           t("lk_open_quest"), pic=o._pics.label(q["key"] or "quest/", ROW_PIC),
+                           end_chip=(_lv(t, (lv, lv)), "quest") if lv else None, flat=True, rtl=rtl)
+                row.clicked.connect(lambda _=False, k=q["key"]: self._open_quest(k))
+                block.add(row)
+            self._more(block, len(gives))
+            self._add(block)
         if drop:
             block = _Block(bidi.plain(t("lk_dropped_by"), rtl))
             for d in drop[:SRC_CAP]:

@@ -76,6 +76,28 @@ def needed_by(kb, key: str) -> tuple[list[dict], list[dict]]:
     return quests, recipes
 
 
+def from_quests(kb, key: str) -> list[dict]:
+    """The quests that hand the item over: [{"name", "key", "npc", "level", "count"}], the lowest level first, from
+    the knowledge base's rewards table (the page's "Quest Reward") — an item a quest is the only source of (Arcon's
+    Blood, quest/10109) is found nowhere else. Only what a quest always gives ("sure"), never one of a pick or a
+    roll, and never a quest the KB doesn't count as open (availability): a quest no one can take is no source.
+    Each quest once, with the NPC that gives it (the quests table's own)."""
+    from . import availability, tables
+    open_ = availability.of(kb)
+    npcs = {str(r.get("key") or ""): str(r.get("npc") or "") for r in tables.rows(kb, "quests")}
+    out: dict[str, dict] = {}
+    for r in tables.rows(kb, "rewards"):
+        qkey = str(r.get("quest_key") or "")
+        if (r.get("item_key") != key or r.get("kind") != "sure" or not qkey or qkey in out
+                or not open_.quest_open(qkey)):
+            continue
+        lv = r.get("quest_level")
+        out[qkey] = {"name": r["quest"], "key": qkey, "npc": npcs.get(qkey, ""),
+                     "level": int(lv) if isinstance(lv, (int, float)) and not isinstance(lv, bool) else 0,
+                     "count": r["count"]}
+    return sorted(out.values(), key=lambda q: (q["level"], q["name"]))
+
+
 def _notes(lines: list[str]) -> tuple[list[str], list[Post]]:
     head = next((h for h in NOTES_HEADS if h in lines), None)
     if head is None:

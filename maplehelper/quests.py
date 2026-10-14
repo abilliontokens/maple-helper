@@ -694,6 +694,45 @@ def opens(kb, key: str) -> list[str]:
     return [k for k, ps in _links(kb).parents.items() if key in ps]
 
 
+def _item_givers(kb) -> dict[str, list[str]]:
+    """An item's key -> the quests that surely hand it over, worked out once per KB (the rewards table's "sure"
+    rows: a pick-one choice or a random roll is no promise the item will be there)."""
+    got = kb.__dict__.get("_quest_item_givers")
+    if got is None:
+        from . import tables
+        got = {}
+        for r in tables.rows(kb, "rewards"):
+            if r.get("kind") != "sure":
+                continue
+            item, giver = str(r.get("item_key") or ""), str(r.get("quest_key") or "")
+            if item and giver and giver not in got.setdefault(item, []):
+                got[item].append(giver)
+        kb.__dict__["_quest_item_givers"] = got
+    return got
+
+
+def item_givers(kb, item_key: str, key: str = "") -> list[str]:
+    """The quests that hand this item over, as keys: an item a quest asks for that no monster drops comes from one
+    of these (Arcon's Blood is Manji's reward for "Arcon's Blood?", and "Getting Arcon's Blood" asks for it).
+
+    The quest the player on `key` would actually do comes first: one `key` asks to finish first, then an earlier
+    step of its line, then another step of the same line, then the rest, the lowest level first. `key` itself is
+    never one of them (a quest that gives what it asks for is no source to go to)."""
+    givers = [k for k in _item_givers(kb).get(item_key, []) if k != key]
+    if not givers or not key:
+        return givers
+    parents = set(prerequisites(kb, key))
+    before = set(earlier_steps(kb, key))
+    chain = chain_of(kb, key)
+    line = set(chain.order) if chain else set()
+
+    def place(k: str) -> tuple:
+        q = quest(kb, k)
+        near = 0 if k in parents else 1 if k in before else 2 if k in line else 3
+        return near, (q.opens_at() if q else 0), (q.name if q else k)
+    return sorted(givers, key=place)
+
+
 def earlier_steps(kb, key: str) -> list[str]:
     """Every quest done before this one can be: its prerequisites and theirs, the first first (what to mark done
     with it: the game never lets a step be done before them)."""

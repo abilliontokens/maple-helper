@@ -9,7 +9,8 @@ ui/citizenship.py), ported from the old Play tools' quest card and made for the 
   shows that quest (in this window, or the other one for a Citizenship quest); what it opens off its line;
 - what to do (quests.task_text, in the UI's language), what it needs (each monster and item a link to its page) and
   who drops each item: the three droppers nearest the character's level, how each sits against it, the rest behind
-  "Show all N", a link to the Farm window on it; a crafted one, its recipes;
+  "Show all N", a link to the Farm window on it; one another quest hands over, that quest and its NPC a tap away;
+  a crafted one, its recipes;
 - what it gives: EXP, mesos, Fame and items (each a link to its page), the class's own pick, a random set, a
   gender's;
 - what it asks first ("Opens once you finish X", a tap away), a level to finish it, a citizenship grade, a profession
@@ -504,8 +505,8 @@ class QuestCard(QFrame):
     def _droppers_html(self) -> str:
         """Item by item: its name (its page) and the Farm window on it, then the monsters that drop it, the three
         nearest the character's level first, each with how it sits against the level (the Farm window's words), the
-        rest behind "Show all N" (Iron Ingot listed nine monsters from Lv 2 to Lv 40: TOOL-06); or the recipes that
-        make it ("Smithing Lv. 3: 10 x Tree Branch")."""
+        rest behind "Show all N" (Iron Ingot listed nine monsters from Lv 2 to Lv 40: TOOL-06); the quest that hands
+        it over, a tap away (_from_quest_html); or the recipes that make it ("Smithing Lv. 3: 10 x Tree Branch")."""
         kb, t, rtl = self._kb, self.t, self.t.rtl
         c = self.win.character
         side = _side(rtl)
@@ -528,7 +529,10 @@ class QuestCard(QFrame):
                 top = near[:DROPPERS_SHOWN]
                 mons = top + ([m for m in every if m not in top] if name in self._expanded else [])
             made = crafting.made_from(kb, name) if not mons else []
-            if not mons and not made:
+            # an item no one drops is often another quest's reward: the one to go do, not a drop to hunt (the owner
+            # looked for Arcon's Blood, which only "Arcon's Blood?" hands over)
+            givers = quests.item_givers(kb, key, self.key) if key else []
+            if not mons and not made and not givers:
                 continue
             # the item: its page (its prices, every dropper) in the text's own colour, bold, then the Farm window
             item = f"{bidi.LRE}<b>{html.escape(name)}</b>{bidi.PDF}"
@@ -559,6 +563,8 @@ class QuestCard(QFrame):
                 rows.append(f"<p {side} style='margin:0 0 2px 0;'>"
                             + self._a(f"all:{quote(name)}", html.escape(bidi.plain(t("q_droppers_all", n=len(every)),
                                                                                     rtl))) + "</p>")
+            if givers:
+                rows.append(f"<p {side} style='margin:0 0 2px 0;'>{self._from_quest_html(givers)}</p>")
             if made:
                 # a line in the UI's language, then each recipe's profession and its ingredients, one a line with
                 # its picture (five ingredients in one line wrapped in the middle of a name: the owner)
@@ -572,6 +578,23 @@ class QuestCard(QFrame):
                         rows.append(f"<p {side} style='margin:0 0 2px 0;'>{self._thing(f'{part.strip()} x {n}')}</p>")
             blocks.append("".join(rows))
         return "".join(blocks)
+
+    def _from_quest_html(self, givers: list[str]) -> str:
+        """The quest a needed item comes from (quests.item_givers put the one to do first): its name a tap away,
+        who hands it over, and how many other quests give it too, rather than a list of them all."""
+        kb, t, rtl = self._kb, self.t, self.t.rtl
+        key = givers[0]
+        q = quests.quest(kb, key)
+        link = self._a(f"quest:{quote(key)}", html.escape(whole_name(quest_name(kb, key), rtl)))
+        npc = q.npc if q else ""
+        said = (t("q_from_quest", quest=_SLOT, npc=whole_name(npc, rtl)) if npc
+                else t("q_from_quest_npcless", quest=_SLOT))
+        text = html.escape(said).replace(_SLOT, link)
+        if len(givers) > 1:
+            more = (t("q_from_quest_more_one") if len(givers) == 2
+                    else t("q_from_quest_more", n=len(givers) - 1))
+            text += f"{bidi.RLM} · " + html.escape(bidi.plain(more, rtl))
+        return text
 
     def _prerequisites(self) -> None:
         """What it asks first: each quest not done yet a tap away (done: nothing left to say, the owner), then the
