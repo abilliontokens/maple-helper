@@ -20,7 +20,20 @@ The model — every line of this is an assumption fitted to the data, not a fact
    every real slope and drops only walls. Foothold fragments that touch end to end (the site
    splits one platform into many short segments) join into one walk: a player walks freely
    along joined spans, at a cost of the horizontal length walked.
-2. Ropes and ladders. An `lr` entry is `[x, y_a, y_b]`: a vertical climb at `x` between the
+2. Walls. A foothold too steep to stand on (rule 1's discards, vertical ones included) is
+   a wall: in this game a vertical foothold blocks sideways movement, so the discarded
+   footholds are kept as wall segments. A wall blocks two moves. It blocks a fragment
+   join it stands on — a wall rising through the point where two fragments touch splits
+   the walk there, the way a cliff face rising from the floor stops a player walking
+   along that floor — and it blocks a fall whose drop line passes through it or past
+   its foot (its lowest point); a drop that only runs along a wall's face, or lands
+   against that face, is not blocked, and a fall stopped by a wall face lands on the
+   next span below whose drop is clear. Ropes are not tested against walls (a rope is
+   climbed against a face), and neither are jumps. Utah's Pig Farm shows why walls
+   matter: a vertical foothold at x=-1119 runs from the floor at y=155 up to y=-240,
+   right beside the small west platform at y≈91, so that platform's floor cannot be
+   walked east past it, however continuous the floor's footholds look.
+3. Ropes and ladders. An `lr` entry is `[x, y_a, y_b]`: a vertical climb at `x` between the
    two y values, in either order. The site does not document that; it is read from its data.
    The third value cannot be a height: on map 010001081 `[-3885, -1343, -1147]` as a height
    would end at y=-2490, above that map's whole view rectangle, while as an end it is a
@@ -31,32 +44,39 @@ The model — every line of this is an assumption fitted to the data, not a fact
    spans they plainly serve (`[689, -196, -41]` crosses nothing, and sits 69 units below the
    span at y=-265 and 76 above the one at y=35), which reads as the player grabbing, dropping
    from, or stepping off the end. Climbing costs the vertical distance between the two spans.
-3. Falling. From a few probe points along a span the player drops onto the first span below
-   (greater y) whose ground is within FALL_REACH sideways. Falling is one way and nearly
-   free. Probing, rather than solving every drop line exactly, is the one deliberate
-   simplification: a lower span that only ever passes under a span between two probes is
-   missed, and in a map of hundreds of spans that has not been seen to matter.
-4. Jumping up. A character jumps: from anywhere along a lower span they can land on the
-   part of a higher span up to JUMP_HEIGHT above it and up to JUMP_GAP sideways of where
-   they jump from, so a lower span joins (one way, upward only) every higher span that
-   comes that close above it. That height is an assumption read from how the game plays,
-   not from the data: the terrain data says where the ground is, never how high anyone
-   can jump. It is set at about a platform's height so one jump climbs one ledge, not
-   two. Utah's Pig Farm shows why the rule is needed at all: the player stands on a span
-   at y≈-690 and Utah stands on one at y=-805, about 113 units higher, with no rope
-   serving Utah's ledge from below (the nearest rope, at x=1964, hangs 164 units past
-   that span's east end at x=1800, and serves it only from the map's floor far below).
-   No single jump spans that 113 either — JUMP_HEIGHT is deliberately under it — but
-   without any jumping the player's span connects upward to nothing, while with it the
-   player can climb in steps (the first onto the span at y=-625, some 65 up) and work
-   across and around to that far rope. A jump costs its height plus JUMP_EFFORT: a jump
-   is slow to line up and land compared with walking the same rise on a slope, so the
-   fixed part is priced well above the height itself.
-5. Hidden teleports. A jump (a hidden teleport; `Jump` to the engine, `jumps` in `pads`)
+4. Falling. From a few probe points along a span the player drops onto the first span
+   below (greater y) whose ground is within FALL_REACH sideways and whose drop no wall
+   (rule 2) crosses. Falling is one way and nearly free. Probing, rather than solving
+   every drop line exactly, is the one deliberate simplification: a lower span that only
+   ever passes under a span between two probes is missed, and in a map of hundreds of
+   spans that has not been seen to matter.
+5. Jumping up. A character jumps: from anywhere along a lower span they can land on a
+   higher span that sits over it — the higher span's x range must overlap the lower one's
+   (touching at an end counts: that is a ledge whose foot is the lower span's end) — and
+   that is at most JUMP_HEIGHT above it over that overlap, so a lower span joins (one way,
+   upward only) every higher span that sits over it within one jump. A span merely near
+   above, offset sideways past the lower span's end, is not a jump: the character cannot
+   drift sideways onto ground that is not over where they jumped from. The height is
+   measured from the map, not assumed: on Utah's Pig Farm, joining fragments into
+   platforms and taking, for each platform, the rise to the nearest higher platform that
+   overlaps it in x gives one platform tier of 57–68 units for 22 of its 49 platforms,
+   and the next rises up are 120, then 168–180, then 230–240 — two and three tiers.
+   JUMP_HEIGHT = 70 therefore climbs exactly one tier, never two. Utah's Pig Farm shows
+   why the rule is needed at all: the player stands on a span at y≈-690 and Utah stands
+   on one at y=-805, about 113 units higher, with no rope serving Utah's ledge from below
+   (the nearest rope, at x=1964, hangs 164 units past that span's east end at x=1800, and
+   serves it only from the map's floor far below). No single jump spans that 113 either —
+   JUMP_HEIGHT is deliberately under it — but without any jumping the player's span
+   connects upward to nothing, while with it the player can climb in steps (the first onto
+   the span at y=-625, some 65 up) and work across and around to that far rope. A jump
+   costs its height plus JUMP_EFFORT: a jump is slow to line up and land compared with
+   walking the same rise on a slope, so the fixed part is priced well above the height
+   itself, and a long ladder of jumps loses to a pad that skips the ladder.
+6. Hidden teleports. A jump (a hidden teleport; `Jump` to the engine, `jumps` in `pads`)
    connects the span under its `frm` to the span under its `to`, one way, at a flat
-   TELEPORT_COST. Either end that cannot be snapped to a span (rule 6) makes that jump
+   TELEPORT_COST. Either end that cannot be snapped to a span (rule 7) makes that jump
    unusable, never the whole query.
-6. Snapping. The player, the target, and the jumps' ends are points that should be standing
+7. Snapping. The player, the target, and the jumps' ends are points that should be standing
    on the ground, so each stands on the ground beneath it: the first standable span at or
    below the point (no higher, a greater y) within SNAP_DOWN, whose x range covers the point
    to within FALL_REACH sideways. A point with no such span — standing at the very bottom of
@@ -75,11 +95,13 @@ jumps that walk takes. Within a span the exact entry and exit points are not tra
 so costs are map-unit estimates good enough to order ways, not exact distances.
 
 Cost, by counting rather than by benchmark: the model is built once per map (`Walk.of`).
-Utah's Pig Farm, among the largest maps, gives 355 spans and 11 ropes; joining, rope,
-fall and jump edges are a few per span (the jump pass compares every pair of spans —
-some 126k pairs — but keeps only the few that come within a jump of each other), so a
-query's Dijkstra search visits a few hundred nodes and relaxes a few thousand edges,
-and jump ends are snapped once and remembered by their points.
+Utah's Pig Farm, among the largest maps, gives 355 spans, 297 walls and 11 ropes; the
+walls sit in the same x-bin index as the spans, so each join or fall probe tests the few
+walls in its neighbourhood rather than scanning them all. Joining, rope, fall and jump
+edges are a few per span (the jump pass compares every pair of spans — some 126k pairs —
+but keeps only the few that come within a jump of each other), so a query's Dijkstra
+search visits a few hundred nodes and relaxes a few thousand edges, and jump ends are
+snapped once and remembered by their points.
 """
 from __future__ import annotations
 
@@ -90,9 +112,9 @@ from dataclasses import dataclass
 # a foothold stands a player up when its rise over its run is at most this (see rule 1 above)
 STAND_SLOPE = 1.0
 # a point this far (map units) from a standable span still counts as standing on it when it
-# has no ground below it to stand on (rule 6)
+# has no ground below it to stand on (rule 7)
 SNAP_DIST = 60.0
-# how far below a point (map units) the ground it stands on may lie (rule 6): a character is
+# how far below a point (map units) the ground it stands on may lie (rule 7): a character is
 # a few tens of units tall, so its minimap dot sits that far above its feet, and a pad's dot
 # is drawn 50 units above its own point (routes.PORTAL_MARK_RISE), so a point can sit some
 # 120 units above the foothold under it — the live Pig Farm player read was 113 above theirs;
@@ -100,28 +122,29 @@ SNAP_DIST = 60.0
 SNAP_DOWN = 160.0
 # foothold fragments this close end to end are one walk (rule 1)
 JOIN_DIST = 2.0
-# how far sideways a falling player can drift onto the span below (rule 3)
+# how far sideways a falling player can drift onto the span below (rule 4)
 FALL_REACH = 30.0
 # what a fall costs: nearly nothing, but not nothing, so a walk on the same level can win
 FALL_COST = 1.0
-# how high (map units) a character can jump onto a span above (rule 4): about one
-# platform's height, an assumption from how the game plays, not from the data
-JUMP_HEIGHT = 90.0
-# how far sideways (map units) a jump can cross to the span above (rule 4)
-JUMP_GAP = 60.0
-# the fixed effort of one jump up, on top of its height (rule 4): a jump is slow
-JUMP_EFFORT = 150.0
+# how high (map units) a character can jump onto a span above (rule 5): one platform tier —
+# the nearest overlapping higher platform on Utah's Pig Farm is 57–68 up, the next tiers
+# 120 and more, so 70 climbs one tier and never two (see rule 5)
+JUMP_HEIGHT = 70.0
+# the fixed effort of one jump up, on top of its height (rule 5): a jump is slow to line
+# up and land, so one tier's jump costs some 320 all-in — a ladder of them loses to a pad
+JUMP_EFFORT = 250.0
 # what a hidden teleport costs: about nothing (it is instant), but not nothing, so a
 # pad that only ties a walk or a fall is not named for it
 TELEPORT_COST = 5.0
-# a span this far past a rope's end still counts as served by that rope (rule 2)
+# a span this far past a rope's end still counts as served by that rope (rule 3)
 ROPE_END_DIST = 90.0
 # a rope this far sideways of a span's end still crosses that span (the site's rope x can sit
 # a few units past the last foothold fragment of the platform it hangs over)
 ROPE_X_DIST = 10.0
-# x-bin width of the span index that keeps snapping and fall probes off a full scan per query
+# x-bin width of the span and wall index that keeps snapping and fall probes off a full scan
+# per query
 _BIN = 128.0
-# where along a span falling is probed from: both ends and the quarters between (rule 3)
+# where along a span falling is probed from: both ends and the quarters between (rule 4)
 _FALL_PROBES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
@@ -151,11 +174,66 @@ class _Span:
         """The ground's height at x (x clamped into the span before asking)."""
         return self.y0 + (self.y1 - self.y0) * (x - self.x0) / self.width
 
-    def dist(self, px: float, py: float) -> float:
-        """Distance from a point to this fragment, end to end."""
+    def closest(self, px: float, py: float) -> tuple[float, float]:
+        """The point of this fragment nearest a point (the projection `dist` measures)."""
         t = max(0.0, min(1.0, ((px - self.x0) * self.width + (py - self.y0) * (self.y1 - self.y0))
                          / (self.width ** 2 + (self.y1 - self.y0) ** 2)))
-        return math.hypot(px - (self.x0 + t * self.width), py - (self.y0 + t * (self.y1 - self.y0)))
+        return self.x0 + t * self.width, self.y0 + t * (self.y1 - self.y0)
+
+    def dist(self, px: float, py: float) -> float:
+        """Distance from a point to this fragment, end to end."""
+        qx, qy = self.closest(px, py)
+        return math.hypot(px - qx, py - qy)
+
+
+@dataclass(frozen=True)
+class _Wall:
+    """One foothold too steep to stand on (rule 2): (x0, y0) to (x1, y1), x0 <= x1, y downward."""
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+    def dist(self, px: float, py: float) -> float:
+        """Distance from a point to this wall, end to end (a wall has length, never none)."""
+        dx, dy = self.x1 - self.x0, self.y1 - self.y0
+        t = max(0.0, min(1.0, ((px - self.x0) * dx + (py - self.y0) * dy) / (dx ** 2 + dy ** 2)))
+        return math.hypot(px - (self.x0 + t * dx), py - (self.y0 + t * dy))
+
+
+def _side(ax: float, ay: float, bx: float, by: float, px: float, py: float) -> float:
+    """Which side of the line a→b the point p is on (signed, zero on the line)."""
+    return (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+
+
+def _on_segment(ax: float, ay: float, bx: float, by: float, px: float, py: float) -> bool:
+    """The point p lies on the segment a→b (the caller has it on the segment's line)."""
+    return (min(ax, bx) - 1e-9 <= px <= max(ax, bx) + 1e-9
+            and min(ay, by) - 1e-9 <= py <= max(ay, by) + 1e-9)
+
+
+def _segments_cross(ax: float, ay: float, bx: float, by: float,
+                    cx: float, cy: float, dx: float, dy: float) -> bool:
+    """The segments a→b and c→d touch or cross, endpoints included."""
+    d1, d2 = _side(cx, cy, dx, dy, ax, ay), _side(cx, cy, dx, dy, bx, by)
+    d3, d4 = _side(ax, ay, bx, by, cx, cy), _side(ax, ay, bx, by, dx, dy)
+    if ((d1 > 1e-9 and d2 < -1e-9) or (d1 < -1e-9 and d2 > 1e-9)) and \
+            ((d3 > 1e-9 and d4 < -1e-9) or (d3 < -1e-9 and d4 > 1e-9)):
+        return True
+    return (abs(d1) <= 1e-9 and _on_segment(cx, cy, dx, dy, ax, ay)
+            or abs(d2) <= 1e-9 and _on_segment(cx, cy, dx, dy, bx, by)
+            or abs(d3) <= 1e-9 and _on_segment(ax, ay, bx, by, cx, cy)
+            or abs(d4) <= 1e-9 and _on_segment(ax, ay, bx, by, dx, dy))
+
+
+def _segments_properly_cross(ax: float, ay: float, bx: float, by: float,
+                             cx: float, cy: float, dx: float, dy: float) -> bool:
+    """The segments a→b and c→d cross at a point inside both (touching ends is not crossing)."""
+    d1, d2 = _side(cx, cy, dx, dy, ax, ay), _side(cx, cy, dx, dy, bx, by)
+    d3, d4 = _side(ax, ay, bx, by, cx, cy), _side(ax, ay, bx, by, dx, dy)
+    return ((d1 > 1e-9 and d2 < -1e-9) or (d1 < -1e-9 and d2 > 1e-9)) and \
+        ((d3 > 1e-9 and d4 < -1e-9) or (d3 < -1e-9 and d4 > 1e-9))
 
 
 class Walk:
@@ -163,6 +241,7 @@ class Walk:
 
     def __init__(self, fh, lr):
         self._spans: list[_Span] = []
+        self._walls: list[_Wall] = []
         for row in fh or []:
             seg = _nums(row, 4)
             if seg is None:
@@ -171,13 +250,22 @@ class Walk:
             if x2 < x1:
                 x1, y1, x2, y2 = x2, y2, x1, y1
             if x2 - x1 <= 0 or abs(y2 - y1) > STAND_SLOPE * (x2 - x1):
-                continue            # a wall, a point, or too steep to stand on (rule 1)
+                # a point stands for nothing, but a wall or too-steep foothold is kept
+                # as a wall (rule 2): it stands on nothing, yet it blocks movement
+                if (x2 - x1) ** 2 + (y2 - y1) ** 2 > 0:
+                    self._walls.append(_Wall(x1, y1, x2, y2))
+                continue
             self._spans.append(_Span(x1, y1, x2, y2))
-        # spans by the x-bins they cover, so a snap or a fall probe reads its neighbourhood
+        # spans and walls by the x-bins they cover, so a snap or a fall probe reads its
+        # neighbourhood
         self._by_x: dict[int, list[int]] = {}
         for i, s in enumerate(self._spans):
             for b in range(math.floor(s.x0 / _BIN), math.floor(s.x1 / _BIN) + 1):
                 self._by_x.setdefault(b, []).append(i)
+        self._walls_by_x: dict[int, list[int]] = {}
+        for i, w in enumerate(self._walls):
+            for b in range(math.floor(w.x0 / _BIN), math.floor(w.x1 / _BIN) + 1):
+                self._walls_by_x.setdefault(b, []).append(i)
         edges: list[dict[int, float]] = [dict() for _ in self._spans]
         self._edges = edges
         self._join_fragments()
@@ -209,18 +297,74 @@ class Walk:
             out.update(self._by_x.get(b, ()))
         return sorted(out)
 
+    def _near_walls(self, x_lo: float, x_hi: float) -> list[int]:
+        """The walls covering any of the x-bins between two x values, each once."""
+        out = set()
+        for b in range(math.floor(x_lo / _BIN), math.floor(x_hi / _BIN) + 1):
+            out.update(self._walls_by_x.get(b, ()))
+        return sorted(out)
+
+    def _wall_stands_on(self, px: float, py: float) -> bool:
+        """A wall rises through this ground point (rule 2): it passes through the point
+        and reaches above it, so a walk along the ground cannot pass it there. A wall
+        that only drops below the point (the face under a platform's edge) stands on
+        nothing and blocks nothing."""
+        return any(w.dist(px, py) <= 0.01 and min(w.y0, w.y1) < py - 0.01
+                   for w in (self._walls[k] for k in self._near_walls(px, px)))
+
+    def _wall_crosses(self, xa: float, ya: float, xb: float, yb: float) -> bool:
+        """A wall crosses the drop line from (xa, ya) to (xb, yb) (rule 2). Running
+        along a wall's face is not crossing it, and neither is landing against the
+        face: a drop is blocked only when it passes through the wall, or past the
+        wall's foot (the wall's lowest point, where passing the touch means passing
+        the wall's base). A wall that only touches the line at its own start is not
+        a crossing either — falling away from the edge you stand on does not cross
+        the wall that edge belongs to — so the tests run from a hair past the start."""
+        sx, sy = xa + (xb - xa) * 1e-6, ya + (yb - ya) * 1e-6
+        walls = [self._walls[k] for k in self._near_walls(min(xa, xb), max(xa, xb))]
+        for w in walls:
+            if _segments_properly_cross(sx, sy, xb, yb, w.x0, w.y0, w.x1, w.y1):
+                return True                     # through the wall, side to side
+            if not _segments_cross(sx, sy, xb, yb, w.x0, w.y0, w.x1, w.y1):
+                continue
+            if abs(_side(sx, sy, xb, yb, w.x0, w.y0)) <= 1e-9 and \
+                    abs(_side(sx, sy, xb, yb, w.x1, w.y1)) <= 1e-9:
+                continue                        # along the wall's face, not through it
+            # the drop only touches the wall, at the drop's end or at a wall's end:
+            # blocked when that touch is at the wall's foot and no wall runs on below it
+            for tx, ty in ((xb, yb), (w.x0, w.y0), (w.x1, w.y1)):
+                if not (_on_segment(sx, sy, xb, yb, tx, ty)
+                        and _on_segment(w.x0, w.y0, w.x1, w.y1, tx, ty)):
+                    continue
+                above = any(o.dist(tx, ty) <= 0.01 and min(o.y0, o.y1) < ty - 0.01
+                            for o in walls)
+                below = any(o.dist(tx, ty) <= 0.01 and max(o.y0, o.y1) > ty + 0.01
+                            for o in walls)
+                if above and not below:
+                    return True
+        return False
+
     def _join_fragments(self) -> None:
-        """Fragments touching end to end (or end to middle) join into one walk (rule 1);
-        walking into a fragment costs its horizontal length."""
+        """Fragments touching end to end (or end to middle) join into one walk (rule 1),
+        unless a wall stands on the join (rule 2); walking into a fragment costs its
+        horizontal length."""
         for i, s in enumerate(self._spans):
             for px, py in ((s.x0, s.y0), (s.x1, s.y1)):
                 for j in self._near(px - JOIN_DIST, px + JOIN_DIST):
-                    if j != i and self._spans[j].dist(px, py) <= JOIN_DIST:
-                        self._add(i, j, self._spans[j].width, both=False)
-                        self._add(j, i, s.width, both=False)
+                    if j == i or self._spans[j].dist(px, py) > JOIN_DIST:
+                        continue
+                    qx, qy = self._spans[j].closest(px, py)
+                    if (self._wall_stands_on(px, py) or self._wall_stands_on(qx, qy)
+                            or any(_segments_properly_cross(px, py, qx, qy,
+                                                            w.x0, w.y0, w.x1, w.y1)
+                                   for w in (self._walls[k] for k in
+                                             self._near_walls(min(px, qx), max(px, qx))))):
+                        continue    # a wall stands on the join: not one walk (rule 2)
+                    self._add(i, j, self._spans[j].width, both=False)
+                    self._add(j, i, s.width, both=False)
 
     def _join_ropes(self, lr) -> None:
-        """Every span a rope crosses or ends near joins every other, both ways (rule 2), at
+        """Every span a rope crosses or ends near joins every other, both ways (rule 3), at
         the cost of the height between them at the rope's x."""
         for row in lr:
             rope = _nums(row, 3)
@@ -241,13 +385,15 @@ class Walk:
 
     def _join_falls(self) -> None:
         """From each probe point along a span, a one-way cheap drop to the first span below
-        within FALL_REACH sideways (rule 3). The first below at a probe is the lowest cost
-        found there; an in-between span is itself that first span, so drops never tunnel."""
+        within FALL_REACH sideways whose drop no wall crosses (rules 4 and 2): a fall
+        stopped by a wall face slides down it, so the first span below whose drop is
+        clear is the one landed on. An in-between span is itself that first span, so
+        drops never tunnel."""
         for i, s in enumerate(self._spans):
             for frac in _FALL_PROBES:
                 xa = s.x0 + frac * s.width
                 ya = s.y_at(xa)
-                best, drift = None, 0.0
+                below = []
                 for j in self._near(xa - FALL_REACH, xa + FALL_REACH):
                     if j == i:
                         continue
@@ -256,49 +402,36 @@ class Walk:
                     if abs(xb - xa) > FALL_REACH:
                         continue
                     yb = t.y_at(xb)
-                    if yb > ya + 1.0 and (best is None or yb < best[1]):
-                        best, drift = (j, yb), abs(xb - xa)
-                if best is not None:
-                    self._add(i, best[0], FALL_COST + drift, both=False)
+                    if yb > ya + 1.0:
+                        below.append((yb, j, xb))
+                for yb, j, xb in sorted(below):
+                    if not self._wall_crosses(xa, ya, xb, yb):
+                        self._add(i, j, FALL_COST + abs(xb - xa), both=False)
+                        break
 
     def _join_jumps(self) -> None:
-        """A one-way jump up from a lower span to every higher span within a jump of it
-        (rule 4): the higher span is at most JUMP_HEIGHT above some point of the lower
-        one and at most JUMP_GAP sideways of that point, and the jump costs its height
-        plus JUMP_EFFORT. The lowest rise over the points where the two spans come
-        closest is the jump on offer — the player walks along the lower span to the
-        best spot before jumping — so spans that only meet that closely at one end
-        still join there."""
+        """A one-way jump up from a lower span to every higher span that sits over it
+        within one jump (rule 5): the higher span's x range overlaps the lower one's
+        (touching at an end counts), the rise over that overlap is at most JUMP_HEIGHT,
+        and the jump costs its height plus JUMP_EFFORT. The lowest rise over the overlap
+        is the jump on offer — the player walks along the lower span to the best spot
+        before jumping."""
         for i, lo in enumerate(self._spans):
             for j, hi in enumerate(self._spans):
                 if i == j:
                     continue
-                gap = max(0.0, hi.x0 - lo.x1, lo.x0 - hi.x1)
-                if gap > JUMP_GAP:
-                    continue
-                rises = []
                 overlap_lo, overlap_hi = max(lo.x0, hi.x0), min(lo.x1, hi.x1)
-                if overlap_lo <= overlap_hi:
-                    rises.append(lo.y_at(overlap_lo) - hi.y_at(overlap_lo))
-                    rises.append(lo.y_at(overlap_hi) - hi.y_at(overlap_hi))
-                for xl in (lo.x0, lo.x1):
-                    xh = max(hi.x0, min(hi.x1, xl))
-                    if abs(xh - xl) <= JUMP_GAP:
-                        rises.append(lo.y_at(xl) - hi.y_at(xh))
-                for xh in (hi.x0, hi.x1):
-                    xl = max(lo.x0, min(lo.x1, xh))
-                    if abs(xh - xl) <= JUMP_GAP:
-                        rises.append(lo.y_at(xl) - hi.y_at(xh))
-                if not rises:
-                    continue
-                rise = min(rises)
+                if overlap_lo > overlap_hi:
+                    continue        # not over the lower span: no jump lands there (rule 5)
+                rise = min(lo.y_at(overlap_lo) - hi.y_at(overlap_lo),
+                           lo.y_at(overlap_hi) - hi.y_at(overlap_hi))
                 if 1.0 < rise <= JUMP_HEIGHT:
                     self._add(i, j, JUMP_EFFORT + rise, both=False)
 
     # ------------------------------------------------------------ asking
 
     def _snap(self, point) -> int | None:
-        """The span a point stands on (rule 6): the first span at or below the point within
+        """The span a point stands on (rule 7): the first span at or below the point within
         SNAP_DOWN whose x range covers it (to within FALL_REACH sideways); failing that, the
         nearest span within SNAP_DIST, for a point at the bottom of a map or a little under
         its ground."""
@@ -323,7 +456,7 @@ class Walk:
 
     def _snap_jump(self, jump) -> tuple[int, int] | None:
         """A jump's (from span, to span), remembered by its end points; None when either end
-        snaps to nothing, which leaves that jump out without spoiling the query (rule 5)."""
+        snaps to nothing, which leaves that jump out without spoiling the query (rule 6)."""
         key = (tuple(jump.frm), tuple(jump.to))
         if key not in self._snapped:
             frm, to = self._snap(jump.frm), self._snap(jump.to)

@@ -701,6 +701,46 @@ def test_an_npc_on_the_players_map_guides_and_hiding_clears_it(win, qapp, kb, cl
     assert LOCATION.guide is None
 
 
+def test_redrawing_an_npc_page_keeps_its_guide_until_the_page_or_the_window_lets_go(
+        win, qapp, kb, clean_location, graph, monkeypatch):
+    """The minimap reads redraw the page as the player moves (_moved): a redraw that guides the same NPC to
+    the same spot never lets the guide go in between, so LOCATION.guided fires once for it, not once per read."""
+    from maplehelper import gamelookup
+    from maplehelper.ui.location import LOCATION
+    spots = {"npc/3": (0.6, 0.5), "npc/4": (0.4, 0.5)}
+    monkeypatch.setattr(gamelookup, "npc_place",
+                        lambda kb, key, here_map=None: gamelookup.Place(MID, "Fake Town", "Fake Street",
+                                                                        spots[key]) if key in spots else None)
+    guided = []
+    LOCATION.guided.connect(guided.append)
+    try:
+        clean_location.set(_here(MID, (0.5, 0.5)))
+        win.open("monster_npc")
+        d = win._detail
+        d.open_view("npc", "npc/3")
+        assert LOCATION.guide == (MID, spots["npc/3"], "npc/3") and guided == [(MID, spots["npc/3"], "npc/3")]
+        for x in (0.51, 0.52, 0.53):                    # still reads, still the same NPC at the same spot
+            clean_location.set(_here(MID, (x, 0.5)))
+        assert LOCATION.guide == (MID, spots["npc/3"], "npc/3")
+        assert guided == [(MID, spots["npc/3"], "npc/3")]          # one arming, not one per redraw
+        d.open_view("npc", "npc/4")                                # another NPC: re-armed once, never via None
+        assert guided == [(MID, spots["npc/3"], "npc/3"), (MID, spots["npc/4"], "npc/4")]
+        clean_location.set(_here(MID, (0.54, 0.5)))
+        assert guided == [(MID, spots["npc/3"], "npc/3"), (MID, spots["npc/4"], "npc/4")]
+        d.open_view("npc", "npc/5")                                # nowhere the KB can place it: cleared once
+        assert LOCATION.guide is None
+        assert guided == [(MID, spots["npc/3"], "npc/3"), (MID, spots["npc/4"], "npc/4"), None]
+        clean_location.set(_here(MID, (0.55, 0.5)))
+        assert guided == [(MID, spots["npc/3"], "npc/3"), (MID, spots["npc/4"], "npc/4"), None]
+        d.open_view("npc", "npc/3")
+        win.hide()                                                 # hidden: the ring is let go, once
+        assert not d.isVisible() and LOCATION.guide is None
+        assert guided == [(MID, spots["npc/3"], "npc/3"), (MID, spots["npc/4"], "npc/4"), None,
+                          (MID, spots["npc/3"], "npc/3"), None]
+    finally:
+        LOCATION.guided.disconnect(guided.append)
+
+
 def test_an_npc_elsewhere_shows_the_way_there_step_by_step_with_each_maps_picture(
         win, qapp, kb, clean_location, graph, monkeypatch):
     from PySide6.QtCore import Qt

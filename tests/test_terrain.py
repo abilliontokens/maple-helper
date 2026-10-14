@@ -66,11 +66,44 @@ def test_a_target_reachable_by_falling_needs_no_pad():
 
 
 def test_a_ledge_a_jump_above_is_reached_without_a_pad():
-    # 80 up, straight above and again across a 40-wide gap: both inside one jump
-    walk = Walk.of([[0, 200, 200, 200], [0, 120, 200, 120]], [])
-    assert walk.pads((10, 200), (150, 120), []) == []
-    gapped = Walk.of([[0, 200, 100, 200], [140, 120, 240, 120]], [])
-    assert gapped.pads((10, 200), (200, 120), []) == []
+    """One platform tier (60 units, the tier measured on Utah's Pig Farm) up, with the
+    ledge over the ground below: inside one jump, so no pad is named. The old version
+    of this premise used 80 up, which assumed the old 90-unit jump height; a tier is
+    what a jump climbs now, not 80."""
+    walk = Walk.of([[0, 200, 200, 200], [0, 140, 200, 140]], [])
+    assert walk.pads((10, 200), (150, 140), []) == []
+
+
+def test_a_ledge_offset_sideways_past_the_lower_span_is_not_a_jump():
+    """The same tier up, but the ledge starts 40 units past the lower span's end: it is
+    not over the ground the player jumps from, so no jump lands on it. The old rule
+    allowed this (a 60-unit sideways gap at up to 90 up); sideways offset is not a jump
+    any more, only ground that sits over the lower span is. Without a pad the ledge is
+    unreachable, and the pad that lands there is the way."""
+    pad = Jump((50, 200), (200, 140), "t001")
+    gapped = Walk.of([[0, 200, 100, 200], [140, 140, 240, 140]], [])
+    assert gapped.pads((10, 200), (200, 140), []) is None
+    assert gapped.pads((10, 200), (200, 140), [pad]) == [pad]
+
+
+def test_a_wall_rising_from_the_floor_splits_the_walk():
+    """A vertical foothold is a wall (rule 2): the two floor fragments touch at its
+    foot, but the wall rising through that join means they are not one walk, so the
+    far fragment cannot be reached on foot at all."""
+    ground = [[0, 200, 100, 200], [100, 200, 200, 200], [100, 200, 100, 100]]
+    walk = Walk.of(ground, [])
+    assert walk.pads((10, 200), (190, 200), []) is None
+
+
+def test_a_fall_through_a_wall_is_not_a_fall():
+    """A drop whose line passes through a wall (rule 2) is not a fall to the far side:
+    the lower platform sits beyond the wall from every probe the upper one offers,
+    so it cannot be reached by dropping."""
+    ground = [[0, 100, 100, 100], [110, 200, 210, 200], [105, 140, 105, 200]]
+    walk = Walk.of(ground, [])
+    assert walk.pads((10, 100), (150, 200), []) is None
+    # without the wall the same drop (10 sideways of the last probe) is a plain fall
+    assert Walk.of(ground[:2], []).pads((10, 100), (150, 200), []) == []
 
 
 def test_a_ledge_too_high_to_jump_needs_its_pad():
@@ -82,13 +115,15 @@ def test_a_ledge_too_high_to_jump_needs_its_pad():
 
 
 def test_a_long_climb_of_many_jumps_loses_to_a_pad_that_skips_it():
-    # four ledges 80 apart: each is one jump, so the climb is there to be walked —
-    # at a jump's height plus its fixed effort apiece it costs far more than the pad
-    pad = Jump((50, 500), (50, 180), "t001")
-    ground = [[0, y, 200, y] for y in (500, 420, 340, 260, 180)]
+    """Four ledges one tier (60 units) apart: each is one jump, so the climb is there
+    to be walked — at a jump's height plus its fixed effort apiece (some 320 each) it
+    costs far more than the pad. The old version spaced the ledges 80 apart, which
+    assumed the old 90-unit jump height; one tier is the spacing a jump climbs now."""
+    pad = Jump((50, 500), (50, 260), "t001")
+    ground = [[0, y, 200, y] for y in (500, 440, 380, 320, 260)]
     walk = Walk.of(ground, [])
-    assert walk.pads((10, 500), (150, 180), []) == []
-    assert walk.pads((10, 500), (150, 180), [pad]) == [pad]
+    assert walk.pads((10, 500), (150, 260), []) == []
+    assert walk.pads((10, 500), (150, 260), [pad]) == [pad]
 
 
 def test_a_pad_that_saves_nothing_is_not_named():

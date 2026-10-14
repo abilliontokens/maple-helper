@@ -754,6 +754,7 @@ class DetailWindow(EdgeResize, QWidget):
         self.setLayoutDirection(Qt.RightToLeft if owner.t.rtl else Qt.LeftToRight)
         self._stack: list[tuple[str, str]] = []     # each view pushed, the last one shown
         self._guided: tuple | None = None           # the guide this window set, None while it set none
+        self._page_guide: tuple | None = None       # the guide the view being drawn arms (_npc_body), settled by _draw
         self._routed: str | None = None             # the route arrow's map this window armed, None while it armed none
         self._arming = False                        # a view being drawn as it opens: its way arms the arrow (_open)
         self._rows: list[QWidget] = []
@@ -831,14 +832,21 @@ class DetailWindow(EdgeResize, QWidget):
 
     def _draw(self) -> None:
         """The last view on the history, built again from the KB and where the player is now: also the redraw
-        when they move (the guide let go first — the view may no longer be on their map)."""
-        self._clear_guide()
+        when they move. The guide is settled once the view is built, not let go first: the same guide again is
+        left alone (LOCATION.set_guide stays silent on it), a different one takes its place, and a view that
+        arms none lets the one this window owns go."""
+        self._page_guide = None
         self._clear_body()
         kind, key = self._stack[-1]
         body = {"npc": self._npc_body, "monster": self._monster_body,
                 "item": self._item_body, "map": self._map_body, "sell": self._sell_body}.get(kind)
         if body is not None:
             body(key)
+        if self._page_guide is not None:
+            self._guided = self._page_guide
+            LOCATION.set_guide(self._guided)
+        else:
+            self._clear_guide()
         self._fit()
         if self.isVisible():
             self.dock()
@@ -864,8 +872,7 @@ class DetailWindow(EdgeResize, QWidget):
             self._line(line)
             self._picture(g.minimap(place.map), place.spot, not place.inside, here.spot)
             if place.spot is not None:
-                self._guided = (place.map, place.spot, key)
-                LOCATION.set_guide(self._guided)
+                self._page_guide = (place.map, place.spot, key)   # _draw settles it once the page is built
             return
         self._line(t("lk_on_map", name=name, map=place.map_name or g.name(place.map)))
         self._picture(g.minimap(place.map), place.spot, not place.inside, None)
