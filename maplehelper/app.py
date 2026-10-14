@@ -1641,9 +1641,10 @@ class MapleHelperApp:
 
     def _ensure_routes(self) -> None:
         """A downloaded KB built before routes.json carried the hidden teleports (0.18.0's, on every platform) gave
-        no portal dots and no shop room frames: the file is rebuilt from NiaMeowDB's map data (mapdata.refresh) off
-        the GUI thread, then the KB loaded again so every window takes it. Only the downloaded KB is touched (never
-        the copy bundled in the app); offline, it is tried again on the next start or KB load."""
+        no portal dots and no shop room frames, and one built before it carried where each of them lands can't name
+        the teleport to take: the file is rebuilt from NiaMeowDB's map data (mapdata.refresh) off the GUI thread,
+        then the KB loaded again so every window takes it. Only the downloaded KB is touched (never the copy bundled
+        in the app); offline, it is tried again on the next start or KB load."""
         from pathlib import Path
 
         from . import mapdata
