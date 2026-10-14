@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QFrame, QLabel
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
 
 from maplehelper import routes
 from maplehelper.i18n import I18n
@@ -258,19 +258,25 @@ def test_the_way_to_a_quest_giver_keeps_the_turn_in(tiny):
 
 
 def test_step_lines(tiny):
-    """The window says what the route page says: portal side, cab, fare, arrival."""
+    """The window says what the route page says: portal side, a hidden teleport, cab, fare, arrival."""
     _, g = tiny
     t = I18n("en")
     portal = g.route(HENESYS, HG1).legs[0]
     assert routes.side(portal.spot) == "right"
     says = mapview.route_says(t, g, portal).replace(" ", " ")
-    assert "**right**" in says and "Henesys Hunting Ground I" in says
+    assert "**right**" in says and "Henesys Hunting Ground I" in says and "hidden" not in says
     shown = mapview.says_html(t, says)
     assert "<b>right</b>" in shown and "**" not in shown
     cab = routes.Leg(HENESYS, PERION, "taxi", "Regular Cab", "npc/9001", (0.0625, 0.5))
     assert "Regular Cab" in mapview.route_says(t, g, cab) and "Perion" in mapview.route_says(t, g, cab)
     assert "300" in mapview.route_says(t, g, routes.Leg(HENESYS, PERION, "boat", "Shanks", "", None, 300))
     assert mapview.route_says(t, g, None) == t("route_arrive")
+    # a hidden teleport says so (the blue dot: press up or walk into it), on the same left/right/middle rule
+    hidden = {x: mapview.route_says(t, g, routes.Leg(HENESYS, HG1, "portal", "hide01", spot=(x, 0.5), hidden=True))
+              .replace("\u00a0", " ") for x in (0.1, 0.5, 0.9)}
+    assert all("Take the hidden teleport" in s and "Henesys Hunting Ground I" in s for s in hidden.values())
+    assert "**left**" in hidden[0.1] and "**right**" in hidden[0.9]
+    assert "**left**" not in hidden[0.5] and "**right**" not in hidden[0.5]
 
 
 def test_has_location_ignores_the_live_map(tiny):
@@ -320,12 +326,12 @@ def test_the_window_shows_the_way_from_the_live_map(tiny, isolated_store):
         d.close()
 
 
-def test_the_way_arms_the_route_arrow_by_itself_and_stop_keeps_it_off_until_the_next_one(tiny, isolated_store):
+def test_the_way_arms_the_route_arrow_by_itself_as_the_window_opens(tiny, isolated_store):
     """Perion's ◎ with the player on Henesys: the way, as it shows, points the game minimap's route arrow at Perion
-    (LOCATION.route_dest) with no click, "Stop the route arrow" over its first step (no scrolling past the steps'
-    pictures to reach it). Stop lets it go while the window shows the way — drawn again as the player walks on, it
-    isn't armed again; "Guide me there" points it again, and so does the next ◎. A pick on the search's map page shows
-    here too. Nothing armed and no button with ⚙'s route arrow off, or once the player is on Perion."""
+    (LOCATION.route_dest) by itself, its first step heading the window: nothing to click, ⚙'s route arrow switch
+    alone turns it off. Drawn again as the player walks on, it stays armed; pointed elsewhere meanwhile (the search's
+    map page), no redraw takes it back, the next ◎ does. Nothing armed with ⚙'s route arrow off, or once the player is
+    on Perion."""
     kb, _ = tiny
     settings = isolated_store.Settings()
     old = LOCATION.route_dest
@@ -337,36 +343,27 @@ def test_the_way_arms_the_route_arrow_by_itself_and_stop_keeps_it_off_until_the_
         d.show_map(f"map/{PERION}")
         app.processEvents()
         assert LOCATION.route_dest == PERION                  # armed by itself: no click
-        assert d.route_btn is not None and d.route_btn.text() == "Stop the route arrow"
-        assert d.lay.indexOf(d.route_btn) == 0                # the body's first piece: seen without scrolling
-        assert d.lay.itemAt(1).widget().findChild(QLabel, "TagAccent").text() == "1"     # right over the first step
-        d.route_btn.click()
-        assert LOCATION.route_dest is None and d.route_btn.text() == "Guide me there"
-        assert d.lay.indexOf(d.route_btn) == 0                # shown again (_on_routed): still on top
-        LOCATION.set(Here(HG1, (0.5, 0.5)))                   # the player walks on: the way drawn again, still stopped
+        assert not d.body.findChildren(QPushButton)           # nothing to click
+        assert d.lay.itemAt(0).widget().findChild(QLabel, "TagAccent").text() == "1"     # its first step on top
+        LOCATION.set(Here(HG1, (0.5, 0.5)))                   # the player walks on: the way drawn again, still armed
         app.processEvents()
         assert d.title_label.text() == "From Henesys Hunting Ground I to Perion"
-        assert LOCATION.route_dest is None and d.route_btn.text() == "Guide me there"
-        d.route_btn.click()                                   # Guide me there: pointed again
-        assert LOCATION.route_dest == PERION and d.route_btn.text() == "Stop the route arrow"
-        d.route_btn.click()
-        assert LOCATION.route_dest is None
+        assert LOCATION.route_dest == PERION
+        LOCATION.set_route_dest(SLEEPY)                       # pointed elsewhere on the search's map page meanwhile
+        d.redraw()                                            # drawn again: never taken back
+        assert LOCATION.route_dest == SLEEPY
         d.show_map(f"map/{PERION}")                           # its ◎ again: armed again
-        assert LOCATION.route_dest == PERION and d.route_btn.text() == "Stop the route arrow"
-        LOCATION.set_route_dest(None)                         # let go on the search's map page: the button follows
-        assert d.route_btn.text() == "Guide me there"
-        LOCATION.set_route_dest(PERION)                       # ... and picked there
-        assert d.route_btn.text() == "Stop the route arrow"
+        assert LOCATION.route_dest == PERION
         LOCATION.set_route_dest(None)
-        settings["minimap_route_arrow"] = False               # ⚙'s route arrow off: the way, nothing armed, no button
+        settings["minimap_route_arrow"] = False               # ⚙'s route arrow off: the way, nothing armed
         d.show_map(f"map/{PERION}")
-        assert LOCATION.route_dest is None and d.route_btn is None
+        assert LOCATION.route_dest is None
         assert d.title_label.text() == "From Henesys Hunting Ground I to Perion"
         settings["minimap_route_arrow"] = True
         LOCATION.set(Here(PERION, (0.5, 0.5)))                # already there: nowhere to guide to
         d.show_map(f"map/{PERION}")
         app.processEvents()
-        assert LOCATION.route_dest is None and d.route_btn is None and d.title_label.text() == "From Perion to Perion"
+        assert LOCATION.route_dest is None and d.title_label.text() == "From Perion to Perion"
     finally:
         d.close()
         LOCATION.set(None)
@@ -394,7 +391,7 @@ def test_closing_the_window_lets_go_of_the_arrow_it_armed_never_another_windows(
         LOCATION.set_route_dest(None)
         unseen = mapview.MapLocationDialog(kb, "en", "", isolated_store.Settings())
         unseen.show_map(f"map/{PERION}")
-        assert unseen.route_btn is not None and LOCATION.route_dest is None
+        assert unseen.title_label.text() == "From Henesys to Perion" and LOCATION.route_dest is None
         unseen.close()
     finally:
         LOCATION.set(None)

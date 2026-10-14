@@ -8,12 +8,13 @@ wrap into as many lines as the length leaves room for, the other side following,
 words would take more than WORD_LINES_MAX lines; the length is kept in game_toolbar_width (game_toolbar_height
 upright). Each button has a line icon (assets/icons/toolbar, Lucide's) drawn in its text's colour: small beside the
 words, or alone (a short bar, or the ⚙'s icons mode) with the name in the tooltip. The ⚙ beside the ✕ opens the
-panel with the look of every window over the game, the icons mode, the bar's show/hide key, Cabs & Teleports and
-Minimap: the hidden portals' dots and the route's arrow on the game's minimap, and the overlays in screenshots
-(_SettingsPanel below); the ✕ hides the bar (the app then says how to bring it back). Where the player left it is
-kept in game_toolbar_pos; with none saved it opens just above the game's minimap window (found at the game's top
-left) and follows it until moved. Every colour is read from npcoverlay.palette() when a style is built or a widget
-paints: light text on the dark glass tints, dark text on the white one."""
+panel with the look of every window over the game, the icons mode, the bar's show/hide key, Cabs & Teleports, the
+hidden-teleport routes and Minimap: the hidden portals' dots and the route's arrow on the game's minimap (its colour,
+size and flashing), and the overlays in screenshots (_SettingsPanel below); the ✕ hides the bar (the app then says
+how to bring it back). Where the player left it is kept in game_toolbar_pos; with none saved it opens just above the
+game's minimap window (found at the game's top left) and follows it until moved. Every colour is read from
+npcoverlay.palette() when a style is built or a widget paints: light text on the dark glass tints, dark text on the
+white one."""
 from __future__ import annotations
 
 import time
@@ -66,6 +67,7 @@ from .npcoverlay import (
     palette,
     set_capturable,
 )
+from .portaldots import ARROW_COLORS, ARROW_SIZE_MAX, ARROW_SIZE_MIN
 from .theme import ACCENTS, LIGHT_TINTS, TINTS
 
 SIDE, TOP, BOTTOM = SHADOW + 12, SHADOW + 8, SHADOW + 8    # content margins, past the glass's shadow rim
@@ -95,7 +97,7 @@ PANEL_SIDE = SHADOW + 16
 PANEL_GUTTER = 4       # between the ⚙ panel's sections and their scrollbar, which shows in the side margin...
 PANEL_BAR = SCROLLBAR_W + PANEL_GUTTER   # ...this much of it: the sections keep their place and width either way
 PANEL_SPARE = 16       # the ⚙ panel's height stays this far inside its screen's room: past it, its sections scroll
-FOLLOW_MS = 80         # a transparency drag: every other window over the game follows at most this often
+FOLLOW_MS = 80         # a transparency or arrow-size drag: the windows over the game follow at most this often
 # what "Reset to default look" puts back (the hotkey is no look: it stays)
 LOOK_KEYS = ("overlay_tint", "overlay_accent", "npc_overlay_opacity", "game_toolbar_icons")
 
@@ -311,12 +313,15 @@ class _SettingsPanel(QWidget):
     over the game as tiles of each tint and the lit buttons' accent as dots, the picked one ringed and named;
     Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead of words, and the bar's
     show/hide key in the same key box Settings has; Directions: Cabs & Teleports, whether the way to a found NPC or
-    map rides cabs and NPC teleports or walks; Minimap: the hidden portals' blue dots and the route's orange arrow on
-    the game's minimap, and whether screenshots see the windows over the game (the bar's minimap_toggled: the app
-    follows). Each choice is written, applies at once and stays; "Reset to default look" puts the look back. ✕, the ⚙
-    again or Esc closes it (Esc once the panel has been clicked into: like the search window it takes the keyboard
-    only then, never on opening). It is never taller than its screen: with too little room there for every section
-    (a 1080p screen at 125 %), they scroll under the title row, which stays put to drag the panel by and close it."""
+    map rides cabs and NPC teleports or walks, and Hidden teleport routes, whether it may take the invisible teleports
+    (the blue dots) when they make it shorter (the bar's rides_toggled: a way shown is found again); Minimap: the
+    hidden portals' blue dots and the route's arrow on the game's minimap, the arrow's colour as dots (the picked one
+    ringed and named), its size on a slider in whole pixels and whether it flashes, and whether screenshots see the
+    windows over the game (the bar's minimap_toggled: the app follows). Each choice is written, applies at once and
+    stays; "Reset to default look" puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been
+    clicked into: like the search window it takes the keyboard only then, never on opening). It is never taller than
+    its screen: with too little room there for every section (a 1080p screen at 125 %), they scroll under the title
+    row, which stays put to drag the panel by and close it."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -422,6 +427,19 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         col.addSpacing(3)
         self._rides_hint = self._hint(col)
+        # ... and whether that way may take the invisible teleports (the blue dots) where they make it shorter
+        col.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._hidden_routes_label = QLabel(objectName="Label")
+        self._hidden_routes = _GlassSwitch()
+        self._hidden_routes.setCursor(Qt.PointingHandCursor)
+        self._hidden_routes.clicked.connect(self._pick_hidden_routes)
+        row.addWidget(self._hidden_routes_label, 1)
+        row.addWidget(self._hidden_routes, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        col.addSpacing(3)
+        self._hidden_routes_hint = self._hint(col)
         # Minimap: the hidden portals' dots and the route's arrow on the game's minimap, each on or off, and whether
         # screenshots see the windows over the game (were on the Settings page)
         self._minimap_head = self._section(col)
@@ -448,6 +466,34 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         col.addSpacing(3)
         self._route_arrow_hint = self._hint(col)
+        # the route arrow's look, under its switch: its colour as dots (the picked one ringed and named), its size on
+        # a slider in whole pixels (beside its label), and whether it flashes
+        col.addSpacing(14)
+        self._arrow_color_label, self._arrow_color_name = self._label_row(col)
+        col.addSpacing(8)
+        self._arrow_colors = self._swatches("arrow", ARROW_COLORS, lambda k: ARROW_COLORS[k][1], self._pick_arrow_color)
+        col.addWidget(self._arrow_colors)
+        col.addSpacing(14)
+        self._arrow_size_label, self._arrow_size_value = self._label_row(col, value="Value")
+        col.addSpacing(6)
+        self._arrow_size = Slider(ARROW_SIZE_MIN, ARROW_SIZE_MAX, _edge, lambda: palette().light)
+        self._arrow_size.changed.connect(self._pick_arrow_size)
+        self._arrow_size.released.connect(self._arrow_size_settled)
+        col.addWidget(self._arrow_size)
+        # the app follows a drag of it once a moment, not at every pixel: minimap_toggled redraws windows too
+        self._arrow_follow = QTimer(self, singleShot=True, interval=FOLLOW_MS, timeout=self._bar.minimap_toggled.emit)
+        col.addSpacing(14)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._arrow_flash_label = QLabel(objectName="Label")
+        self._arrow_flash = _GlassSwitch()
+        self._arrow_flash.setCursor(Qt.PointingHandCursor)
+        self._arrow_flash.clicked.connect(self._pick_arrow_flash)
+        row.addWidget(self._arrow_flash_label, 1)
+        row.addWidget(self._arrow_flash, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        col.addSpacing(3)
+        self._arrow_flash_hint = self._hint(col)
         col.addSpacing(14)
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -519,8 +565,9 @@ class _SettingsPanel(QWidget):
         for i, key in enumerate(presets):
             if i and not spacing:
                 row.addStretch(1)
-            # a tint's check reads on its own tile (dark on the white one), an accent's in its own text colour
-            check = (LIGHT.text if key in LIGHT_TINTS else DARK.text) if kind == "tint" else ACCENTS[key][2]
+            # a tint's check reads on its own tile (dark on the white one), a dot's in the dark colour its preset
+            # pairs with it: an accent's own text colour, the route arrow's rim
+            check = (LIGHT.text if key in LIGHT_TINTS else DARK.text) if kind == "tint" else presets[key][2]
             b = Swatch(kind, key, colour_of(key), check, _edge)
             b.clicked.connect(lambda _=False, k=key: picked(k))
             row.addWidget(b)
@@ -545,26 +592,36 @@ class _SettingsPanel(QWidget):
             lb.setText(bidi.plain(t(key) if rtl else t(key).upper(), rtl))
         tint = s["overlay_tint"] if s["overlay_tint"] in TINTS else next(iter(TINTS))      # a stale name: today's
         accent_key = s["overlay_accent"] if s["overlay_accent"] in ACCENTS else next(iter(ACCENTS))
+        arrow_key = (s["minimap_arrow_color"] if s["minimap_arrow_color"] in ARROW_COLORS
+                     else DEFAULT_SETTINGS["minimap_arrow_color"])                  # ... the arrow's: today's orange
         for lb, key in ((self._tint_label, "tbs_tint"), (self._tint_name, TINTS[tint][0]),
                         (self._accent_label, "tbs_accent"), (self._accent_name, ACCENTS[accent_key][0]),
                         (self._opacity_label, "tbs_opacity"), (self._icons_label, "tbs_icons"),
                         (self._icons_hint, "tbs_icons_hint"), (self._hotkey_label, "tb_hotkey"),
                         (self._hotkey_hint, "tb_hotkey_hint"), (self._rides_label, "tb_rides"),
                         (self._rides_hint, "tb_rides_tip"),
+                        (self._hidden_routes_label, "tb_hidden_routes"),
+                        (self._hidden_routes_hint, "tb_hidden_routes_tip"),
                         (self._hidden_portals_label, "minimap_hidden_portals"),
                         (self._hidden_portals_hint, "minimap_hidden_portals_hint"),
                         (self._route_arrow_label, "minimap_route_arrow"),
                         (self._route_arrow_hint, "minimap_route_arrow_hint"),
+                        (self._arrow_color_label, "tbs_arrow_colour"),
+                        (self._arrow_color_name, ARROW_COLORS[arrow_key][0]),
+                        (self._arrow_size_label, "tbs_arrow_size"),
+                        (self._arrow_flash_label, "tbs_arrow_flash"),
+                        (self._arrow_flash_hint, "tbs_arrow_flash_hint"),
                         (self._overlay_shots_label, "overlays_in_screenshots"),
                         (self._overlay_shots_hint, "overlays_in_screenshots_hint")):
             lb.setText(bidi.plain(t(key), rtl))
-        for lb in (self._icons_hint, self._hotkey_hint, self._rides_hint, self._hidden_portals_hint,
-                   self._route_arrow_hint, self._overlay_shots_hint):
+        for lb in (self._icons_hint, self._hotkey_hint, self._rides_hint, self._hidden_routes_hint,
+                   self._hidden_portals_hint, self._route_arrow_hint, self._arrow_flash_hint, self._overlay_shots_hint):
             # Hebrew: two pixels' room at the right, where a line wrapped to the full width drew its first letter
             # past the label's edge, cut off (the wrap measures whole pixels, the glyphs overhang)
             lb.setContentsMargins(0, 0, 2 if rtl else 0, 0)
         self._reset.setText(bidi.plain(t("tbs_reset"), rtl))
-        for row, chosen, presets in ((self._tints, tint, TINTS), (self._accents, accent_key, ACCENTS)):
+        for row, chosen, presets in ((self._tints, tint, TINTS), (self._accents, accent_key, ACCENTS),
+                                     (self._arrow_colors, arrow_key, ARROW_COLORS)):
             for b in row.findChildren(Swatch):
                 key = b.property("key")
                 b.setChecked(key == chosen)
@@ -586,15 +643,26 @@ class _SettingsPanel(QWidget):
         self._hotkey.set_key(s["game_toolbar_hotkey"])
         self._hotkey.set_accent(accent)
         self._hotkey.set_label(t("tb_hotkey"))
-        self._rides.setChecked(bool(s["game_rides"]))
-        self._rides.set_accent(accent)
-        self._rides.setAccessibleName(t("tb_rides"))
-        for switch, key in ((self._hidden_portals, "minimap_hidden_portals"),
-                            (self._route_arrow, "minimap_route_arrow"),
-                            (self._overlay_shots, "overlays_in_screenshots")):     # the Minimap's: each its setting
+        # Directions' and the Minimap's switches: each on from its setting, named as its label
+        for switch, key, name in ((self._rides, "game_rides", "tb_rides"),
+                                  (self._hidden_routes, "route_hidden_teleports", "tb_hidden_routes"),
+                                  (self._hidden_portals, "minimap_hidden_portals", "minimap_hidden_portals"),
+                                  (self._route_arrow, "minimap_route_arrow", "minimap_route_arrow"),
+                                  (self._arrow_flash, "minimap_arrow_flash", "tbs_arrow_flash"),
+                                  (self._overlay_shots, "overlays_in_screenshots", "overlays_in_screenshots")):
             switch.setChecked(bool(s[key]))
             switch.set_accent(accent)
-            switch.setAccessibleName(t(key))
+            switch.setAccessibleName(t(name))
+        # the route arrow's size in whole pixels, between the slider's ends (a size past one: that end)
+        try:
+            size = float(s["minimap_arrow_size"])
+        except (TypeError, ValueError):
+            size = DEFAULT_SETTINGS["minimap_arrow_size"]
+        size = round(min(ARROW_SIZE_MAX, max(ARROW_SIZE_MIN, size)))
+        self._arrow_size.set_value(size)
+        self._arrow_size.set_accent(accent)
+        self._arrow_size.setAccessibleName(t("tbs_arrow_size"))
+        self._arrow_size_value.setText(bidi.ltr_block(f"{size} px", rtl))
         self._reset.setEnabled(any(s[k] != DEFAULT_SETTINGS[k] for k in LOOK_KEYS))
         self._fit(self._room())
         self.update()
@@ -674,6 +742,13 @@ class _SettingsPanel(QWidget):
         self._settings["game_rides"] = self._rides.isChecked()
         self._bar.rides_toggled.emit()
 
+    def _pick_hidden_routes(self, _=False) -> None:
+        """Hidden teleport routes: written, and a way already shown is found again, through the invisible teleports
+        (the blue dots) where they make it shorter or past them (the bar's rides_toggled, as Cabs & Teleports: the app
+        redraws the search's page, the ◎ window and the route's arrow on the game's minimap)."""
+        self._settings["route_hidden_teleports"] = self._hidden_routes.isChecked()
+        self._bar.rides_toggled.emit()
+
     def _pick_hidden(self, _=False) -> None:
         """Hidden portals on the minimap: written, and the blue dots on the game's minimap come or go (the bar's
         minimap_toggled, which the app wires to the dots, the windows' captures and the pickers' pages)."""
@@ -684,6 +759,37 @@ class _SettingsPanel(QWidget):
         """The route arrow on the minimap: written, and the arrow comes or goes, with the Guide me there button on
         the search's page and in the ◎ window (minimap_toggled)."""
         self._settings["minimap_route_arrow"] = self._route_arrow.isChecked()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_arrow_color(self, key: str) -> None:
+        """The route arrow's colour: written, ringed and named here, and the arrow on the game's minimap drawn in it
+        (minimap_toggled)."""
+        self._settings["minimap_arrow_color"] = key
+        self.refresh()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_arrow_size(self, value: float) -> None:
+        """A length on the slider: the whole pixel nearest it is written at once, under the knob and beside the label,
+        and the app follows a moment later (_arrow_follow: minimap_toggled, which redraws the arrow on the game's
+        minimap but the search's page and the ◎ window too, once per FOLLOW_MS of a drag, not at every pixel)."""
+        size = round(value)
+        if size == self._settings["minimap_arrow_size"]:
+            self._arrow_size.set_value(size)        # a step inside the same pixel: the knob stays on it
+            return
+        self._settings["minimap_arrow_size"] = size
+        self.refresh()                              # the knob on the new pixel, its px beside the label
+        if not self._arrow_follow.isActive():
+            self._arrow_follow.start()
+
+    def _arrow_size_settled(self) -> None:
+        """The slider let go: the app follows the last pixel now, not after the moment's wait."""
+        if self._arrow_follow.isActive():
+            self._arrow_follow.stop()
+            self._bar.minimap_toggled.emit()
+
+    def _pick_arrow_flash(self, _=False) -> None:
+        """The flashing arrow: written, and the arrow on the game's minimap blinks or holds still (minimap_toggled)."""
+        self._settings["minimap_arrow_flash"] = self._arrow_flash.isChecked()
         self._bar.minimap_toggled.emit()
 
     def _pick_shots(self, _=False) -> None:
@@ -836,16 +942,16 @@ class GameToolbar(EdgeResize, QWidget):
     the ✕ turns the bar itself off (closed: the app says how to bring it back). Its length is dragged shorter and
     longer (its width; its height upright, the ◯ before the grip turning it), the buttons wrapping into lines and
     showing icons alone once the words would take more than WORD_LINES_MAX lines; Tools opens a little card with the
-    tool windows (_ToolsMenu); the ⚙ opens the panel with the look, the icons mode, the bar's key, Cabs & Teleports
-    and Minimap: the hidden portals, the route arrow and the overlays in screenshots (rides_toggled and
-    minimap_toggled stay the bar's signals). Clicks work but it never takes the keyboard from the game, and the
-    minimap reads never see it. Its place is kept in game_toolbar_pos, its length in game_toolbar_width (or
-    game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
+    tool windows (_ToolsMenu); the ⚙ opens the panel with the look, the icons mode, the bar's key, Cabs & Teleports,
+    the hidden-teleport routes and Minimap: the hidden portals, the route arrow (its colour, size and flashing) and
+    the overlays in screenshots (rides_toggled and minimap_toggled stay the bar's signals). Clicks work but it never
+    takes the keyboard from the game, and the minimap reads never see it. Its place is kept in game_toolbar_pos, its
+    length in game_toolbar_width (or game_toolbar_height upright), the way it stands in game_toolbar_vertical."""
 
     search_requested = Signal(str)     # which search to open: "monster_npc" | "map" | "item" | "sell"
     npc_toggled = Signal()             # settings["npc_overlay"] flipped: the NPCs-here window follows
-    rides_toggled = Signal()           # the ⚙ panel's Cabs & Teleports flipped settings["game_rides"]: a way shown follows
-    minimap_toggled = Signal()         # a ⚙ panel Minimap switch flipped its setting: dots, screenshots, pickers follow
+    rides_toggled = Signal()           # a ⚙ panel Directions switch flipped its setting: a way shown follows
+    minimap_toggled = Signal()         # a ⚙ panel Minimap choice written: dots, arrow, screenshots, pickers follow
     loot_toggled = Signal()            # settings["loot_overlay"] flipped: the loot log's window follows
     grind_toggled = Signal()           # settings["grind_bar"] flipped: the grind bar over the game follows
     tool_toggled = Signal(str)         # a TOOLS setting flipped (the Tools card's buttons): its window follows
@@ -934,7 +1040,7 @@ class GameToolbar(EdgeResize, QWidget):
         self._flow.addWidget(self._tools_btn)
         self._menu = _ToolsMenu(self)
         self._tools: dict[str, QPushButton] = self._menu.buttons     # each its window's setting
-        # the ⚙: the panel with the look, the icons mode, the bar's key, Cabs & Teleports and Minimap; then the ✕
+        # the ⚙: the panel with the look, the icons mode, the bar's key, Directions and Minimap; then the ✕
         self._gear = QToolButton(objectName="Gear")
         self._close = QToolButton(objectName="Close")
         for b, slot in ((self._gear, self._gear_clicked), (self._close, self._close_clicked)):

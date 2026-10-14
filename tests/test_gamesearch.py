@@ -335,7 +335,8 @@ def test_a_map_row_opens_the_maps_page_and_back_returns(win, qapp, clean_locatio
     from maplehelper import gamelookup
     monkeypatch.setattr(gamelookup, "map_monsters",
                         lambda kb, key: [("monster/2230104", "Stump", 15, 3)] if key == f"map/{GARDEN}" else [])
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
+    monkeypatch.setattr(gamelookup, "way_to",
+                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
     win.open("monster_npc")
     win._box.setText("snail")
     pump(qapp, 200)
@@ -367,7 +368,8 @@ def test_the_next_page_is_measured_at_once_never_folded_to_the_header(win, qapp,
     from maplehelper import gamelookup
     monkeypatch.setattr(gamelookup, "map_monsters",
                         lambda kb, key: [("monster/2230104", "Stump", 15, 3)] if key == f"map/{GARDEN}" else [])
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
+    monkeypatch.setattr(gamelookup, "way_to",
+                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
     win.open("monster_npc")
     win._box.setText("snail")
     pump(qapp, 200)
@@ -388,7 +390,8 @@ def test_the_page_window_keeps_the_size_the_player_drags_it_to(win, qapp, settin
     from maplehelper import gamelookup
     from maplehelper.ui import gamesearch, mapview
     monkeypatch.setattr(gamelookup, "map_monsters", lambda kb, key: [])
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
+    monkeypatch.setattr(gamelookup, "way_to",
+                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
     widths = []
     real = mapview.route_picture
     monkeypatch.setattr(mapview, "route_picture",
@@ -670,8 +673,8 @@ def test_an_npc_on_the_players_map_guides_and_hiding_clears_it(win, qapp, kb, cl
     monkeypatch.setattr(gamelookup, "npc_place",
                         lambda kb, key, here_map=None: gamelookup.Place(MID, "Fake Town", "Fake Street", spot))
     monkeypatch.setattr(gamelookup, "map_monsters", lambda kb, key: [])
-    monkeypatch.setattr(gamelookup, "way_to",
-                        lambda kb, here, to, rides=True: gamelookup.Way(here="999999999", legs=(), known=False))
+    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True, hidden=False:
+                        gamelookup.Way(here="999999999", legs=(), known=False))
     clean_location.set(_here(MID, (0.5, 0.5)))
     win.open("monster_npc")
     win._detail.open_view("npc", "npc/3")
@@ -714,7 +717,7 @@ def test_an_npc_elsewhere_shows_the_way_there_step_by_step_with_each_maps_pictur
             Leg("010020002", FAR, "npc", "Bart", npc="npc/9", spot=(0.1, 0.5)))
     monkeypatch.setattr(gamelookup, "npc_place",
                         lambda kb, key, here_map=None: gamelookup.Place(FAR, "Far Map", "Far Street", (0.5, 0.5)))
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True:
+    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True, hidden=False:
                         gamelookup.Way(here=MID, legs=ride if rides else walk, known=True))
     clean_location.set(_here(MID, (0.5, 0.5)))
     win.open("monster_npc")
@@ -760,20 +763,21 @@ def test_an_npc_elsewhere_shows_the_way_there_step_by_step_with_each_maps_pictur
     assert _texts(d)[1:] == ["The way from here on foot", guiding, *says(walk)]
 
 
-def test_a_maps_page_arms_the_route_arrow_by_itself_and_stop_keeps_it_off_for_that_page(
+def test_a_maps_page_arms_the_route_arrow_as_it_opens_and_lets_go_of_it_hidden(
         win, qapp, clean_location, graph, monkeypatch):
-    """A map with a way there from the player's: its page, as it opens, points the game minimap's route arrow along
-    the way (LOCATION.route_dest) with no click, and says so over "Stop the route arrow", both heading the way under
-    its title and over the steps (no scrolling past a long way's pictures to reach them). Stop lets it go for that
-    page: drawn again (the player walking on) or come back to with ‹ Back, it isn't armed again; "Guide me there"
-    points it again, and opening the page afresh arms it again. A pick in the ◎ window shows here too; hidden, the
-    window lets go of the arrow it armed, never another window's. Nothing armed and no button with ⚙'s route arrow
-    off, on the map itself, or with no way known (the player's map not read yet)."""
+    """A map with a way there from the player's: its page, as it opens (a search click, a row's, ‹ Back), points the
+    game minimap's route arrow along the way (LOCATION.route_dest) by itself, and a muted line heading the way, under
+    its title and over the steps, says so. Nothing on the page to click: ⚙'s route arrow switch alone turns it off.
+    Drawn again (the player walking on) it stays armed; pointed elsewhere in the ◎ window, the line goes and no redraw
+    takes the arrow back. Hidden, the window lets go of the arrow it armed, never another window's. Nothing armed and
+    no line with ⚙'s route arrow off, on the map itself, or with no way known (the player's map not read yet)."""
+    from PySide6.QtWidgets import QLabel
+
     from maplehelper import gamelookup
     from maplehelper.routes import Leg
     walk = (Leg(MID, FAR, "portal", "the door", spot=(0.9, 0.5)),)
 
-    def way_to(kb, here, to, rides=True):
+    def way_to(kb, here, to, rides=True, hidden=False):
         if here is None:
             return gamelookup.Way(None, (), False)
         return gamelookup.Way(here, () if here == to else walk, True)
@@ -784,56 +788,43 @@ def test_a_maps_page_arms_the_route_arrow_by_itself_and_stop_keeps_it_off_for_th
     d = win._detail
     d.open_view("map", f"map/{FAR}")
     title, step, guiding = "The way from here on foot", "1 · Fake Town", "Route arrow: to Far Map"
-
-    def top(n):
-        """The page's first n pieces as the player reads them down, the route button as [its text]."""
-        return [f"[{w.text()}]" if w is d.route_btn else w.text() for w in _pieces(d)[:n]]
     assert clean_location.route_dest == FAR                      # armed as it opened: the game's minimap points there
-    assert d.route_btn is not None and d.route_btn.text() == "Stop the route arrow"
-    assert top(4) == [title, guiding, "[Stop the route arrow]", step]     # said over the button, both over the steps
-    d.route_btn.click()
-    assert clean_location.route_dest is None                     # stopped
-    assert d.route_btn.text() == "Guide me there" and guiding not in _texts(d)
-    assert top(3) == [title, "[Guide me there]", step]
-    d.redraw()                                                   # drawn again: still stopped
+    assert _texts(d)[:3] == [title, guiding, step]               # said heading the way, over the steps
+    assert all(isinstance(w, QLabel) for w in _pieces(d))        # nothing to click
+    d.redraw()                                                   # drawn again: still armed, still said
     clean_location.set(_here(MID, (0.4, 0.5)))                   # the player walks on: likewise
-    assert clean_location.route_dest is None and d.route_btn.text() == "Guide me there"
+    assert clean_location.route_dest == FAR and _texts(d)[:3] == [title, guiding, step]
+    clean_location.set_route_dest(GARDEN)                        # pointed elsewhere in the ◎ window: the line goes,
+    d.redraw()                                                   # and no redraw takes the arrow back
+    clean_location.set(_here(MID, (0.6, 0.5)))
+    assert clean_location.route_dest == GARDEN and _texts(d)[:2] == [title, step]
     d.push("map", f"map/{MID}")                                  # their own map's page: nothing to arm there
-    assert clean_location.route_dest is None and d.route_btn is None and _texts(d) == ["You're on this map"]
-    d.go_back()                                                  # ‹ Back to the stopped page: still stopped
-    assert clean_location.route_dest is None and top(3) == [title, "[Guide me there]", step]
-    d.route_btn.click()                                          # Guide me there: pointed again
-    assert clean_location.route_dest == FAR and top(4) == [title, guiding, "[Stop the route arrow]", step]
-    clean_location.set_route_dest(None)                          # let go in the ◎ window: the page follows
-    assert d.route_btn.text() == "Guide me there" and guiding not in _texts(d)
-    clean_location.set_route_dest(FAR)                           # ... and picked there
-    assert top(4) == [title, guiding, "[Stop the route arrow]", step]
-    d.route_btn.click()
-    assert clean_location.route_dest is None
-    d.open_view("map", f"map/{FAR}")                             # opened afresh: armed again
-    assert clean_location.route_dest == FAR and top(4) == [title, guiding, "[Stop the route arrow]", step]
+    assert clean_location.route_dest == GARDEN and _texts(d) == ["You're on this map"]
+    d.go_back()                                                  # ‹ Back: the way opened again, armed again
+    assert clean_location.route_dest == FAR and _texts(d)[:3] == [title, guiding, step]
+    win._settings["minimap_route_arrow"] = False                 # ⚙'s switch off: no arrow drawn, and the page drawn
+    win.rides_changed()                                          # again (the app's _minimap_toggled) says none
+    assert _texts(d)[:2] == [title, step] and guiding not in _texts(d)
+    win._settings["minimap_route_arrow"] = True
     win.hide()                                                   # hidden with the search: the arrow it armed let go
     assert not d.isVisible() and clean_location.route_dest is None
     win.open("monster_npc")
     d.open_view("map", f"map/{FAR}")
     assert clean_location.route_dest == FAR
     clean_location.set_route_dest(GARDEN)                        # pointed elsewhere in the ◎ window meanwhile
-    assert d.route_btn.text() == "Guide me there"
     d.close_btn.click()                                          # hidden: that one isn't this window's to let go
     assert not d.isVisible() and clean_location.route_dest == GARDEN
     clean_location.set_route_dest(None)
     win._settings["minimap_route_arrow"] = False                 # ⚙'s route arrow off: the steps, nothing armed
     d.open_view("map", f"map/{FAR}")
-    assert clean_location.route_dest is None and d.route_btn is None
-    assert _texts(d)[:2] == [title, step] and guiding not in _texts(d)
+    assert clean_location.route_dest is None and _texts(d)[:2] == [title, step] and guiding not in _texts(d)
     win._settings["minimap_route_arrow"] = True
     clean_location.set(_here(FAR))                               # on the map itself: nowhere to guide to
     d.open_view("map", f"map/{FAR}")
-    assert clean_location.route_dest is None and d.route_btn is None and _texts(d) == ["You're on this map"]
+    assert clean_location.route_dest is None and _texts(d) == ["You're on this map"]
     clean_location.set(None)                                     # their map not read yet: no way known
     d.open_view("map", f"map/{FAR}")
-    assert clean_location.route_dest is None and d.route_btn is None
-    assert _texts(d) == [title, win.t("lk_way_unknown_here")]
+    assert clean_location.route_dest is None and _texts(d) == [title, win.t("lk_way_unknown_here")]
 
 
 def test_the_maps_are_listed_before_anything_is_typed_and_a_search_narrows_them(win, qapp, kb, monkeypatch):

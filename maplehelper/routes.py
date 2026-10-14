@@ -4,6 +4,9 @@ The graph:
 - portals: routes.json (tools/scrape_meowdb.py, from the map data NiaMeowDB's own Pathfinder reads) gives every map's
   portals with the map each one leads to, and the NPCs standing on it. A portal goes one way; the way back is the
   other map's own portal, when it has one.
+- hidden teleports: a portal the game's minimap never draws (routes.json "hidden": a press-up or touch teleport, the
+  blue dots the app marks) is a hidden step (Leg.hidden), unless it is a building's door (DOOR). A way takes one only
+  where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route).
 - taxis: the Pathfinder's taxi towns (routes.json "taxi"), each with its cab NPC on the map.
 - boats: a KB guide that says so ("take the boat from Shanks at the dock to Lith Harbor"), one way.
 - NPC trips: an NPC whose own words offer one ("Want to head over to Florina Beach?"), and the NPC there who takes
@@ -28,6 +31,9 @@ FOUND_MAX = 4096                # Graph.find's remembered texts (names; the AI's
 # 122-130 map units up on four live captures; dots that high read too high in game, and the owner set them lower in
 # game (2026-10-09: 125, then 100, 75, 50; 25 units is ~3 screen px at a x2 minimap) (hidden_spots)
 PORTAL_MARK_RISE = 50
+# a building's door, as the game names its portal: in00, in01_1, jobin00. The game's minimap doesn't draw it either,
+# but the building does: a step like any portal, never Leg.hidden (gamelookup and ui.npcoverlay find buildings by it)
+DOOR = re.compile(r"in\d")
 # what a step costs in the search: a short walk beats a cab ride, a long one doesn't
 COST = {"portal": 1, "npc": 2, "boat": 3, "taxi": 4}
 PAID = ("taxi", "boat")         # steps a player pays mesos for (how many only when a guide says: Leg.fare)
@@ -51,6 +57,7 @@ class Leg:
     npc: str = ""                        # the NPC's KB key ("npc/112")
     spot: tuple[float, float] | None = None     # (0-1, 0-1) on the first map's minimap
     fare: int | None = None              # mesos, when a KB guide names the price ("... for 300 mesos")
+    hidden: bool = False                 # a portal the game's minimap never draws (MapInfo.hidden), not a DOOR
 
 
 @dataclass
@@ -115,12 +122,21 @@ class Graph:
             self.maps[mid] = info
         self.edges: dict[str, list[Leg]] = {mid: [] for mid in self.maps}
         for mid, m in raw.items():
-            seen = set()
+            # one portal a destination, as the Pathfinder does: the first one the game draws, else the first hidden
+            # one (in the map's "hidden" list by name and point, and no door). A hidden one beside a drawn one to the
+            # same map is dropped: route never takes it over the drawn one, and as a second edge it made a building
+            # of two ways out (ui.mapview.in_building), listed a map twice among a map's entrances and shifted the
+            # "most ways out" tie-breaks (find_town, exact, the minimap reader's pick among same-named maps)
+            secret = {(h.get("name") or "", h.get("x"), h.get("y")) for h in self.maps[mid].hidden}
+            first: dict[str, Leg] = {}
             for p in m.get("portals") or []:
-                to = str(p.get("to") or "")
-                if to in self.maps and to != mid and to not in seen:
-                    seen.add(to)       # the first portal there, as the Pathfinder does
-                    self._add(Leg(mid, to, "portal", p.get("name") or "", spot=self._spot(mid, p)))
+                to, name = str(p.get("to") or ""), p.get("name") or ""
+                if to not in self.maps or to == mid or (to in first and not first[to].hidden):
+                    continue
+                hidden = (name, p.get("x"), p.get("y")) in secret and not DOOR.search(name)
+                if to not in first or not hidden:
+                    first[to] = Leg(mid, to, "portal", name, spot=self._spot(mid, p), hidden=hidden)
+            self.edges[mid].extend(first.values())
         self._taxis([t for t in data.get("taxi") or [] if t in self.maps])
         self._boats()
         self._npc_trips()
@@ -226,29 +242,35 @@ class Graph:
 
     # ------------------------------------------------------------ routing
 
-    def route(self, start: str, end: str, taxi: bool = True, teleport: bool = True) -> Route | None:
+    def route(self, start: str, end: str, taxi: bool = True, teleport: bool = True,
+              hidden: bool = False) -> Route | None:
         """The cheapest way (COST per step) from one map to another; taxi=False walks (no cab fare), teleport=False
         leaves out the NPCs who take you somewhere ("Want to head over to Florina Beach?"). Boats always count:
-        a sea has no other way across."""
+        a sea has no other way across. A hidden teleport (Leg.hidden) never leaves a map out of reach: by default
+        the way takes as few as it can, so one through portals the game draws wins however long it is (a shop's
+        hidden exit, the Subway: still a way); hidden=True (the player's setting) costs one like any portal, taken
+        where it makes the way shorter, a tie going to the drawn one."""
         if start not in self.maps or end not in self.maps:
             return None
         if start == end:
             return Route(start, end)
-        best = {start: 0}
+        # a map's best so far: (hidden steps, cost), or with hidden=True (cost, hidden steps)
+        best = {start: (0, 0)}
         came: dict[str, Leg] = {}
-        queue = [(0, 0, start)]
+        queue = [((0, 0), 0, start)]
         n = 0
         while queue:
-            cost, _, here = heapq.heappop(queue)
+            score, _, here = heapq.heappop(queue)
             if here == end:
                 break
-            if cost > best.get(here, cost):
+            if score > best[here]:
                 continue
             for leg in self.edges[here]:
                 if (leg.kind == "taxi" and not taxi) or (leg.kind == "npc" and not teleport):
                     continue
-                c = cost + COST[leg.kind]
-                if c < best.get(leg.to, c + 1):
+                cost, unseen = COST[leg.kind], int(leg.hidden)
+                c = (score[0] + cost, score[1] + unseen) if hidden else (score[0] + unseen, score[1] + cost)
+                if leg.to not in best or c < best[leg.to]:
                     best[leg.to], came[leg.to] = c, leg
                     n += 1
                     heapq.heappush(queue, (c, n, leg.to))
@@ -435,7 +457,9 @@ def describe(graph: Graph, r: Route) -> list[str]:
         at, to = graph.name(leg.frm), graph.name(leg.to)
         where = side(leg.spot)
         if leg.kind == "portal":
-            bit = f"take the portal{' on the ' + where + ' side' if where and where != 'middle' else ''} to {to}"
+            on = f" on the {where} side" if where and where != "middle" else ""
+            bit = (f"take the hidden teleport{on} to {to} (the game doesn't draw it: press up on its spot or walk "
+                   "into it)" if leg.hidden else f"take the portal{on} to {to}")
         elif leg.kind == "taxi":
             bit = f"talk to {leg.via} and take the taxi to {to} (costs mesos)"
         elif leg.kind == "boat":

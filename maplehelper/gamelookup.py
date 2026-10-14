@@ -12,9 +12,6 @@ from .kb import memo
 
 _CACHE = "_game_lookup"     # the kb.memo key holding this module's per-KB table indexes
 
-# the door the game names in00/in01_1/jobin00...: the same rule as ui.npcoverlay.buildings_off, kept here in words
-# (npcoverlay imports Qt, this module must stay importable without it)
-_DOOR = re.compile(r"in\d")
 UNKNOWN_LEVEL = 999         # a monster without a Level in its props, sorted after every known one (no level chip)
 
 
@@ -59,11 +56,11 @@ class Seller:
 
 def _buildings_off(g, mid: str) -> list:
     """The buildings entered from this map, as the portal legs that lead in: the same rule as
-    ui.npcoverlay.buildings_off (a door the game names in00/in01_1/jobin00, into a map that leads back here),
+    ui.npcoverlay.buildings_off (a door, routes.DOOR, into a map that leads back here),
     answered here so this module stays Qt-free."""
     edges = getattr(g, "edges", {})
     return [leg for leg in edges.get(mid, ())
-            if leg.kind == "portal" and _DOOR.search(leg.via or "") and leg.to in g.known
+            if leg.kind == "portal" and routes.DOOR.search(leg.via or "") and leg.to in g.known
             and any(back.to == mid for back in edges.get(leg.to, ()))]
 
 
@@ -99,12 +96,13 @@ def npc_place(kb, key: str, here_map: str | None = None) -> Place | None:
     return Place(mid, g.name(mid), _street(g, mid), g.picture_spot(mid, npc) if npc else None)
 
 
-def way_to(kb, here_map: str | None, to_map: str, rides: bool = True) -> Way:
+def way_to(kb, here_map: str | None, to_map: str, rides: bool = True, hidden: bool = False) -> Way:
     """The routes.of(kb).route(here, to) as a Way: unknown here or no route is known False with no legs.
-    rides=False: on foot (no cab, no NPC teleport; a boat still, a sea has no other way across)."""
+    rides=False: on foot (no cab, no NPC teleport; a boat still, a sea has no other way across). hidden=True: the
+    player's setting (route_hidden_teleports), a hidden teleport wherever it makes the way shorter (Graph.route)."""
     if here_map is None:
         return Way(None, (), False)
-    r = routes.of(kb).route(here_map, to_map, taxi=rides, teleport=rides)
+    r = routes.of(kb).route(here_map, to_map, taxi=rides, teleport=rides, hidden=hidden)
     if r is None:
         return Way(here_map, (), False)
     return Way(here_map, tuple(r.legs), True)

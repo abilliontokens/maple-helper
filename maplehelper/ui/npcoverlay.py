@@ -10,7 +10,6 @@ it; only the filter box, once clicked, borrows it while the player types) nor is
 from __future__ import annotations
 
 import logging
-import re
 import sys
 import time
 from dataclasses import dataclass
@@ -240,16 +239,13 @@ class NpcHere:
     inside: str = ""
 
 
-_DOOR = re.compile(r"in\d")             # the game names a building's door portal in00, in01_1, jobin00...
-
-
 def buildings_off(g, mid: str) -> list:
     """The buildings entered from this map, as the portal legs that lead in (Leg.to the building, Leg.spot its door
-    here): a door the game names in00/in01_1/jobin00, into a map that leads back here. That's Kerning City's shops,
-    hospital, hideout and civic center, not its subway or the construction site (live data, 2026-10-10)."""
+    here): a door the game names in00/in01_1/jobin00 (routes.DOOR), into a map that leads back here. That's Kerning
+    City's shops, hospital, hideout and civic center, not its subway or the construction site (live data, 2026-10-10)."""
     edges = getattr(g, "edges", {})
     return [leg for leg in edges.get(mid, ())
-            if leg.kind == "portal" and _DOOR.search(leg.via or "") and leg.to in g.known
+            if leg.kind == "portal" and routes.DOOR.search(leg.via or "") and leg.to in g.known
             and any(back.to == mid for back in edges.get(leg.to, ()))]
 
 

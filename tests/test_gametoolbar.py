@@ -4,13 +4,14 @@ on the button that opened it, the ✕ turning the bar off (and saying so, for th
 and its place on the screen — above the minimap's box (LOCATION.box) and with it, at the saved spot, and the spot
 kept after a drag. Its width is the player's too: the buttons wrap into as many rows as the width leaves room for.
 Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
-tint, the accent, the transparency, icons instead of words, the bar's key, the Minimap switches, Reset) are written
-and followed live; the panel is no taller than its screen, its sections scrolling under its title row."""
+tint, the accent, the transparency, icons instead of words, the bar's key, Cabs & Teleports and the hidden-teleport
+routes, the Minimap switches and the route arrow's colour, size and flashing, Reset) are written and followed live;
+the panel is no taller than its screen, its sections scrolling under its title row."""
 import os
 
 import pytest
 from PySide6.QtCore import QPoint, QSize, Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QColor, QGuiApplication, QIcon
 from PySide6.QtWidgets import QPushButton
 from PySide6.QtTest import QTest
 
@@ -114,6 +115,30 @@ def test_cabs_and_teleports_is_a_switch_in_the_gear_panel_off_at_first(bar):
     assert p._rides.isChecked() is True and p._reset.isEnabled()
     p._reset.click()                    # no look: Reset leaves it
     assert s["game_rides"] is True and s["overlay_accent"] == "green"
+
+
+def test_hidden_teleport_routes_is_a_switch_under_cabs_and_teleports_off_at_first(bar):
+    """Off on a new install: a way takes only the portals the game shows until the player lets it take the invisible
+    teleports (the blue dots), with the switch under Cabs & Teleports in the ⚙ panel's Directions. Each flip is
+    written and said with the bar's rides_toggled (the app finds a way shown again, as for Cabs & Teleports), and a
+    setting changed elsewhere is back on the switch at the next refresh."""
+    w, s = bar
+    seen = []
+    w.rides_toggled.connect(lambda: seen.append((s["game_rides"], s["route_hidden_teleports"])))
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    y = lambda widget: widget.mapTo(p, QPoint(0, 0)).y()  # noqa: E731
+    assert y(p._way_head) < y(p._rides_label) < y(p._hidden_routes_label) < y(p._minimap_head)
+    assert p._hidden_routes_label.text() == p._hidden_routes.accessibleName() == "Hidden teleport routes"
+    assert p._hidden_routes_hint.text() == w.t("tb_hidden_routes_tip")      # the row says what the setting does
+    assert p._hidden_routes.isChecked() is False and s["route_hidden_teleports"] is False
+    p._hidden_routes.click()
+    p._hidden_routes.click()
+    assert seen == [(False, True), (False, False)]          # Cabs & Teleports left as it was
+    s["route_hidden_teleports"] = True
+    w.refresh()
+    assert p._hidden_routes.isChecked() is True
 
 
 # ------------------------------------------------------------ the searches
@@ -672,7 +697,7 @@ def test_a_listening_key_box_lets_the_app_take_its_key_back(bar):
 
 
 def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
-    from maplehelper.ui import gametoolbar
+    from maplehelper.ui import gametoolbar, portaldots
     w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n("he"))
     try:
         w.refresh()
@@ -683,6 +708,12 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
         tiles = p._tints.findChildren(QPushButton)
         assert tiles[0].x() > tiles[-1].x()                            # the tiles run from the right
         assert p._tint_name.text() == bidi.plain("כהה", True)
+        sl = p._arrow_size
+        assert sl._x(portaldots.ARROW_SIZE_MIN) > sl._x(portaldots.ARROW_SIZE_MAX)   # the shortest arrow on the right
+        assert p._arrow_size_value.text() == bidi.ltr_block("22 px", True)
+        assert p._arrow_flash_label.text() == bidi.plain("חץ מהבהב", True)
+        # the new hints keep every hint's two pixels at the right (a wrapped Hebrew line's first letter overhangs)
+        assert [h.contentsMargins().right() for h in (p._hidden_routes_hint, p._arrow_flash_hint)] == [2, 2]
     finally:
         w.close()
         w._panel.close()
@@ -768,6 +799,85 @@ def test_the_minimap_switches_are_in_the_gear_panel_and_signal_the_app(bar):
     s["minimap_hidden_portals"], s["minimap_route_arrow"], s["overlays_in_screenshots"] = True, True, False
     w.refresh()                         # changed elsewhere: each switch follows
     assert [b.isChecked() for b in switches] == [True, True, False]
+
+
+def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_signal_the_app(bar):
+    """Under the route arrow's switch: its colour as dots (orange at first, the picked one ringed in itself and named
+    beside its label), its size on a slider in whole pixels (22 at first, its px beside its label) and whether it
+    flashes (off at first). Each choice is written and said with the bar's minimap_toggled (the app redraws the arrow,
+    the search's page and the ◎ window); a drag of the size is written at every pixel but said only once a moment and
+    once more on letting go. A setting changed elsewhere is back on its control at the next refresh."""
+    from maplehelper.ui import gametoolbar, portaldots
+    w, s = bar
+    seen = []
+    w.minimap_toggled.connect(lambda: seen.append((s["minimap_arrow_color"], s["minimap_arrow_size"],
+                                                   s["minimap_arrow_flash"])))
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    y = lambda widget: widget.mapTo(p, QPoint(0, 0)).y()  # noqa: E731
+    assert (y(p._route_arrow_hint) < y(p._arrow_color_label) < y(p._arrow_colors) < y(p._arrow_size_label)
+            < y(p._arrow_size) < y(p._arrow_flash_label) < y(p._overlay_shots_label))
+    assert [p._arrow_color_label.text(), p._arrow_size_label.text(), p._arrow_flash_label.text()] == [
+        "Route arrow colour", "Route arrow size", "Flashing arrow"]
+    assert p._arrow_flash_hint.text() == "The arrow blinks, so it is easy to spot on a busy minimap."
+    # the colour: a dot in each ARROW_COLORS fill, named from its i18n key, the picked one ringed in itself
+    dots = {b.property("key"): b for b in p._arrow_colors.findChildren(QPushButton)}
+    picked = lambda: [key for key, b in dots.items() if b.isChecked()]  # noqa: E731
+    assert list(dots) == list(portaldots.ARROW_COLORS)
+    assert all(b.property("colour") == portaldots.ARROW_COLORS[key][1] for key, b in dots.items())
+    assert picked() == ["orange"] and p._arrow_color_name.text() == "Orange"
+    assert dots["blue"].accessibleName() == dots["blue"].toolTip() == "Blue"
+    dots["blue"].click()
+    assert s["minimap_arrow_color"] == "blue" and seen == [("blue", 22, False)]
+    assert picked() == ["blue"] and p._arrow_color_name.text() == "Blue"
+    assert dots["blue"]._ring == QColor(portaldots.ARROW_COLORS["blue"][1])
+    # the size: a press anywhere on the track writes the whole pixel under it as an int at once, the knob on it and its
+    # px beside; the app is told when the mouse lets go
+    sl = p._arrow_size
+    assert sl.value() == 22 and p._arrow_size_value.text() == "22 px" and sl.accessibleName() == "Route arrow size"
+    at = QPoint(round(sl._x(30)), sl.height() // 2)
+    QTest.mousePress(sl, Qt.LeftButton, pos=at)
+    assert s["minimap_arrow_size"] == 30 and type(s["minimap_arrow_size"]) is int and len(seen) == 1
+    assert sl.value() == 30 and p._arrow_size_value.text() == "30 px"
+    sl._drag(sl._x(30.3))                   # a step inside the same pixel: the knob stays on it, nothing written
+    assert sl.value() == 30 and s["minimap_arrow_size"] == 30
+    QTest.mouseRelease(sl, Qt.LeftButton, pos=at)
+    assert seen[1:] == [("blue", 30, False)]
+    QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(sl.width() - 1, sl.height() // 2))     # past the end: the end
+    assert s["minimap_arrow_size"] == portaldots.ARROW_SIZE_MAX and len(seen) == 3
+    assert p._arrow_size_value.text() == f"{portaldots.ARROW_SIZE_MAX} px"
+    QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(0, sl.height() // 2))
+    assert s["minimap_arrow_size"] == portaldots.ARROW_SIZE_MIN and len(seen) == 4
+    # a drag: each pixel it crosses written and shown at once, the app told at most once a FOLLOW_MS (it redraws the
+    # search's page and the ◎ window too) and once more, at the last pixel, when the mouse lets go
+    QTest.mousePress(sl, Qt.LeftButton, pos=QPoint(round(sl._x(13)), sl.height() // 2))
+    for size in range(14, 26):
+        sl._drag(sl._x(size))
+        assert s["minimap_arrow_size"] == size and p._arrow_size_value.text() == f"{size} px"
+    assert len(seen) == 4                   # 13 pixels crossed, nothing said yet
+    QTest.qWait(gametoolbar.FOLLOW_MS * 3)  # a moment of the drag: said once, at the pixel then
+    assert seen[4:] == [("blue", 25, False)]
+    for size in range(26, 38):
+        sl._drag(sl._x(size))
+    assert len(seen) == 5 and s["minimap_arrow_size"] == 37     # 25 pixels crossed, said once
+    QTest.mouseRelease(sl, Qt.LeftButton, pos=QPoint(round(sl._x(37)), sl.height() // 2))
+    assert seen[4:] == [("blue", 25, False), ("blue", 37, False)] and not p._arrow_follow.isActive()
+    QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(round(sl._x(37)), sl.height() // 2))   # its own pixel: no word
+    assert len(seen) == 6
+    # flashing
+    assert p._arrow_flash.isChecked() is False and p._arrow_flash.accessibleName() == "Flashing arrow"
+    p._arrow_flash.click()
+    assert s["minimap_arrow_flash"] is True and seen[-1] == ("blue", 37, True)
+    # changed elsewhere: each control follows (a stale colour: today's orange; a size past the end: the end)
+    s["minimap_arrow_color"], s["minimap_arrow_size"], s["minimap_arrow_flash"] = "teal", 25, False
+    w.refresh()
+    assert picked() == ["teal"] and p._arrow_color_name.text() == "Teal" and p._arrow_flash.isChecked() is False
+    assert sl.value() == 25 and p._arrow_size_value.text() == "25 px"
+    s["minimap_arrow_color"], s["minimap_arrow_size"] = "chartreuse", 99
+    w.refresh()
+    assert picked() == ["orange"] and sl.value() == portaldots.ARROW_SIZE_MAX
+    assert p._arrow_size_value.text() == f"{portaldots.ARROW_SIZE_MAX} px"
 
 
 def test_the_default_look_is_todays(bar):

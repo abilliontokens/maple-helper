@@ -1,7 +1,8 @@
 """The hidden-portal dots and the route's arrow over the game's minimap (ui/portaldots.py): placed from each minimap
 read's view over the minimap's box (LOCATION.box) and moved with it, hidden when there is nothing to place or their
-setting is off, the arrow pointing from the panel's edge at a step off the part shown; and the dots' switch, gone
-from Settings to the bar's ⚙ panel."""
+setting is off, the arrow pointing from the panel's edge at a step off the part shown, in the colour and at the size
+its settings pick and blinking with its flash setting; and the dots' switch, gone from Settings to the bar's ⚙
+panel."""
 import os
 from types import SimpleNamespace
 
@@ -49,7 +50,7 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed):
             "050000000": [SimpleNamespace(kind="portal", spot=(0.0, 0.0))],
             "060000000": [SimpleNamespace(kind="portal", spot=(0.0427, 0.7532))]}
 
-    def route(frm, to, taxi=True, teleport=True):
+    def route(frm, to, taxi=True, teleport=True, hidden=False):
         routed.append((frm, to, taxi, teleport))
         return SimpleNamespace(legs=ways[to]) if to in ways else None
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
@@ -82,6 +83,22 @@ def _live_read(x=-150.0):
     lies off the panel shown from x=10; the player's dot at (0.577, 0.429), at (221, 256) in the box."""
     from maplehelper.minimap import Here, View
     return Here("010003000", (0.577, 0.429), View(x, 143, 643, 263, (10, 142, 430, 406)))
+
+
+def _near(c, colour: str, tol: int = 2) -> bool:
+    """A drawn pixel (a QColor) is this "#RRGGBB" colour, give or take the antialiasing's rounding."""
+    from PySide6.QtGui import QColor
+    want = QColor(colour)
+    return c.alpha() > 0 and all(abs(a - b) <= tol for a, b in ((c.red(), want.red()), (c.green(), want.green()),
+                                                               (c.blue(), want.blue())))
+
+
+def _span(w) -> tuple[int, int]:
+    """How wide and how tall the window's drawing is, in its pixels: the arrow's, when it draws nothing else."""
+    img = w.grab().toImage()
+    drawn = [(x, y) for y in range(img.height()) for x in range(img.width()) if img.pixelColor(x, y).alpha()]
+    xs, ys = [x for x, _ in drawn], [y for _, y in drawn]
+    return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
 
 
 def test_dots_sit_on_the_box_where_the_map_was_placed(dots, qapp):
@@ -352,7 +369,7 @@ def test_the_arrows_way_takes_cabs_and_teleports_only_with_the_toolbars_switch(d
     asked = []
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: [],
-        route=lambda frm, to, taxi=True, teleport=True: asked.append((frm, to, taxi, teleport))))
+        route=lambda frm, to, taxi=True, teleport=True, hidden=False: asked.append((frm, to, taxi, teleport))))
     s["game_rides"] = rides
     loc.set_route_dest("020000000")
     _place(loc, _here())
@@ -400,6 +417,137 @@ def test_the_arrows_way_is_routed_once_not_on_every_follow_frame(dots, routed, k
     assert w._arrow == QPointF(10, 20) and routed[3:] == [("010003001", "050000000", True, True)]
     w.set_kb(kb)                                                    # another KB, another graph
     assert w._arrow == QPointF(10, 20) and routed[4:] == [("010003001", "050000000", True, True)]
+
+
+@pytest.mark.parametrize("name, drawn", [("orange", "orange"), ("blue", "blue"), ("teal", "teal"), ("pink", "pink"),
+                                         ("chartreuse", "orange"), (None, "orange"), (["green"], "orange")])
+def test_the_arrow_takes_the_colour_its_setting_picks(dots, name, drawn):
+    """The bar's ⚙ panel picks the arrow's colour (settings["minimap_arrow_color"]), orange by default as the map
+    windows mark a portal: the next refresh paints the arrow in that fill on its dark rim. A name ARROW_COLORS
+    doesn't know, or none, keeps the orange; the dots stay blue whatever it is."""
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    assert s["minimap_arrow_color"] == "orange"
+    assert portaldots.ARROW_COLORS["orange"][1:] == ("#F5B642", "#3A2A05")     # today's orange, on its rim
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    s["minimap_arrow_color"] = name
+    w.refresh()
+    _, fill, rim = portaldots.ARROW_COLORS[drawn]
+    img = w.grab().toImage()
+    c = img.pixelColor(60, 37)                                      # on the shaft, 8 px above the step
+    assert c.alpha() == 255 and _near(c, fill)                      # in the colour picked
+    assert _near(img.pixelColor(60, 29), rim, tol=12)               # half over the shaft's top end: its rim
+    d = img.pixelColor(100, 65)
+    assert d.blue() > 200 and d.red() < 80                          # a dot beside it, still blue
+
+
+def test_the_arrows_size_setting_draws_it_bigger_or_smaller(dots):
+    """The bar's ⚙ panel picks the arrow's size (settings["minimap_arrow_size"]: its length in screen pixels, 22 as
+    it always was): the next refresh draws it that much bigger or smaller on the same step, kept within
+    ARROW_SIZE_MIN..ARROW_SIZE_MAX; a setting holding no number draws it at the default size."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    lo, hi = portaldots.ARROW_SIZE_MIN, portaldots.ARROW_SIZE_MAX
+    assert (lo, hi) == (12, 40) and s["minimap_arrow_size"] == 22
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    spans = {}
+    for size in (22, hi, lo):
+        s["minimap_arrow_size"] = size
+        w.refresh()
+        assert w._arrow == QPointF(60, 45)                          # on its step whatever its size
+        spans[size] = _span(w)
+    (w12, h12), (w22, h22), (w40, h40) = spans[lo], spans[22], spans[hi]
+    assert w12 < w22 < w40 and h12 < h22 < h40
+    assert w40 >= 1.5 * w22 and h40 >= 1.5 * h22                   # 40 px long against 22: near twice the size
+    for size, like in ((1000, hi), (3, lo), ("big", 22), (None, 22), (True, 22), (float("nan"), 22)):
+        s["minimap_arrow_size"] = size
+        w.refresh()
+        assert _span(w) == spans[like], size
+
+
+def test_a_bigger_arrow_at_the_panels_edge_sits_further_in_and_stays_inside_it(dots):
+    """The size draws the sign at the panel's edge bigger too, in the colour picked, and pulls its tip in as much
+    further as it takes to keep all of it inside the panel: the player's dot by the panel's bottom-left corner,
+    Kerning City's way to Henesys leaving off the panel's left (west00), so the arrow points up and left out of the
+    corner, its head and shaft reaching down toward the bottom edge."""
+    import math
+
+    from maplehelper.minimap import Here
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow alone
+    s["minimap_arrow_color"] = "purple"
+    loc.set_box(dict(LIVE_BOX))
+    v = _live_read().view
+    loc.set_route_dest("060000000")                                 # its first step at (0.0427, 0.7532): (-123, 341)
+    _place(loc, Here("010003000", (0.2644, 0.9772), v))             # the player's dot at (20, 400), by the corner
+    assert w.isVisible() and w._arrow_edge
+    before = w._arrow
+    s["minimap_arrow_size"] = portaldots.ARROW_SIZE_MAX
+    w.refresh()
+    tip = w._arrow
+    assert w._arrow_edge and tip.y() < before.y() - 5               # pulled up off the bottom edge as it grew
+    me = (v.x + 0.2644 * v.w, v.y + 0.9772 * v.h)
+    step = (v.x + 0.0427 * v.w, v.y + 0.7532 * v.h)
+    n = math.hypot(step[0] - me[0], step[1] - me[1])
+    ux, uy = (step[0] - me[0]) / n, (step[1] - me[1]) / n           # the way it points, one pixel long
+    img = w.grab().toImage()
+    c = img.pixelColor(int(tip.x() - 30 * ux), int(tip.y() - 30 * uy))     # on its shaft 30 px back: past 22 px
+    assert c.alpha() == 255 and _near(c, portaldots.ARROW_COLORS["purple"][1])
+    x0, y0, x1, y1 = v.panel
+    assert not any(img.pixelColor(x, y).alpha() for x in range(img.width()) for y in range(img.height())
+                   if not (x0 <= x < x1 and y0 <= y < y1))          # none of it outside the panel
+
+
+def test_the_arrow_blinks_with_its_flash_setting_and_nothing_else_does(dots):
+    """With its flash setting on (off by default), a timer on the window hides the arrow and shows it again every
+    FLASH_MS, to catch the eye on a busy minimap: the dots and the guided NPC's ring stay drawn throughout, and the
+    refresh of every follow frame keeps the beat going rather than restart it. The setting off, or no arrow to
+    show, stops the timer with the arrow shown, so no redraw leaves it hidden."""
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    assert s["minimap_arrow_flash"] is False
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    loc.set_guide(("010003000", (0.9, 0.9), "npc/303"))            # its ring around the dot at (100, 65)
+    timer = w._flash_timer
+
+    def arrow_drawn() -> bool:
+        """The arrow on its shaft, 8 px above its step; the dot and the ring are drawn whatever it does."""
+        img = w.grab().toImage()
+        dot, ring = img.pixelColor(100, 65), img.pixelColor(100, 58)
+        assert dot.blue() > 200 and dot.red() < 80                  # the dot, blue
+        assert ring.green() > 90 and ring.red() < 90                # the ring 7 px above its centre, green
+        return img.pixelColor(60, 37).alpha() > 0
+
+    assert w._arrow is not None and not timer.isActive() and w._flash_on and arrow_drawn()     # no blink by default
+    s["minimap_arrow_flash"] = True
+    w.refresh()
+    assert timer.isActive() and timer.interval() == portaldots.FLASH_MS and arrow_drawn()     # shown first
+    timer.timeout.emit()                                            # a beat: hidden
+    assert not w._flash_on and not arrow_drawn()
+    w.refresh()                                                     # a follow frame meanwhile: the beat goes on
+    assert timer.isActive() and not w._flash_on and not arrow_drawn()
+    timer.timeout.emit()                                            # the next: shown again
+    assert w._flash_on and arrow_drawn()
+    timer.timeout.emit()
+    s["minimap_arrow_flash"] = False                                # switched off while hidden: shown, and stays
+    w.refresh()
+    assert not timer.isActive() and w._flash_on and arrow_drawn()
+    s["minimap_arrow_flash"] = True
+    w.refresh()
+    timer.timeout.emit()
+    loc.set_route_dest(None)                                        # the route stopped: no arrow left to blink
+    assert w.isVisible() and w._arrow is None and not timer.isActive() and w._flash_on
+    loc.set_route_dest("020000000")                                 # a route again: blinking again, shown first
+    assert timer.isActive() and w._flash_on and arrow_drawn()
+    loc.set_follow(("010003000", None))                             # the picture lost: all of it hidden, the blink too
+    assert not w.isVisible() and not timer.isActive() and w._flash_on
 
 
 def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isolated_store, kb, monkeypatch):

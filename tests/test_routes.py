@@ -1,6 +1,6 @@
-"""How to get there: the route graph (KB map connections, taxis, boats, NPC trips), only through maps in the game;
-routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes); the ◎ window's way from the
-player's map and a map card's way there."""
+"""How to get there: the route graph (KB map connections, hidden teleports, taxis, boats, NPC trips), only through
+maps in the game; routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes); the ◎
+window's way from the player's map and a map card's way there."""
 import json
 import os
 from pathlib import Path
@@ -104,6 +104,87 @@ def test_hidden_portals_are_spots_on_the_minimap(world):
     assert g.hidden_spots(PERION) == []
     # a map off the routes (not in the game, as the KB says) still has its dots: the player may stand on it anyway
     assert ORBIS not in g.maps and g.hidden_spots(ORBIS) == [(0.5, (400 - routes.PORTAL_MARK_RISE) / 800)]
+
+
+def _secret(kb):
+    """Henesys to Snail Garden: one hidden teleport (hide01), or the walk through both hunting grounds; Perion only
+    through Hunting Ground II's hidden teleport. Henesys' hidden way to Hunting Ground I is listed before its drawn
+    one; Hunting Ground I's door (in01) is in its hidden list, and its hide02 portal stands elsewhere than the
+    hidden one of that name."""
+    def portal(to, name, x):
+        return {"to": to, "name": name, "x": x, "y": 0}
+
+    def hidden(*spots):
+        return [{"name": name, "x": x, "y": 0} for name, x in spots]
+    return routes.Graph(kb, {"maps": [
+        {**_map(HENESYS, "Henesys", town=True),
+         "portals": [portal(HG1, "hide00", -300), portal(HG1, "east00", 700), portal(GARDEN, "hide01", 0)],
+         "hidden": hidden(("hide00", -300), ("hide01", 0))},
+        {**_map(HG1, "Henesys Hunting Ground I"),
+         "portals": [portal(HENESYS, "in01", -700), portal(HG2, "hide02", 700)],
+         "hidden": hidden(("in01", -700), ("hide02", 600))},
+        {**_map(HG2, "Henesys Hunting Ground II"),
+         "portals": [portal(HG1, "west00", -700), portal(GARDEN, "east00", 700), portal(PERION, "hide03", 0)],
+         "hidden": hidden(("hide03", 0))},
+        _map(GARDEN, "Snail Garden", [HENESYS]),
+        _map(PERION, "Perion", town=True)]})
+
+
+def test_a_portal_in_the_maps_hidden_list_is_a_hidden_step(world):
+    """A portal that is also one of the map's invisible teleports (the same name at the same point) is a hidden step;
+    a building's door (in01: the game draws the building) and a portal named like a teleport but standing elsewhere
+    are not. One leg a destination: the first drawn portal there, else the first hidden one (a hidden twin listed
+    first never hides the drawn one)."""
+    kb, world_graph = world
+    g = _secret(kb)
+    legs = {(leg.frm, leg.to): leg for out in g.edges.values() for leg in out}
+    assert [(leg.to, leg.via, leg.hidden) for leg in g.edges[HENESYS]] == [(HG1, "east00", False),
+                                                                             (GARDEN, "hide01", True)]
+    assert (legs[HG1, HENESYS].via, legs[HG1, HENESYS].hidden) == ("in01", False)
+    assert (legs[HG1, HG2].via, legs[HG1, HG2].hidden) == ("hide02", False)
+    assert (legs[HG2, PERION].via, legs[HG2, PERION].hidden) == ("hide03", True)
+    assert not any(leg.hidden for out in world_graph.edges.values() for leg in out)     # no hidden lists: none
+
+
+def test_a_hidden_teleport_only_where_nothing_else_gets_there_unless_the_player_allows_them(world):
+    """By default a way takes as few hidden teleports as it can: the walk through both hunting grounds beats Henesys'
+    one-step teleport to Snail Garden, and Perion, reached only through one, is still a way (never out of reach). The
+    player's setting (hidden=True) takes the teleport where it makes the way shorter, and of two ways as short the one
+    through drawn portals. The AI's route says which step is the hidden one."""
+    kb, _ = world
+    g = _secret(kb)
+    walk = g.route(HENESYS, GARDEN)
+    assert _path(g, walk) == [("portal", "Henesys Hunting Ground I"), ("portal", "Henesys Hunting Ground II"),
+                              ("portal", "Snail Garden")]
+    assert not any(leg.hidden for leg in walk.legs)
+    assert [(leg.via, leg.hidden) for leg in g.route(HENESYS, GARDEN, hidden=True).legs] == [("hide01", True)]
+    for allowed in (False, True):
+        r = g.route(HENESYS, PERION, hidden=allowed)
+        assert _path(g, r) == [("portal", "Henesys Hunting Ground I"), ("portal", "Henesys Hunting Ground II"),
+                               ("portal", "Perion")]
+        assert [leg.hidden for leg in r.legs] == [False, False, True]
+    # Hunting Ground I to Snail Garden, two steps either way: back through Henesys' teleport, or on through Hunting
+    # Ground II's drawn portals
+    assert _path(g, g.route(HG1, GARDEN, hidden=True)) == [("portal", "Henesys Hunting Ground II"),
+                                                            ("portal", "Snail Garden")]
+    steps = routes.describe(g, g.route(HENESYS, PERION))
+    assert "take the portal on the right side to Henesys Hunting Ground I" in steps[0] and "hidden" not in steps[0]
+    assert "3. In Henesys Hunting Ground II: take the hidden teleport to Perion (" in steps[2]
+
+
+def test_the_ways_views_route_with_the_players_setting(world, monkeypatch):
+    """The search's page (gamelookup.way_to) and the ◎ window (mapview.way_from_here) take the hidden teleports
+    where they make the way shorter only when asked (the player's route_hidden_teleports)."""
+    from maplehelper import gamelookup
+    from maplehelper.ui import mapview
+    kb, _ = world
+    g = _secret(kb)
+    monkeypatch.setattr(routes, "of", lambda kb: g)
+    assert len(gamelookup.way_to(kb, HENESYS, GARDEN).legs) == 3
+    assert [leg.via for leg in gamelookup.way_to(kb, HENESYS, GARDEN, hidden=True).legs] == ["hide01"]
+    assert len(mapview.way_from_here(kb, f"map/{GARDEN}", HENESYS).route.legs) == 3
+    way = mapview.way_from_here(kb, f"map/{GARDEN}", HENESYS, hidden=True)
+    assert [leg.via for leg in way.route.legs] == ["hide01"]
 
 
 def test_portals_go_one_way_and_a_short_walk_beats_a_cab(world):

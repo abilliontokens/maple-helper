@@ -441,8 +441,8 @@ class MapleHelperApp:
         w.raise_()
 
     def _game_rides_toggled(self) -> None:
-        """The toolbar's ⚙ panel's Cabs & Teleports switch: a way already shown follows it, in the search's detail
-        page, in the ◎ where-is-it window and in the route's arrow on the game's minimap."""
+        """The toolbar's ⚙ panel's Cabs & Teleports and Hidden teleport routes switches: a way already shown follows
+        them, in the search's detail page, in the ◎ where-is-it window and in the route's arrow on the game's minimap."""
         search = getattr(self, "game_search", None)
         if search is not None:
             search.rides_changed()
@@ -456,14 +456,14 @@ class MapleHelperApp:
     def _minimap_toggled(self) -> None:
         """The toolbar's ⚙ panel's Minimap switches (the hidden portals, the route arrow, the overlays in screenshots):
         the dots and the arrow on the game's minimap, every window over the game in screen captures or out of them, and
-        the pickers' Guide me there button (the search's page, the ◎ window) follow at once."""
+        the way views that name the route arrow (the search's page, the ◎ window) follow at once."""
         dots = getattr(self, "portal_dots", None)
         if dots is not None:
             dots.refresh()          # the hidden-portal dots and the route's arrow switched on or off
         self._apply_overlay_capture()
         search = getattr(self, "game_search", None)
         if search is not None:
-            search.rides_changed()  # the page shown drawn again: its Guide me there button only with the arrow on
+            search.rides_changed()  # the page shown drawn again: it names the route arrow only while it is on
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
             where.redraw()      # ... and in the ◎ window (drawn again, never armed again)

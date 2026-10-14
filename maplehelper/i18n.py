@@ -1086,6 +1086,14 @@ STRINGS = {
     "route_portal": {"he": "להיכנס לפורטל אל **{to}**", "en": "Take the portal to **{to}**"},
     "route_portal_left": {"he": "להיכנס לפורטל **בצד שמאל** של המפה אל **{to}**", "en": "Take the portal on the **left** of the map to **{to}**"},
     "route_portal_right": {"he": "להיכנס לפורטל **בצד ימין** של המפה אל **{to}**", "en": "Take the portal on the **right** of the map to **{to}**"},
+    "route_portal_hidden": {"he": "להיכנס לטלפורט הנסתר אל **{to}** (הנקודה הכחולה: לחצו למעלה או היכנסו אליה)",
+                            "en": "Take the hidden teleport to **{to}** (the blue dot: press up or walk into it)"},
+    "route_portal_hidden_left": {
+        "he": "להיכנס לטלפורט הנסתר **בצד שמאל** של המפה אל **{to}** (הנקודה הכחולה: לחצו למעלה או היכנסו אליה)",
+        "en": "Take the hidden teleport on the **left** of the map to **{to}** (the blue dot: press up or walk into it)"},
+    "route_portal_hidden_right": {
+        "he": "להיכנס לטלפורט הנסתר **בצד ימין** של המפה אל **{to}** (הנקודה הכחולה: לחצו למעלה או היכנסו אליה)",
+        "en": "Take the hidden teleport on the **right** of the map to **{to}** (the blue dot: press up or walk into it)"},
     "route_by_taxi": {"he": "לדבר עם **{npc}** ולנסוע במונית אל **{to}**", "en": "Talk to **{npc}** and take the cab to **{to}**"},
     "route_by_boat": {"he": "לדבר עם **{npc}** ולהפליג אל **{to}**", "en": "Talk to **{npc}** and sail to **{to}**"},
     "route_by_npc": {"he": "לדבר עם **{npc}** כדי לעבור אל **{to}**", "en": "Talk to **{npc}** to go to **{to}**"},
@@ -1116,13 +1124,11 @@ STRINGS = {
                                     "en": "A small blue dot on the game's minimap wherever an invisible teleport is."},
     "minimap_route_arrow": {"he": "חץ מסלול במיני-מפה", "en": "Route arrow on the minimap"},
     "minimap_route_arrow_hint": {
-        "he": "חץ כתום במיני-מפה של המשחק בפורטל הבא או אצל הדמות הבאה בדרך למקום שבחרתם, ומצד המיני-מפה כשהשלב הבא "
+        "he": "חץ במיני-מפה של המשחק בפורטל הבא או אצל הדמות הבאה בדרך למקום שבחרתם, ומצד המיני-מפה כשהשלב הבא "
               "נמצא מחוץ לחלק שרואים. הוא נדלק מעצמו כשפותחים מפה בחיפוש המפות או בחלון ה-◎ שלה.",
-        "en": "An orange arrow on the game's minimap at the next portal or NPC on the way to the place you picked, or "
-              "at the minimap's edge pointing the way when that step is off the part shown. It lights up on its own "
-              "when you open a map in the Maps search or its ◎ window."},
-    "route_arrow_pick": {"he": "הדריכו אותי לשם", "en": "Guide me there"},
-    "route_arrow_stop": {"he": "עצירת חץ המסלול", "en": "Stop the route arrow"},
+        "en": "An arrow on the game's minimap at the next portal or NPC on the way to the place you picked, or at the "
+              "minimap's edge pointing the way when that step is off the part shown. It lights up on its own when "
+              "you open a map in the Maps search or its ◎ window."},
     "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
     "overlays_in_screenshots": {"he": "החלונות שמעל המשחק בצילומי מסך", "en": "Show the overlays in screenshots"},
     "overlays_in_screenshots_hint": {
@@ -2492,6 +2498,16 @@ STRINGS = {
     "tbs_bar": {"he": "הסרגל", "en": "Toolbar"},
     "tbs_way": {"he": "איך מגיעים", "en": "Directions"},
     "tbs_minimap": {"he": "מיני-מפה", "en": "Minimap"},
+    "tbs_arrow_colour": {"he": "צבע חץ המסלול", "en": "Route arrow colour"},
+    "tbs_arrow_size": {"he": "גודל חץ המסלול", "en": "Route arrow size"},
+    "tbs_arrow_flash": {"he": "חץ מהבהב", "en": "Flashing arrow"},
+    "tbs_arrow_flash_hint": {"he": "החץ נדלק וכבה, כדי שיהיה קל למצוא אותו במיני-מפה עמוסה.",
+                             "en": "The arrow blinks, so it is easy to spot on a busy minimap."},
+    "tb_hidden_routes": {"he": "מסלולים דרך טלפורטים נסתרים", "en": "Hidden teleport routes"},
+    "tb_hidden_routes_tip": {"he": "דלוק: הדרך עוברת גם בטלפורטים הנסתרים (הנקודות הכחולות) כשזה מקצר אותה. "
+                                   "כבוי: משתמשים בהם רק כשאין דרך אחרת (למשל ליציאה מחנות).",
+                             "en": "On: the way takes the invisible teleports (the blue dots) when they make it "
+                                   "shorter. Off: they are used only where there is no other way (a shop's exit, say)."},
     "tbs_reset": {"he": "חזרה למראה ברירת המחדל", "en": "Reset to default look"},
     "tbs_tint_dark": {"he": "כהה", "en": "Dark"},
     "tbs_tint_midnight": {"he": "כחול חצות", "en": "Midnight blue"},

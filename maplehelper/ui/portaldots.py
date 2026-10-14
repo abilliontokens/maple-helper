@@ -1,15 +1,18 @@
 """Blue dots on the game's own minimap where the map's invisible teleports are (press-up and touch portals the game
-never draws), a green ring around the NPC the player asked to be guided to (ui/npcoverlay.py), and an orange arrow
-pointing down at the next portal or NPC on the way to the map the player picked a route to (LOCATION.route_dest), or,
-while that step is off the part of the map the minimap shows (it often shows only part), a bigger one just inside
-the edge of the part shown, pointing toward the step: a click-through window laid over the minimap's box
-(LOCATION.box: the game's minimap window found at its top left, else the box the player drew), and moved with it.
-The map comes from each minimap read (ui/location.LOCATION.here), where its picture lies in the box from the fast
-follow between reads (LOCATION.follow: the marks move with the minimap's scroll, and go the moment the picture stops
-matching, a teleport or the loading screen). Hidden whenever there is nothing to place (no box, no read, a picture
-that doesn't match); the portal dots also need their setting, the ring only a guide on the player's own map, and the
-arrow its setting (minimap_route_arrow) and a way known from the player's map to another one, its first step on this
-map's minimap picture."""
+never draws), a green ring around the NPC the player asked to be guided to (ui/npcoverlay.py), and an arrow pointing
+down at the next portal or NPC on the way to the map the player picked a route to (LOCATION.route_dest), or, while
+that step is off the part of the map the minimap shows (it often shows only part), a bigger one just inside the edge
+of the part shown, pointing toward the step: a click-through window laid over the minimap's box (LOCATION.box: the
+game's minimap window found at its top left, else the box the player drew), and moved with it. The map comes from
+each minimap read (ui/location.LOCATION.here), where its picture lies in the box from the fast follow between reads
+(LOCATION.follow: the marks move with the minimap's scroll, and go the moment the picture stops matching, a teleport
+or the loading screen). Hidden whenever there is nothing to place (no box, no read, a picture that doesn't match);
+the portal dots also need their setting, the ring only a guide on the player's own map, and the arrow its setting
+(minimap_route_arrow) and a way known from the player's map to another one, its first step on this map's minimap
+picture. The arrow looks as the bar's ⚙ panel picks, read at every refresh: its colour (minimap_arrow_color, a name
+in ARROW_COLORS: orange unless another is picked), its size (minimap_arrow_size: its length in screen pixels, from
+ARROW_SIZE_MIN to ARROW_SIZE_MAX, both its shapes scaled alike) and whether it blinks (minimap_arrow_flash: hidden
+and shown again every FLASH_MS, to catch the eye on a busy minimap; the dots and the ring never blink)."""
 from __future__ import annotations
 
 import logging
@@ -17,7 +20,7 @@ import math
 import sys
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QWidget
 
@@ -40,16 +43,28 @@ RING_PX = 7                         # the guided NPC's ring radius: wider than t
 RING_PEN = 2.0                      # the green stroke's width, the dark rim drawn a little wider under it
 RING_FILL = QColor(theme.GOOD_TEXT_LIGHT)   # the NPC green, as the map windows dot an NPC (mapview._mark_colors)
 RING_RIM = QColor(8, 48, 24)        # its dark rim (mapview's), so the ring holds on any minimap
-ARROW_FILL = QColor(245, 182, 66)   # the next step's orange, as the map windows mark a portal (mapview._mark_colors)
-ARROW_RIM = QColor(58, 42, 5)       # its dark rim (mapview's), so the arrow holds on any minimap
+# the route's arrow's colours, by the name its setting keeps (minimap_arrow_color), as the bar's ⚙ panel offers them:
+# the name's i18n key, the fill, and the dark rim that holds it on any minimap. Orange, the default, is the next
+# step's as the map windows mark a portal (mapview._mark_colors); the others are bright shades of the accents
+# (theme.ACCENTS), each on its own dark rim
+ARROW_COLORS = {"green": ("tbs_accent_green", "#4CD07D", "#083018"),
+                "blue": ("tbs_accent_blue", "#64B5FF", "#082138"),
+                "purple": ("tbs_accent_purple", "#A98BFF", "#180C2C"),
+                "orange": ("tbs_accent_orange", "#F5B642", "#3A2A05"),
+                "pink": ("tbs_accent_pink", "#FF7EB6", "#2F081A"),
+                "teal": ("tbs_accent_teal", "#3FD9CF", "#062623")}
+ARROW_SIZE_MIN, ARROW_SIZE_MAX = 12, 40     # the arrow's length its size setting may pick, in screen pixels
+ARROW_SIZE_PX = 22      # how long the shapes below are drawn (the default size): a size scales them by size / this
 # the route's arrow, in screen pixels from its step's spot: the tip there, the head 14 px wide, the shaft up to 15 px
 # above it, pointing down at the step's portal or NPC
 ARROW_PX = ((0, 1), (-7, -7), (-3, -7), (-3, -15), (3, -15), (3, -7), (7, -7))
 # the arrow while the step is off the part of the map the minimap shows, in screen pixels from its tip: a sign at the
 # panel's edge rather than a mark on a spot, so longer and bolder (22 px, the head 18 px wide, the shaft 8), drawn
-# here pointing down and turned about its tip toward the step (_aim)
+# here pointing down and turned about its tip toward the step (_aim). Both shapes are at the default size, drawn
+# scaled about their origin (the step's spot, the tip) to the size the setting picks (_size_scale)
 EDGE_ARROW_PX = ((0, 0), (-9, -10), (-4, -10), (-4, -22), (4, -22), (4, -10), (9, -10))
 EDGE_GAP_PX = 3     # how far inside the panel's edge all of it stays: its dark rim whole, a sliver of map off the frame
+FLASH_MS = 550      # the arrow's blink, with its flash setting on: shown this long, then hidden as long
 
 
 def _name(graph, mid: str) -> str:
@@ -80,13 +95,37 @@ def _inset(lo: float, hi: float) -> tuple[float, float]:
     return (lo, hi) if lo <= hi else ((lo + hi) / 2, (lo + hi) / 2)
 
 
-def _aim(view: View, step: tuple[float, float], spot: tuple[float, float] | None) -> _Aim:
+def _arrow_colors(settings) -> tuple[QColor, QColor]:
+    """The arrow's fill and rim in the colour its setting names (ARROW_COLORS); orange's for a name it doesn't know."""
+    name = settings["minimap_arrow_color"]
+    entry = ARROW_COLORS.get(name) if isinstance(name, str) else None
+    _, fill, rim = entry if entry is not None else ARROW_COLORS["orange"]
+    return QColor(fill), QColor(rim)
+
+
+def _size_scale(settings) -> float:
+    """How many times its drawn size (ARROW_PX, EDGE_ARROW_PX: ARROW_SIZE_PX long) the arrow's size setting makes
+    it: the length kept within ARROW_SIZE_MIN..ARROW_SIZE_MAX, and the drawn size for a setting holding no number
+    (an old or hand-edited settings file)."""
+    size = settings["minimap_arrow_size"]
+    if isinstance(size, bool) or not isinstance(size, (int, float)) or size != size:     # size != size: NaN
+        size = ARROW_SIZE_PX
+    return min(max(size, ARROW_SIZE_MIN), ARROW_SIZE_MAX) / ARROW_SIZE_PX
+
+
+def _shape(points, scale: float) -> QPolygonF:
+    """One of the arrow's shapes (ARROW_PX, EDGE_ARROW_PX) scaled about its origin."""
+    return QPolygonF([QPointF(x * scale, y * scale) for x, y in points])
+
+
+def _aim(view: View, step: tuple[float, float], spot: tuple[float, float] | None, scale: float) -> _Aim:
     """The route's arrow for its next step (a spot on the map's picture): on the step itself, pointing down, when
     the window shows it. Else the step is off the part of the map shown (the game's minimap often shows only part:
     Kerning City's way to Henesys starts at its far left, left of the panel, live), and the arrow sits at the
     panel's edge, on the line from the player's dot (`spot`, the read's; the panel's middle when the read saw none
     or the window doesn't show it) toward the step, turned to point out along it, its tip pulled in just far enough
-    that all of it, head and shaft, stays inside the panel whichever way it turns."""
+    that all of it, head and shaft, stays inside the panel whichever way it turns, at the size it is drawn (`scale`,
+    _size_scale: a bigger arrow sits further in)."""
     on = view.at(step)
     if on is not None:
         return _Aim(on[0], on[1], 0.0, False)
@@ -97,8 +136,8 @@ def _aim(view: View, step: tuple[float, float], spot: tuple[float, float] | None
     dx, dy = bx - ox, by - oy
     # the line's own angle less down's (90: y grows down the screen), the turn from pointing down
     angle = (math.degrees(math.atan2(dy, dx)) - 90.0) % 360.0
-    # where the tip may go: the panel less how far the arrow, turned so, reaches past its tip on each side
-    reach = QTransform().rotate(angle).map(QPolygonF([QPointF(x, y) for x, y in EDGE_ARROW_PX])).boundingRect()
+    # where the tip may go: the panel less how far the arrow, turned so at its size, reaches past its tip on each side
+    reach = QTransform().rotate(angle).map(_shape(EDGE_ARROW_PX, scale)).boundingRect()
     lo_x, hi_x = _inset(x0 - reach.left(), x1 - reach.right())
     lo_y, hi_y = _inset(y0 - reach.top(), y1 - reach.bottom())
     # from the player's dot (moved in there when nearer the edge) along the line toward the step, as far as it goes
@@ -112,7 +151,9 @@ def _aim(view: View, step: tuple[float, float], spot: tuple[float, float] | None
 
 class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and the route's arrow's window over the minimap box. Never takes a click,
-    the focus, or a place in the minimap reads."""
+    the focus, or a place in the minimap reads. Each refresh takes the arrow's look from the settings: its colour
+    (minimap_arrow_color), its size (minimap_arrow_size) and its blink (minimap_arrow_flash): a timer on the window
+    hiding and showing the arrow alone every FLASH_MS, while one is placed and the setting is on."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -130,11 +171,21 @@ class PortalDots(QWidget):
         self._arrow: QPointF | None = None
         self._arrow_angle = 0.0
         self._arrow_edge = False
-        # the way _next_step last routed, (player's map, route's map, cabs & teleports), and its first step's spot
-        self._arrow_key: tuple[str, str, bool] | None = None
+        # the way _next_step last routed, (player's map, route's map, cabs & teleports, hidden teleports), and its
+        # first step's spot
+        self._arrow_key: tuple[str, str, bool, bool] | None = None
         self._arrow_spot: tuple[float, float] | None = None
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say_arrow)
         self._ratio = 1.0
+        # the arrow's look, from the settings at each refresh: how many times its drawn size (_size_scale), its fill
+        # and its rim (_arrow_colors)
+        self._arrow_scale = 1.0
+        self._arrow_fill, self._arrow_rim = _arrow_colors(settings)
+        # its blink while its flash setting is on (_flash): a beat of the timer hides it, the next shows it again
+        self._flash_on = True
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setInterval(FLASH_MS)
+        self._flash_timer.timeout.connect(self._blink)
         LOCATION.changed.connect(self.refresh)
         LOCATION.followed.connect(self.refresh)
         LOCATION.guided.connect(self.refresh)
@@ -148,9 +199,10 @@ class PortalDots(QWidget):
 
     def refresh(self, _what: object = None) -> None:
         """Place the dots, the guided NPC's ring and the route's arrow over LOCATION.box from the live follow of the
-        player's map (a Qt slot too: LOCATION's signals carry what it re-reads). Never from a read's own view: it can
-        be the last map's while the reads wait to confirm a new one, and entering a shop flashed the street's dots
-        back for a second (live)."""
+        player's map (a Qt slot too: LOCATION's signals carry what it re-reads), the arrow in the colour and at the
+        size its settings pick, blinking or not: read here every time, so a change shows at the next refresh. Never
+        from a read's own view: it can be the last map's while the reads wait to confirm a new one, and entering a
+        shop flashed the street's dots back for a second (live)."""
         region = LOCATION.box
         here = LOCATION.here
         if not isinstance(region, dict) or here is None:
@@ -170,7 +222,8 @@ class PortalDots(QWidget):
         guide = LOCATION.guide
         at_ring = view.at(guide[1]) if guide is not None and guide[0] == here.map else None
         step = self._next_step(graph, here.map)
-        aim = _aim(view, step, here.spot) if step is not None else None
+        scale = _size_scale(self._settings)     # the edge arrow's room in the panel depends on its size
+        aim = _aim(view, step, here.spot, scale) if step is not None else None
         self._say_arrow(aim)
         if not at and at_ring is None and aim is None:
             self._clear()
@@ -186,6 +239,9 @@ class PortalDots(QWidget):
         self._ring = QPointF(at_ring[0] / ratio, at_ring[1] / ratio) if at_ring is not None else None
         self._arrow = QPointF(aim.x / ratio, aim.y / ratio) if aim is not None else None
         self._arrow_angle, self._arrow_edge = (aim.angle, aim.edge) if aim is not None else (0.0, False)
+        self._arrow_scale = scale
+        self._arrow_fill, self._arrow_rim = _arrow_colors(self._settings)
+        self._flash(self._arrow is not None and bool(self._settings["minimap_arrow_flash"]))
         if self.geometry() != rect:
             self.setGeometry(rect)
         if not self.isVisible():
@@ -196,22 +252,26 @@ class PortalDots(QWidget):
     def _next_step(self, graph, here_map: str) -> tuple[float, float] | None:
         """Where the way to the map the player picked (LOCATION.route_dest) starts on their map's minimap picture: its
         first step's portal or NPC (routes.Leg.spot). The way on foot, or with cabs and NPC teleports when the
-        toolbar's switch says so (settings["game_rides"]), as the search's page and the ◎ window draw it. None with
-        the arrow's setting off, no route picked or already on its map, no way known, or a first step with no spot
-        on the minimap. Routed only when the player's map, the route's map or the switch changes, the step's spot
-        kept for the refreshes after (set_kb forgets it): refresh runs on the GUI thread for every follow frame while
-        the minimap scrolls, and Graph.route is a Dijkstra search over the whole map graph."""
+        toolbar's switch says so (settings["game_rides"]), through the hidden teleports where they make it shorter
+        when the player allows them (settings["route_hidden_teleports"]), as the search's page and the ◎ window draw
+        it. None with the arrow's setting off, no route picked or already on its map, no way known, or a first step
+        with no spot on the minimap. Routed only when the player's map, the route's map or a switch changes, the
+        step's spot kept for the refreshes after (set_kb forgets it): refresh runs on the GUI thread for every follow
+        frame while the minimap scrolls, and Graph.route is a Dijkstra search over the whole map graph."""
         dest = LOCATION.route_dest
         if not self._settings["minimap_route_arrow"] or not dest or dest == here_map:
             return None
-        try:
-            rides = bool(self._settings["game_rides"])
-        except (KeyError, TypeError):
-            rides = False
-        key = (here_map, dest, rides)
+
+        def switch(name: str) -> bool:
+            try:
+                return bool(self._settings[name])
+            except (KeyError, TypeError):
+                return False
+        rides, hidden = switch("game_rides"), switch("route_hidden_teleports")
+        key = (here_map, dest, rides, hidden)
         if key != self._arrow_key:
             route = getattr(graph, "route", None)     # a stand-in graph that can't route (an older test's): no arrow
-            way = route(here_map, dest, taxi=rides, teleport=rides) if route is not None else None
+            way = route(here_map, dest, taxi=rides, teleport=rides, hidden=hidden) if route is not None else None
             leg = way.legs[0] if way is not None and way.legs else None
             self._arrow_key, self._arrow_spot = key, leg.spot if leg is not None else None
             self._arrow_said = None
@@ -241,11 +301,28 @@ class PortalDots(QWidget):
         self._arrow = None
         self._arrow_angle = 0.0
         self._arrow_edge = False
+        self._flash(False)
         if self.isVisible():
             self.hide()
 
+    def _flash(self, on: bool) -> None:
+        """The arrow's blink (settings["minimap_arrow_flash"]): kept running while an arrow is placed and the setting
+        is on, never restarted by the refreshes meanwhile (they come with every follow frame while the minimap
+        scrolls, faster than its beat); else stopped with the arrow shown, so no redraw is left without it."""
+        if not on:
+            self._flash_timer.stop()
+            self._flash_on = True
+        elif not self._flash_timer.isActive():
+            self._flash_timer.start()
+
+    def _blink(self) -> None:
+        """The flash timer's beat: the arrow hidden, or shown again (it alone: the dots and the ring stay)."""
+        self._flash_on = not self._flash_on
+        self.update()
+
     def paintEvent(self, e) -> None:
-        if not self._dots and self._ring is None and self._arrow is None:
+        arrow = self._arrow if self._flash_on else None     # blinking (_flash): left out every other beat
+        if not self._dots and self._ring is None and arrow is None:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -261,11 +338,11 @@ class PortalDots(QWidget):
             p.drawEllipse(self._ring, rr, rr)
             p.setPen(QPen(RING_FILL, RING_PEN / self._ratio))
             p.drawEllipse(self._ring, rr, rr)
-        if self._arrow is not None:
-            p.setPen(QPen(ARROW_RIM, 1.0 / self._ratio))
-            p.setBrush(ARROW_FILL)
-            shape = QPolygonF([QPointF(x / self._ratio, y / self._ratio)
-                               for x, y in (EDGE_ARROW_PX if self._arrow_edge else ARROW_PX)])
-            # turned about its own origin (the step's spot, the edge arrow's tip): 0 leaves the mark pointing down
-            p.drawPolygon(QTransform().rotate(self._arrow_angle).map(shape).translated(self._arrow))
+        if arrow is not None:
+            p.setPen(QPen(self._arrow_rim, 1.0 / self._ratio))
+            p.setBrush(self._arrow_fill)
+            # at the size its setting picks, in the window's pixels, about its own origin (the step's spot, the edge
+            # arrow's tip), then turned about it: 0 leaves the mark pointing down
+            shape = _shape(EDGE_ARROW_PX if self._arrow_edge else ARROW_PX, self._arrow_scale / self._ratio)
+            p.drawPolygon(QTransform().rotate(self._arrow_angle).map(shape).translated(arrow))
         p.end()
