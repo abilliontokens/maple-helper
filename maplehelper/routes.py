@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import heapq
 import json
+import logging
 import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import availability, terrain
+
+log = logging.getLogger("maplehelper")
 
 ROUTES_FILE = "routes.json"
 TERRAIN_FILE = "terrain.json"     # the maps' real ground (terrain.Walk), beside ROUTES_FILE in the KB; read lazily
@@ -446,6 +449,17 @@ class Graph:
             walks[mid] = terrain.Walk.of(entry.get("fh") or [], entry.get("lr") or []) if isinstance(entry, dict) and entry else None
         return walks[mid]
 
+    def _note_ground_fallback(self, mid: str, why: str) -> None:
+        """Say once a run that the straight-line measure picked the pads on a map because its real ground had
+        no answer for it (`why`: what was missing there), so a map whose ground gave no answer is told apart
+        in the log from one it walks fine. The overlay asks several times a second, so a map is named once,
+        however often it is asked about again."""
+        said = self.__dict__.setdefault("_ground_fallback_said", set())
+        if mid in said:
+            return
+        said.add(mid)
+        log.info("routes: %s on %s, so its pads are picked by straight-line distance", why, self.name(mid))
+
     def shortcut_path(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
                       margin: float = SHORTCUT_MARGIN) -> list[Jump]:
         """The pads of the cheapest way across the map to a spot (the next step's portal or an NPC), in the order
@@ -491,6 +505,9 @@ class Graph:
                 by_id = {id(j): i for i, j in enumerate(in_units)}
                 by_name = {j.name: i for i, j in enumerate(jumps)}
                 return [jumps[by_id[id(j)] if id(j) in by_id else by_name[j.name]] for j in picked]
+            self._note_ground_fallback(mid, "the ground had no answer from where the player stands")
+        else:
+            self._note_ground_fallback(mid, "the knowledge base has no ground")
 
         def walk(a: tuple[float, float], b: tuple[float, float]) -> float:
             return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h * SHORTCUT_CLIMB)
@@ -574,6 +591,9 @@ class Graph:
                             via[jump.name] = (walked[snapped[0]] + terrain.TELEPORT_COST
                                               + onward[snapped[1]])
                     return best[goal], via
+            self._note_ground_fallback(mid, "the ground had no answer from where the player stands")
+        else:
+            self._note_ground_fallback(mid, "the knowledge base has no ground")
         w, h = self.known[mid].minimap[:2]
 
         def walk(a: tuple[float, float], b: tuple[float, float]) -> float:

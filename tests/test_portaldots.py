@@ -961,8 +961,12 @@ def test_standing_on_the_pad_keeps_the_arrow_on_it_until_the_jump_is_taken(dots,
 def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
     """Two ways costing nearly the same (on Utah's Pig Farm, t001's chain against t004's): the cheapest first
     pad flips cell to cell as their dot wobbles and jumps, but a pad once named stays named across repeated
-    reads in new cells while a way through it still costs within SHORTCUT_SWITCH_MARGIN of the cheapest
-    (routes.Graph.shortcut_costs), so the arrow never changes its mind several times a second."""
+    reads in new cells while a way through it still costs within the switch margin of the cheapest
+    (routes.Graph.shortcut_costs: the larger of SHORTCUT_SWITCH_MARGIN and SHORTCUT_SWITCH_MARGIN_SHARE of
+    the cheapest cost, at maplehelper.ui.portaldots), so the arrow never changes its mind several times a
+    second. The costs here are at the Pig Farm ground measure's own scale (cheapest 9862.5 there): through
+    the named pad 5000 over the cheapest is past the flat 2200 alone, and held only by the share
+    (0.6 of 10000) — under the old flat margin alone this wobble would flip to the rival."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.minimap import Here, View
@@ -973,7 +977,7 @@ def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
     first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
     rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
     shortcuts.path = [first]
-    shortcuts.costs = (1000.0, {"t001": 1010.0, "t004": 1000.0})    # the rival cheaper, by a coin toss
+    shortcuts.costs = (10000.0, {"t001": 15000.0, "t004": 10000.0})  # the rival cheaper, by a coin toss at this scale
     loc.set_route_dest("020000000")                                 # its step at (60, 45), into Bush Road
     view = View(10, 20, 100, 50, (0, 0, 200, 200))
     _place(loc, Here("010003000", (0.30, 0.30), view))
@@ -986,8 +990,12 @@ def test_a_wobble_around_a_tie_keeps_naming_the_same_pad(dots, shortcuts):
 
 
 def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
-    """A real move makes the other way cheaper by more than the tie band (past SHORTCUT_SWITCH_MARGIN over
-    the cheapest, routes.Graph.shortcut_costs): the arrow gives up the pad it named and takes the new one."""
+    """A real move makes the other way cheaper by more than the tie band (past the switch margin over the
+    cheapest, routes.Graph.shortcut_costs: the larger of SHORTCUT_SWITCH_MARGIN and
+    SHORTCUT_SWITCH_MARGIN_SHARE of the cheapest cost): the arrow gives up the pad it named and takes the
+    new one. At the Pig Farm ground measure's scale (cheapest 10000 here) that band is the share, 6000:
+    through the named pad 7000 over the cheapest is past it, for all that it would also be past the flat
+    2200 — the share, not the flat number, is what a clearly-cheaper way has to beat there."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.minimap import Here, View
@@ -998,13 +1006,13 @@ def test_a_way_clearly_cheaper_than_the_named_pad_takes_over(dots, shortcuts):
     first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")      # its pad at (60, 45)
     rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")       # its pad at (30, 30)
     shortcuts.path = [first]
-    shortcuts.costs = (1000.0, {"t001": 1010.0, "t004": 1000.0})
+    shortcuts.costs = (10000.0, {"t001": 10100.0, "t004": 10000.0})
     loc.set_route_dest("020000000")
     view = View(10, 20, 100, 50, (0, 0, 200, 200))
     _place(loc, Here("010003000", (0.30, 0.30), view))
     assert w._arrow == QPointF(60, 45)
     shortcuts.path = [rival]
-    shortcuts.costs = (1000.0, {"t001": 6000.0, "t004": 1000.0})    # through the named pad: clearly worse
+    shortcuts.costs = (10000.0, {"t001": 17000.0, "t004": 10000.0})  # through the named pad: clearly worse
     loc.set(Here("010003000", (0.45, 0.31), view))                  # a read in another cell, further on
     assert w._arrow == QPointF(30, 30) and w._arrow_chain == [rival]
 
@@ -1033,6 +1041,99 @@ def test_reaching_the_named_pad_advances_to_the_next_pad_of_the_chain(dots, shor
     shortcuts.path = [second]                                       # from the landing, the next pad first
     loc.set(Here("010003000", first.to, view))                      # through it: landed where it puts them
     assert w._arrow == QPointF(100, 65) and w._arrow_chain == [second]
+
+
+def test_walking_well_past_a_taken_pads_landing_stops_naming_it():
+    """Utah's Pig Farm, as the owner walked it (map units, turned into picture fractions by one scale both
+    ways, so every distance keeps its order): before t001 (pad (-1463, -205), landing (-1480, -637)) the
+    chain names t001, standing on its pad is witnessed, and the next read at (-1104, -713) — 383 units from
+    the landing, 622 from the pad, well outside PAD_NEAR — does not name t001 again, though a way back
+    through it still costs within the tie band: witnessed taken is the whole landing side, not the landing
+    spot alone, and the fresh chain (t004 from there) decides. Back on the pad's side later, a fresh chain
+    starting at t001 again names it again: given up is not banned."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+
+    def at(x, y):
+        return (x + 2000) / 4000, (y + 1000) / 4000
+
+    first = Jump(frm=at(-1463, -205), to=at(-1480, -637), name="t001")
+    rival = Jump(frm=at(-141, 36), to=at(-5, -630), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1010.0, "t004": 1000.0})}    # back: within the band
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"])
+    target = at(1766, -809)                                         # Utah, on the same map
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010001082", spot), target, kept)
+
+    kept = ask(at(-1800, 0), ([], None))                            # a spot before t001: its pad first
+    assert kept[0] == [first]
+    offered["path"] = [rival]                                       # asked from the pad, another way would win
+    kept = ask(first.frm, kept)                                     # standing on it: witnessed, still its pad
+    assert kept[0] == [first]
+    kept = ask(at(-1104, -713), kept)                               # took it and walked well past its landing
+    assert kept[0] == [rival] and kept[0][0].name != "t001"
+    offered["path"] = [first]                                       # later, back on its side, it is the way again
+    offered["costs"] = (1000.0, {"t001": 1000.0, "t004": 6000.0})   # and clearly the cheapest way there now
+    kept = ask(at(-1800, 0), kept)
+    assert kept[0] == [first]
+
+
+def test_wandering_near_a_landing_without_taking_it_asks_once_a_cell():
+    """Near a pad's landing by geography alone is not taken (most of a map is nearer some pad's landing
+    than its pad): a player at (0.31, 0.31) for a pad at (0.9, 0.9) landing at (0.55, 0.5), who never stood
+    on the pad and whose dot never jumped pad to landing, keeps the per-cell cache — the graph (the expensive
+    search) asked only once until their spot reaches another cell, exactly as before any taken rule."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    jump = Jump(frm=(0.9, 0.9), to=(0.55, 0.5), name="h001")
+    asked = []
+
+    def path(mid, you, target):
+        asked.append(you)
+        return [jump]
+
+    graph = SimpleNamespace(shortcut_path=path,
+                            shortcut_costs=lambda mid, you, target: (1000.0, {"h001": 1000.0}))
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.5, 0.5), kept)
+
+    kept = ask((0.31, 0.31), ([], None))                            # nearer the landing than the pad, untouched
+    assert kept[0] == [jump]
+    kept = ask((0.318, 0.302), kept)                                # a read a step on: the same cell
+    kept = ask(None, kept)                                          # a read that didn't see the dot
+    kept = ask((0.31, 0.31), kept)                                  # the same spot read again
+    assert kept[0] == [jump] and asked == [(0.31, 0.31)]            # asked once, the chain kept
+    kept = ask((0.45, 0.31), kept)                                  # another cell: asked again, as ever
+    assert kept[0] == [jump] and asked == [(0.31, 0.31), (0.45, 0.31)]
+
+
+def test_a_tie_wobble_before_anything_is_taken_still_holds_the_named_pad():
+    """No pad taken (never stood on one, no jump witnessed, every spot nearer the named pad than its
+    landing): the cheapest first pad flipping cell to cell inside the tie band still leaves the named
+    pad named, as ever."""
+    from maplehelper.minimap import Here
+    from maplehelper.routes import Jump
+    from maplehelper.ui import portaldots
+    first = Jump(frm=(0.5, 0.5), to=(0.85, 0.85), name="t001")
+    rival = Jump(frm=(0.2, 0.2), to=(0.55, 0.5), name="t004")
+    offered = {"path": [first], "costs": (1000.0, {"t001": 1010.0, "t004": 1000.0})}
+    graph = SimpleNamespace(shortcut_path=lambda mid, you, target: list(offered["path"]),
+                            shortcut_costs=lambda mid, you, target: offered["costs"])
+
+    def ask(spot, kept):
+        return portaldots._ask_shortcut(graph, Here("010003000", spot), (0.9, 0.9), kept)
+
+    kept = ask((0.30, 0.30), ([], None))
+    assert kept[0] == [first]
+    offered["path"] = [rival]                                       # asked fresh, the rival now wins by a coin toss
+    for spot in ((0.34, 0.30), (0.38, 0.34), (0.42, 0.30)):         # a wobble, cell to cell, nothing taken
+        kept = ask(spot, kept)
+        assert kept[0] == [first], spot
 
 
 def test_a_named_pad_no_way_reaches_from_here_is_dropped(dots, shortcuts):

@@ -22,9 +22,15 @@ guide, or once a read has the dot in another of the picture's cells (SHORTCUT_CE
 frame), and the pad stays picked while they stand on it (PAD_NEAR), so the arrow never flickers back to the portal
 or the NPC before they take the jump; the read that lands them past it points at the portal or the NPC again, or at
 the next pad. A pad once named stays named past a cheaper rival too, while a way through it still reaches its
-spot within SHORTCUT_SWITCH_MARGIN of the cheapest way's cost (_held_chain), so a wobble about a tie — their dot
+spot within the switch margin of the cheapest way's cost (_held_chain: SHORTCUT_SWITCH_MARGIN, or
+SHORTCUT_SWITCH_MARGIN_SHARE of that cost when the share is the larger), so a wobble about a tie — their dot
 jumping, the cheapest pad flipping cell to cell — never changes the arrow's mind; it gives the pad up only for a
-way clearly cheaper, for none through it from where they stand, or once they have taken it. The arrows look as
+way clearly cheaper, for none through it from where they stand, or once taking it has been witnessed: they
+were seen on the pad and are now on its landing side, or their dot moved in one read from the pad's
+neighbourhood to its landing — nearer the landing alone, true of most of a map for most pads, is no witness
+and leaves the per-cell asking untouched. Once witnessed, the pad stays given up while they remain on that
+side, however far they walk on, the fresh chain deciding there — and naming that same pad again only when
+it genuinely does. The arrows look as
 the bar's ⚙ panel picks, read at every refresh: the route's colour
 (minimap_arrow_color, a name in ARROW_COLORS: orange unless another is picked; the NPC's is the ring's green whatever
 is picked, so it reads as the NPC and never as the route's step), their size (minimap_arrow_size: the length in
@@ -110,18 +116,39 @@ SHORTCUT_CELLS = 50
 # two cells) and not past the jump (_on_pad): standing on it, their dot jitters about it as they press up there, and
 # the arrow must not flicker between the pad and the portal or the NPC
 PAD_NEAR = 2 / SHORTCUT_CELLS
-# a pad once named stays named while a way through it stays within this much of the cheapest way's cost
-# (routes.Graph.shortcut_costs, its own measure for the map), however the cheapest first pad changes read to
-# read: the two ways on Utah's Pig Farm cost nearly the same there. Measured on the live KB (2026-10-14, the
-# cost through t001 less the cheapest cost toward Utah, over the 300x300-unit patch about the owner's spot
-# (-1178, -18), fed spot by spot): median 1280, 95th of 961 spots 1948, worst 2105 — the band where the
-# answer flips t001/t004 cell to cell (31 against 18 of the owner's 49, before that map's ground was
-# corrected). Toward a spot on three other maps with pads (Forest West of Henesys, The Forest of Wisdom,
-# The Forest of Evil I, 361 spots each), the cheapest way's lead over the next way ran median 356/365/206
-# and 90th 1946/1444/1839, so a lead past this margin is a way a player would call clearly better, not the
-# coin toss inside it; a cost through the kept pad past it, or no cost through it at all (no way through
-# it reaches the spot from here), lets it go.
+# a pad once named stays named while a way through it stays within the switch margin of the cheapest way's
+# cost (routes.Graph.shortcut_costs, its own measure for the map), however the cheapest first pad changes
+# read to read. The margin is the larger of the two below, because the two measures shortcut_costs picks
+# between run at different scales and no one number is honest for both (measured on the live KB,
+# 2026-10-14, spots converted to picture fractions exactly as Graph.shortcut_path converts them to map
+# units, fed spot by spot over 300x300-unit patches):
+# - SHORTCUT_SWITCH_MARGIN (2200, unchanged): the straight-line measure, on maps with no ground in the KB,
+#   whose prices the CLIMB_WEIGHT re-pricing never touched. Toward a spot on Marr's Forest (patch about
+#   (0, 250), toward (-217, -306), 361 spots) a held pad's cost over the cheapest ran to 989 at worst, and
+#   on Kerning City (patch about (0, 0), toward (2030, 309)) to 469, the cheapest way's lead over the next
+#   way (second-cheapest through-a-pad cost less the cheapest) running median 360/149 and 90th 507/322
+#   there — so 2200 still clears the whole straight-line tie band, as it did when it was set.
+# - SHORTCUT_SWITCH_MARGIN_SHARE (0.6 of the cheapest way's cost): the real-ground measure, whose costs
+#   grew with CLIMB_WEIGHT = 5 in terrain.py. On Utah's Pig Farm toward Utah (1766, -809), over the
+#   300x300 patch about the owner's spot (-1178, -18) (961 spots), the cheapest way costs a median 9862.5
+#   and the held t001's cost over the cheapest runs median 0, 95th 1182, worst 1537 — a worst share of
+#   0.53 of the cheapest cost (over the 228 spots where t004 is the cheaper of the two: median share
+#   0.27, 95th 0.49), the band where the raw answer flips t001/t004 (733 against 228 spots). 0.6 clears
+#   that worst share; a flat 2200 is under a quarter of the costs it is set against there. Over the like
+#   patch about (-362, -556) on the same map the held t001's excess runs median 2449, worst 3165 against
+#   a median cheapest cost of 7802.5 — already past a flat 2200, at a share of only 0.32. On three other
+#   ground maps (300x300 patches where the raw answer flips, 361 spots each: Forest West of Henesys about
+#   (0, -400) toward (928, -1346), The Forest of Wisdom about (300, -461) toward (-36, -1193), The Forest
+#   of Evil I about (200, -350) toward (30, -989)) the cheapest way's lead over the next way ran median
+#   135/256/336, 90th 657/1386/612, worst 677/1475/939, and a pad cheapest somewhere in its patch, held
+#   across the whole patch, ran to 3104/2552/1973 over the cheapest — past the flat 2200 only at the far
+#   side of a patch, a real walk away from where it was named, not in the cell-to-cell wobble beside the
+#   flip. So neither alone is the margin: the flat number holds the small-cost spots (either measure), the
+#   share holds the ground's large-cost ones, and the larger of the two is taken.
+# A cost through the kept pad past the margin, or no cost through it at all (no way through it reaches
+# the spot from here), lets it go.
 SHORTCUT_SWITCH_MARGIN = 2200
+SHORTCUT_SWITCH_MARGIN_SHARE = 0.6
 
 
 def _name(graph, mid: str) -> str:
@@ -246,9 +273,34 @@ def _at_landing(you: tuple[float, float], jump: routes.Jump) -> bool:
             and math.dist(you, jump.to) < math.dist(you, jump.frm))
 
 
+def _on_landing_side(you: tuple[float, float], jump: routes.Jump) -> bool:
+    """The player's spot is nearer a shortcut's landing (Jump.to) than its pad (Jump.frm). Geography alone,
+    never a witness that the pad was taken — it is true of most of a map for most pads (a player at (0.31,
+    0.31) is nearer the landing (0.55, 0.5) than the pad (0.9, 0.9) of a pad they have never touched) — so
+    it only counts with one (_ask_shortcut: seen on the pad, or a read that jumped pad to landing), where
+    it says the taken pad stays taken, however far past its landing they have walked: Utah's Pig Farm's
+    t001 taken and walked on from, at (-1104, -713), is still on the landing side of pad (-1463, -205) and
+    landing (-1480, -637) (383 units from the landing, 622 from the pad, far outside PAD_NEAR)."""
+    return math.dist(you, jump.to) < math.dist(you, jump.frm)
+
+
+def _witnessed_take(you: tuple[float, float], last: tuple[float, float] | None, seen: routes.Jump | None,
+                    jump: routes.Jump) -> bool:
+    """A read witnesses that the player took a named pad (`jump`): they were seen on it (`seen`, _on_pad, on
+    an earlier read of this held chain) and this read has them on its landing side (_on_landing_side); or
+    their dot moved in one read from its pad's neighbourhood (`last` on it, _on_pad) to its landing
+    (_at_landing, PAD_NEAR) — a jump no walk between reads makes. Neither is a spot merely nearer the
+    landing than the pad, which most spots are, nor a landing spot reached with no pad read before it."""
+    return ((seen is not None and seen.name == jump.name and _on_landing_side(you, jump))
+            or (last is not None and _on_pad(last, jump) and _at_landing(you, jump)))
+
+
 def _held_chain(graph, here: Here, you: tuple[float, float], target: tuple[float, float], chain: list) -> list | None:
     """The chain already named, kept though the cheapest way now starts another way, when a way through its
-    first pad still reaches the spot from here at a cost within SHORTCUT_SWITCH_MARGIN of the cheapest
+    first pad still reaches the spot from here at a cost within the switch margin of the cheapest — the
+    larger of SHORTCUT_SWITCH_MARGIN and SHORTCUT_SWITCH_MARGIN_SHARE of that cost (at their constants:
+    the flat number is read off the straight-line measure's tie band, the share off the real ground's on
+    Utah's Pig Farm, whose costs run several times the straight-line ones)
     (routes.Graph.shortcut_costs: both costs of that one call, in its one measure). None — the cheapest way
     stands — when the graph cannot cost the ways (a stand-in with only Graph.shortcut or shortcut_path: its
     fresh answer has no rival to set it against), when no way through the named pad reaches the spot from
@@ -264,7 +316,7 @@ def _held_chain(graph, here: Here, you: tuple[float, float], target: tuple[float
     kept = via.get(chain[0].name) if isinstance(via, dict) else None
     if kept is None or math.isinf(kept):
         return None
-    return chain if kept - best <= SHORTCUT_SWITCH_MARGIN else None
+    return chain if kept - best <= max(SHORTCUT_SWITCH_MARGIN, SHORTCUT_SWITCH_MARGIN_SHARE * best) else None
 
 
 def _shortcut_path(graph, here: Here, you: tuple[float, float], target: tuple[float, float]) -> list:
@@ -283,35 +335,59 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     taken (`target`: the way's next step, PortalDots._shortcut; the guided NPC, PortalDots._npc_shortcut), as
     routes.Graph.shortcut_path picks them from their own spot (LOCATION.here.spot, the read's dot): an arrow
     points at the first pad (Jump.frm) then, the later pads get their numbered markers; [] when no teleport beats
-    the walk. `kept` is the last chain and the cell of their spot it was asked from (SHORTCUT_CELLS each way;
-    None: to be asked), both handed back as they are now: asked only with their spot known (a read that didn't see
-    the dot keeps the last chain), and again only once a read has it in another of the picture's cells, never for a
-    follow frame, a read a step on or one while they stand on the first pad picked (_on_pad), where it stays picked
-    so the arrow never flickers between the pad and the spot as their dot jitters about it. The first read off the
-    pad asks again: the one that lands them past the jump gets the spot back (or the next pad), that jump saving
-    nothing from there.
+    the walk. `kept` is the last chain, the cell of their spot it was asked from (SHORTCUT_CELLS each way;
+    None: to be asked), the pad they were seen standing on (`seen`), the pad witnessed taken (`taken`), and
+    their last spot read (`last`), handed back as they are now — a short `kept` counts the rest as none yet:
+    asked only with their spot known (a read that didn't see the dot keeps the last chain), and again only
+    once a read has it in another of the picture's cells, never for a follow frame, a read a step on or one
+    while they stand on the first pad picked (_on_pad), where it stays picked so the arrow never flickers
+    between the pad and the spot as their dot jitters about it. The first read off the pad asks again: the
+    one that lands them past the jump gets the spot back (or the next pad), that jump saving nothing there.
+    A player who has taken nothing — however near some pad's landing their spot happens to be — is asked
+    once a cell as ever: no witness, no extra asks.
 
     A pad once named stays named while it stays a sensible way (_held_chain): a new cell's cheapest chain
     starting another way — or with no pad at all — takes over only when no way through the named pad reaches
-    the spot from here, or its way costs more than SHORTCUT_SWITCH_MARGIN over the cheapest, or they have
-    taken the named pad (a read on its landing, _at_landing: the fresh chain then starts at the next pad, as
-    a new map's or a new guide's does, its caller having forgotten the old chain before asking). Nothing is
-    held without a costing (a graph that cannot cost its ways keeps the fresh answer, as ever)."""
-    chain, cell = kept
+    the spot from here, or its way costs more than the switch margin over the cheapest (the larger of
+    SHORTCUT_SWITCH_MARGIN and SHORTCUT_SWITCH_MARGIN_SHARE of the cheapest cost, at _held_chain), or taking it
+    has been witnessed (_witnessed_take: seen on it and now on its landing side, or a dot moved in one
+    read from its neighbourhood to its landing). Then it stays given up while
+    they remain on that landing side, however far they walk on past the landing — asked again even in the
+    cell the chain was last asked from — the fresh chain deciding there: naming that same pad again only
+    when it starts there itself (which clears the witness: a pad named again is a pad to take again, its
+    next taking to be witnessed anew), never holding it over a fresh chain that starts elsewhere. Back on
+    its pad's side the witness lapses with the side. Nothing is held without a costing (a graph that cannot
+    cost its ways keeps the fresh answer, as ever). A new map's or a new guide's chain is asked fresh, its
+    caller having forgotten the old one — witness and all — before asking."""
+    chain = kept[0]
+    cell = kept[1] if len(kept) > 1 else None
+    seen = kept[2] if len(kept) > 2 else None
+    taken = kept[3] if len(kept) > 3 else None
+    last = kept[4] if len(kept) > 4 else None
     you = here.spot
     if you is None:
-        return kept
-    if chain and _on_pad(you, chain[0]):
-        return chain, None       # standing on it: kept, and the first read off it asks again
+        return chain, cell, seen, taken, last
+    jump = chain[0] if chain else None
+    if jump is not None and _on_pad(you, jump):
+        return chain, None, jump, taken, you       # standing on it: seen; kept, first read off it asks again
+    if jump is not None and _witnessed_take(you, last, seen, jump):
+        taken = jump
+    if taken is not None and not _on_landing_side(you, taken):
+        taken = None                                # back on its pad's side: the given-up lapses with the side
+    given_up = jump is not None and taken is not None and taken.name == jump.name
     now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
-    if now == cell:
-        return kept
+    if now == cell and not given_up:
+        return chain, cell, seen, taken, you
     fresh = _shortcut_path(graph, here, you, target)
-    if chain and not (fresh and fresh[0].name == chain[0].name) and not _at_landing(you, chain[0]):
+    if jump is not None and not (fresh and fresh[0].name == jump.name) and not given_up:
         held = _held_chain(graph, here, you, target, chain)
         if held is not None:
-            return held, now
-    return fresh, now
+            return held, now, seen, taken, you
+    if taken is not None and fresh and fresh[0].name == taken.name:
+        taken = None                                # named again by the fresh chain itself: not given up
+    seen = fresh[0] if fresh and _on_pad(you, fresh[0]) else (
+        seen if seen is not None and fresh and seen.name == fresh[0].name else None)
+    return fresh, now, seen, taken, you
 
 
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:
@@ -432,12 +508,16 @@ class PortalDots(QWidget):
         self._arrow_leg: routes.Leg | None = None
         # ... and its shortcut chain through hidden teleports on the player's map while one cuts the walk to that
         # step (_shortcut: its first pad, where the arrow points, kept as _arrow_jump too), with the cell of their
-        # spot it was last asked from (SHORTCUT_CELLS; None: to be asked), and the later pads' numbered markers
-        # placed from it at each refresh (_chain_marks: _arrow_marks)
+        # spot it was last asked from (SHORTCUT_CELLS; None: to be asked), the pad they were seen standing on
+        # and the one witnessed taken and their last spot read (_ask_shortcut's kept, all forgotten with a new
+        # way), and the later pads' numbered markers placed from it at each refresh (_chain_marks: _arrow_marks)
         self._arrow_jump: routes.Jump | None = None
         self._arrow_chain: list[routes.Jump] = []
         self._arrow_marks: list[_Mark] = []
         self._jump_cell: tuple[int, int] | None = None
+        self._arrow_seen: routes.Jump | None = None
+        self._arrow_taken: routes.Jump | None = None
+        self._arrow_last: tuple[float, float] | None = None
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say)
         self._ratio = 1.0
         # the arrows' look, from the settings at each refresh: how many times their drawn size (_size_scale), and
@@ -456,13 +536,17 @@ class PortalDots(QWidget):
         self._npc_said: tuple | None = None
         # ... and its shortcut chain, as the route's (_npc_shortcut): what it was asked for (the guide, its map, the
         # NPC's spot and key, and the Hidden teleport routes switch), the pads picked while they cut the walk to the
-        # NPC (its first kept as _npc_jump too), the later pads' numbered markers (_npc_marks), and the cell of the
-        # player's spot it was last asked from (SHORTCUT_CELLS; None: to be asked)
+        # NPC (its first kept as _npc_jump too), the later pads' numbered markers (_npc_marks), the cell of the
+        # player's spot it was last asked from (SHORTCUT_CELLS; None: to be asked), and as the route's the pad
+        # seen stood on, the one witnessed taken and their last spot read (all forgotten for a new guide)
         self._npc_key: tuple | None = None
         self._npc_jump: routes.Jump | None = None
         self._npc_chain: list[routes.Jump] = []
         self._npc_marks: list[_Mark] = []
         self._npc_cell: tuple[int, int] | None = None
+        self._npc_seen: routes.Jump | None = None
+        self._npc_taken: routes.Jump | None = None
+        self._npc_last: tuple[float, float] | None = None
         # the arrows' blink while its flash setting is on (_flash): a beat of the timer hides both, the next shows
         # them again
         self._flash_on = True
@@ -583,6 +667,7 @@ class PortalDots(QWidget):
             leg = way.legs[0] if way is not None and way.legs else None
             self._arrow_key, self._arrow_leg = key, leg if leg is not None and leg.spot is not None else None
             self._arrow_jump, self._arrow_chain, self._jump_cell = None, [], None     # a new way: its chain asked anew
+            self._arrow_seen, self._arrow_taken, self._arrow_last = None, None, None     # ... and no witness kept
             self._arrow_said = None
             log.info("route arrow: to %s, %s", _name(graph, dest),
                      f"next step: {getattr(leg, 'kind', '')} {getattr(leg, 'via', '')}".strip()
@@ -594,6 +679,7 @@ class PortalDots(QWidget):
             return None
         if not hidden:
             self._arrow_jump, self._arrow_chain = None, []
+            self._arrow_seen, self._arrow_taken, self._arrow_last = None, None, None
             return leg, None
         return leg, self._shortcut(graph, here, leg)
 
@@ -604,7 +690,9 @@ class PortalDots(QWidget):
         says it takes them toward the step's map; None when no teleport beats the walk. The log says when the arrow
         takes a shortcut — how many pads its chain has, when more than one — and when it goes back to the step. Kept
         with the way: _next_step asks anew for a new one."""
-        chain, self._jump_cell = _ask_shortcut(graph, here, leg.spot, (self._arrow_chain, self._jump_cell))
+        kept = (self._arrow_chain, self._jump_cell, self._arrow_seen, self._arrow_taken, self._arrow_last)
+        chain, self._jump_cell, self._arrow_seen, self._arrow_taken, self._arrow_last = _ask_shortcut(
+            graph, here, leg.spot, kept)
         jump = chain[0] if chain else None
         if chain != self._arrow_chain:
             log.info("route arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "
@@ -627,10 +715,14 @@ class PortalDots(QWidget):
         hidden = _switch(self._settings, "route_hidden_teleports")
         if (guide, hidden) != self._npc_key:
             self._npc_key, self._npc_jump, self._npc_chain, self._npc_cell = (guide, hidden), None, [], None
+            self._npc_seen, self._npc_taken, self._npc_last = None, None, None     # a new guide: no witness kept
         if not hidden:
             self._npc_jump, self._npc_chain = None, []
+            self._npc_seen, self._npc_taken, self._npc_last = None, None, None
             return None
-        chain, self._npc_cell = _ask_shortcut(graph, here, guide[1], (self._npc_chain, self._npc_cell))
+        kept = (self._npc_chain, self._npc_cell, self._npc_seen, self._npc_taken, self._npc_last)
+        chain, self._npc_cell, self._npc_seen, self._npc_taken, self._npc_last = _ask_shortcut(
+            graph, here, guide[1], kept)
         jump = chain[0] if chain else None
         if chain != self._npc_chain:
             log.info("npc arrow: %s", f"pointing at a shortcut, the hidden teleport {jump.name} toward "

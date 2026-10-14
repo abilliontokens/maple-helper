@@ -56,11 +56,11 @@ The model — every line of this is an assumption fitted to the data, not a fact
    across every map in the KB the nearest beside-platform distance per rope holds
    steady out to about 64 units and then drops away — the same one-jump reach. The
    rope at x=1964, by contrast, ends 2 units above the span at y≈87 at its bottom
-   end and 2 below Utah's span at y=-805 at its top: solid contact at both ends. Climbing
-   costs the vertical distance between the two spans.
+   end and 2 below Utah's span at y=-805 at its top: solid contact at both ends. A
+   climb is priced per unit of height by rule 8, not at walking's 1 per unit.
 4. Falling. From a few probe points along a span the player drops onto the first span
    below (greater y) whose ground is within FALL_REACH sideways and whose drop no wall
-   (rule 2) crosses. Falling is one way and nearly free. Probing, rather than solving
+   (rule 2) crosses. Falling is one way and nearly free (priced by rule 8). Probing, rather than solving
    every drop line exactly, is the one deliberate simplification: a lower span that only
    ever passes under a span between two probes is missed, and in a map of hundreds of
    spans that has not been seen to matter.
@@ -68,10 +68,22 @@ The model — every line of this is an assumption fitted to the data, not a fact
    higher span that sits over it — the higher span's x range must overlap the lower one's
    (touching at an end counts: that is a ledge whose foot is the lower span's end) — and
    that is at most JUMP_HEIGHT above it over that overlap, so a lower span joins (one way,
-   upward only) every higher span that sits over it within one jump. A span merely near
-   above, offset sideways past the lower span's end, is not a jump: the character cannot
-   drift sideways onto ground that is not over where they jumped from. The height is
-   measured from the map, not assumed: on Utah's Pig Farm, joining fragments into
+   upward only) every higher span that sits over it within one jump. A ledge that sits
+   just past the lower span's end counts too, within JUMP_SIDE_DIST sideways of it: a
+   jump is airborne the way a fall is, and drifts as far sideways (FALL_REACH, rule 4)
+   before it lands, the rise then measured between the spans' nearest ends. That drift
+   is measured, not assumed: joining fragments into platforms across the KB and taking,
+   for each platform, the nearest higher platform one tier up (50–70) gives 521 that sit
+   over the lower one, 154 that sit within 30 past its end — 105 of those within 12 —
+   and only 34 that sit 31–70 past it, so tier ledges past an end concentrate inside
+   the drift and thin out beyond it. Utah's Pig Farm has the pattern twice, at its two
+   cut-off tower platforms: the span at (231–309, -445) jumps 60 up and 12 east onto
+   the span at (321–399, -505) toward t005, and the span at (681–759, -385) jumps the
+   same 60 up and 12 east onto the span at (771–849, -445) toward h006; with overlap
+   alone neither platform is reached from anywhere, however near it looks on the
+   picture. A span farther past the end than the drift is not a jump: the character
+   cannot drift sideways onto ground that is well past where they jumped from. The
+   height is measured from the map, not assumed: on Utah's Pig Farm, joining fragments into
    platforms and taking, for each platform, the rise to the nearest higher platform that
    overlaps it in x gives one platform tier of 57–68 units for 22 of its 49 platforms,
    and the next rises up are 120, then 168–180, then 230–240 — two and three tiers.
@@ -85,7 +97,8 @@ The model — every line of this is an assumption fitted to the data, not a fact
    the span at y=-625, some 65 up) and work across and around to that far rope. A jump
    costs its height plus JUMP_EFFORT: a jump is slow to line up and land compared with
    walking the same rise on a slope, so the fixed part is priced well above the height
-   itself, and a long ladder of jumps loses to a pad that skips the ladder.
+   itself, and a long ladder of jumps loses to a pad that skips the ladder (rule 8
+   says why the height part itself stays at walking's 1 per unit).
 6. Hidden teleports. A jump (a hidden teleport; `Jump` to the engine, `jumps` in `pads`)
    connects the span under its `frm` to the span under its `to`, one way, at a flat
    TELEPORT_COST. Either end that cannot be snapped to a span (rule 7) makes that jump
@@ -97,11 +110,44 @@ The model — every line of this is an assumption fitted to the data, not a fact
    a map, or a little under its ground — falls back to the nearest span within SNAP_DIST,
    and that fallback never overrides a reachable span below. An end that snaps to nothing
    means the ground data cannot speak for where that point is.
+8. Prices. Walking sets the scale: one unit sideways costs 1 (rule 1). The other moves
+   are priced against it by how a player actually does them, not by straight-line
+   distance. A rope climb costs CLIMB_WEIGHT (5) per unit of height, the same number
+   — and for the same reason — as `routes.SHORTCUT_CLIMB`, the straight-line model's
+   climb weight (`routes` imports this module, so the number is restated here rather
+   than imported; the two must move together). There, a player crosses a map on foot
+   but cannot walk upward at all: they climb it by ladders, ropes and platform jumps,
+   while a pad moves them up or down for free; priced at 2.5 the walk was nearly
+   straight-line and the pads on Utah's Pig Farm were never named from its lower
+   floors, and at 5, 18 of its 29 spawn points named a pad in that census. This model
+   used to charge a climb the height itself (1 per unit, as if climbing were walking
+   sideways), so the 960-unit climb on Pig Farm's rope at x=1964 cost 961 and the
+   pad-free way through it beat the way through t007 from (140, -493); at 5 per unit
+   that climb alone costs some 4800, so wherever a pad actually skips a long climb
+   it is named, as it is in play. From (140, -493) itself t007 is still not named,
+   measured after this change: every way to Utah shares that final climb, and t007
+   only cuts short a fall and a floor walk its landing is already beside, so its way
+   (7832) stays behind the pad-free way (7581) — pricing a climb both ways share
+   cannot separate them, and naming it there would take a different change. The
+   same weight applies down a rope: a ladder down is still climbed, rung by rung,
+   and where a player would simply drop, rule 4's fall edge is the cheap way
+   instead. A fall itself stays flat FALL_COST plus its sideways drift at walking
+   price: gravity does the vertical work and a drop is over in a moment however far
+   it falls, so a fall's height is charged nothing — the opposite of a climb, not an
+   oversight. A jump's height part likewise stays at 1 per unit on top of JUMP_EFFORT,
+   and is not inconsistent with CLIMB_WEIGHT: a jump only ever rises one tier
+   (57–68 on Pig Farm, at most JUMP_HEIGHT), so its all-in price of 307–320 for a tier
+   already sits inside the 285–340 a rope charges for that same rise at 5 per unit —
+   the fixed effort does the climb-pricing work. Charging the height at 5 as well
+   would price one jump at some 550–590, near twice the rope for the same rise, for
+   a single airborne motion that is not a sustained climb.
 
 `pads` returns the teleports on the cheapest walk, in the order taken: effort, not
-pad-count, decides. Walking into a span costs its horizontal length, a rope the height
-climbed, a fall a flat FALL_COST, a jump its height plus JUMP_EFFORT, and a teleport a
-flat TELEPORT_COST — about nothing, since the teleport itself is instant, but not zero,
+pad-count, decides. Walking into a span costs its horizontal length, a rope
+CLIMB_WEIGHT per unit of height climbed, a fall a flat FALL_COST (plus its sideways
+drift), a jump its height plus JUMP_EFFORT (and its sideways
+drift, when it lands past the lower span's end), and a teleport a flat TELEPORT_COST
+— about nothing, since the teleport itself is instant, but not zero,
 so a pad that only ties a walk or a fall is not named for it. [] is returned only when
 that cheapest walk uses no teleport at all: a pad is named exactly when it makes the
 way cheaper than walking, climbing, falling and jumping do without it, however many
@@ -140,12 +186,25 @@ JOIN_DIST = 2.0
 FALL_REACH = 30.0
 # what a fall costs: nearly nothing, but not nothing, so a walk on the same level can win
 FALL_COST = 1.0
+# what one unit of height on a rope or ladder costs, in units walked sideways (rule 8):
+# the same climb weight, and the same reasoning, as routes.SHORTCUT_CLIMB (routes imports
+# this module, so it is restated here rather than imported — the two must move together)
+CLIMB_WEIGHT = 5.0
+# how far sideways (map units) a jump up may land past the lower span's end (rule 5):
+# a player airborne in a jump drifts sideways as one falling does (FALL_REACH, rule 4),
+# so a ledge starting within that drift of the lower span's end is still landed on, and
+# one farther past it is not — on Utah's Pig Farm both cut-off tower platforms sit
+# exactly 12 past the span below them (see rule 5), well inside this, and the ledge
+# 40 past its span in the tests sits outside it
+JUMP_SIDE_DIST = FALL_REACH
 # how high (map units) a character can jump onto a span above (rule 5): one platform tier —
 # the nearest overlapping higher platform on Utah's Pig Farm is 57–68 up, the next tiers
 # 120 and more, so 70 climbs one tier and never two (see rule 5)
 JUMP_HEIGHT = 70.0
 # the fixed effort of one jump up, on top of its height (rule 5): a jump is slow to line
 # up and land, so one tier's jump costs some 320 all-in — a ladder of them loses to a pad
+# that skips it (rule 8: that all-in price is already the climb price of one tier, so
+# the height part stays at walking's 1 per unit)
 JUMP_EFFORT = 250.0
 # what a hidden teleport costs: about nothing (it is instant), but not nothing, so a
 # pad that only ties a walk or a fall is not named for it
@@ -386,7 +445,8 @@ class Walk:
 
     def _join_ropes(self, lr) -> None:
         """Every span a rope crosses, ends near, or passes beside joins every other, both
-        ways (rule 3), at the cost of the height between them at the rope's x."""
+        ways (rule 3), at CLIMB_WEIGHT per unit of the height between them at the rope's
+        x (rule 8), plus the flat 1 it has always paid."""
         for row in lr:
             rope = _nums(row, 3)
             if rope is None:
@@ -404,7 +464,7 @@ class Walk:
                     joined.append((i, y))    # passed beside, between the ends: a jump on or off sideways
             for a, (i, yi) in enumerate(joined):
                 for j, yj in joined[a + 1:]:
-                    self._add(i, j, abs(yi - yj) + 1.0)
+                    self._add(i, j, abs(yi - yj) * CLIMB_WEIGHT + 1.0)
 
     def _join_falls(self) -> None:
         """From each probe point along a span, a one-way cheap drop to the first span below
@@ -433,23 +493,31 @@ class Walk:
                         break
 
     def _join_jumps(self) -> None:
-        """A one-way jump up from a lower span to every higher span that sits over it
-        within one jump (rule 5): the higher span's x range overlaps the lower one's
-        (touching at an end counts), the rise over that overlap is at most JUMP_HEIGHT,
-        and the jump costs its height plus JUMP_EFFORT. The lowest rise over the overlap
-        is the jump on offer — the player walks along the lower span to the best spot
-        before jumping."""
+        """A one-way jump up from a lower span to every higher span within one jump
+        (rule 5): the higher span sits over the lower one (touching at an end counts)
+        or just past its end, within JUMP_SIDE_DIST sideways of it; the rise — over
+        the overlap, or between the spans' nearest ends when the higher span sits
+        past the end — is at most JUMP_HEIGHT, and the jump costs its height plus
+        JUMP_EFFORT plus any sideways drift. The lowest rise on offer is the jump —
+        the player walks along the lower span to the best spot before jumping."""
         for i, lo in enumerate(self._spans):
             for j, hi in enumerate(self._spans):
                 if i == j:
                     continue
                 overlap_lo, overlap_hi = max(lo.x0, hi.x0), min(lo.x1, hi.x1)
-                if overlap_lo > overlap_hi:
-                    continue        # not over the lower span: no jump lands there (rule 5)
-                rise = min(lo.y_at(overlap_lo) - hi.y_at(overlap_lo),
-                           lo.y_at(overlap_hi) - hi.y_at(overlap_hi))
+                if overlap_lo <= overlap_hi:
+                    rise = min(lo.y_at(overlap_lo) - hi.y_at(overlap_lo),
+                               lo.y_at(overlap_hi) - hi.y_at(overlap_hi))
+                    drift = 0.0
+                else:
+                    drift = overlap_lo - overlap_hi
+                    if drift > JUMP_SIDE_DIST:
+                        continue    # past the drift: no jump lands there (rule 5)
+                    near_lo = lo.x1 if hi.x0 > lo.x1 else lo.x0
+                    near_hi = hi.x0 if hi.x0 > lo.x1 else hi.x1
+                    rise = lo.y_at(near_lo) - hi.y_at(near_hi)
                 if 1.0 < rise <= JUMP_HEIGHT:
-                    self._add(i, j, JUMP_EFFORT + rise, both=False)
+                    self._add(i, j, JUMP_EFFORT + rise + drift, both=False)
 
     # ------------------------------------------------------------ asking
 

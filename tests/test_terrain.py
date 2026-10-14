@@ -54,8 +54,34 @@ def test_a_rope_climbs_without_a_pad_and_a_pad_that_saves_the_climb_is_named():
     # the rope alone gets the player up (100 up is past a jump, so the rope is the way)
     assert walk.pads((10, 200), (150, 100), []) == []
     # but effort decides, not pad-count: teleporting costs about nothing next to
-    # climbing the rope's 100, so the pad that skips the climb is the one named
+    # climbing the rope's 100 at CLIMB_WEIGHT a unit (some 500, rule 8), so the pad
+    # that skips the climb is the one named
     assert walk.pads((10, 200), (150, 100), [pad]) == [pad]
+
+
+def test_a_long_rope_climb_loses_to_a_pad_that_skips_it():
+    """900 up on a rope at CLIMB_WEIGHT a unit is some 4500 of effort (rule 8 in the
+    module: climbing is not walking sideways), so the pad that skips the whole climb
+    is named; the rope alone still gets there, so without the pad no pad is named."""
+    pad = Jump((50, 1000), (50, 100), "t001")
+    ground = [[0, 1000, 200, 1000], [0, 100, 200, 100]]
+    walk = Walk.of(ground, [[100, 100, 1000]])
+    assert walk.pads((10, 1000), (150, 100), []) == []
+    assert walk.pads((10, 1000), (150, 100), [pad]) == [pad]
+
+
+def test_a_short_rope_climb_still_beats_a_faraway_pad():
+    """100 up on the rope at the west end costs some 500 (100 at CLIMB_WEIGHT, rule 8).
+    The pad sits at the far east end of both floors (each floor walked in 150-unit
+    fragments, so reaching it costs the fragments walked): walking east to it, taking
+    it and walking back west on top costs some 900, more than the short climb beside
+    the start, so no pad is named."""
+    pad = Jump((550, 300), (550, 200), "t001")
+    ground = [[x, 300, x + 150, 300] for x in (0, 150, 300, 450)] + \
+             [[x, 200, x + 150, 200] for x in (0, 150, 300, 450)]
+    walk = Walk.of(ground, [[75, 200, 300]])
+    assert walk.pads((10, 300), (20, 200), []) == []
+    assert walk.pads((10, 300), (20, 200), [pad]) == []
 
 
 def test_a_rope_stopping_one_jump_short_of_the_platform_above_still_climbs():
@@ -123,12 +149,37 @@ def test_a_ledge_a_jump_above_is_reached_without_a_pad():
     assert walk.pads((10, 200), (150, 140), []) == []
 
 
+def test_a_ledge_just_past_the_lower_spans_end_is_a_jump():
+    """One platform tier (60 units) up, with the ledge starting 12 units past the
+    lower span's end — the two cut-off tower platforms on Utah's Pig Farm sit
+    exactly so (60 up, 12 past the span below) — so the player jumps up and drifts
+    the 12 sideways onto it, and no pad is named. Sideways drift in the air is the
+    fall's drift (30), and 12 is well inside it."""
+    walk = Walk.of([[0, 200, 200, 200], [212, 140, 400, 140]], [])
+    assert walk.pads((10, 200), (300, 140), []) == []
+
+
+def test_a_ledge_at_the_edge_of_the_drift_is_still_a_jump():
+    # the same tier up, the ledge starting the full drift (30 units) past the lower
+    # span's end: still landed on, so still no pad
+    walk = Walk.of([[0, 200, 200, 200], [230, 140, 400, 140]], [])
+    assert walk.pads((10, 200), (300, 140), []) == []
+
+
+def test_a_ledge_past_the_lower_spans_end_but_too_high_is_not_a_jump():
+    # the same 12 past the end, but two tiers (120 units) up: past one jump however
+    # near it sits sideways, so without a pad it is unreachable and the pad is named
+    pad = Jump((50, 200), (300, 80), "t001")
+    walk = Walk.of([[0, 200, 200, 200], [212, 80, 400, 80]], [])
+    assert walk.pads((10, 200), (300, 80), []) is None
+    assert walk.pads((10, 200), (300, 80), [pad]) == [pad]
+
+
 def test_a_ledge_offset_sideways_past_the_lower_span_is_not_a_jump():
-    """The same tier up, but the ledge starts 40 units past the lower span's end: it is
-    not over the ground the player jumps from, so no jump lands on it. The old rule
-    allowed this (a 60-unit sideways gap at up to 90 up); sideways offset is not a jump
-    any more, only ground that sits over the lower span is. Without a pad the ledge is
-    unreachable, and the pad that lands there is the way."""
+    """The same tier up, but the ledge starts 40 units past the lower span's end:
+    past the sideways drift of a jump (30, the fall's drift), so no jump lands on
+    it. Without a pad the ledge is unreachable, and the pad that lands there is
+    the way."""
     pad = Jump((50, 200), (200, 140), "t001")
     gapped = Walk.of([[0, 200, 100, 200], [140, 140, 240, 140]], [])
     assert gapped.pads((10, 200), (200, 140), []) is None
