@@ -42,6 +42,14 @@ ARROW_RIM = QColor(58, 42, 5)       # its dark rim (mapview's), so the arrow hol
 ARROW_PX = ((0, 1), (-7, -7), (-3, -7), (-3, -15), (3, -15), (3, -7), (7, -7))
 
 
+def _name(graph, mid: str) -> str:
+    """A map's name for the log; its id when the graph doesn't know it."""
+    try:
+        return graph.name(mid)
+    except Exception:  # noqa: BLE001 - a log line must never break a redraw
+        return mid
+
+
 class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and the route's arrow's window over the minimap box. Never takes a click,
     the focus, or a place in the minimap reads."""
@@ -61,6 +69,7 @@ class PortalDots(QWidget):
         # the way _next_step last routed, (player's map, route's map, cabs & teleports), and its first step's spot
         self._arrow_key: tuple[str, str, bool] | None = None
         self._arrow_spot: tuple[float, float] | None = None
+        self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say_arrow)
         self._ratio = 1.0
         LOCATION.changed.connect(self.refresh)
         LOCATION.followed.connect(self.refresh)
@@ -98,6 +107,7 @@ class PortalDots(QWidget):
         at_ring = view.at(guide[1]) if guide is not None and guide[0] == here.map else None
         step = self._next_step(graph, here.map)
         at_arrow = view.at(step) if step is not None else None
+        self._say_arrow(step, at_arrow)
         if not at and at_ring is None and at_arrow is None:
             self._clear()
             return
@@ -137,9 +147,28 @@ class PortalDots(QWidget):
         if key != self._arrow_key:
             route = getattr(graph, "route", None)     # a stand-in graph that can't route (an older test's): no arrow
             way = route(here_map, dest, taxi=rides, teleport=rides) if route is not None else None
-            spot = way.legs[0].spot if way is not None and way.legs else None
-            self._arrow_key, self._arrow_spot = key, spot
+            leg = way.legs[0] if way is not None and way.legs else None
+            self._arrow_key, self._arrow_spot = key, leg.spot if leg is not None else None
+            self._arrow_said = None
+            log.info("route arrow: to %s, %s", _name(graph, dest),
+                     f"next step: {getattr(leg, 'kind', '')} {getattr(leg, 'via', '')}".strip()
+                     if leg is not None and leg.spot is not None
+                     else "its first step has no spot on this minimap" if leg is not None
+                     else "no way known from here")
         return self._arrow_spot
+
+    def _say_arrow(self, step: tuple[float, float] | None, at_arrow: tuple[float, float] | None) -> None:
+        """One line in the log whenever the arrow starts or stops being placed on the minimap shown (the way's next
+        step can be off the part of the map the window shows): a player's report says which it was, and nothing is
+        logged while no route is picked."""
+        if step is None:
+            self._arrow_said = None
+            return
+        said = (self._arrow_key, at_arrow is not None)
+        if said != self._arrow_said:
+            self._arrow_said = said
+            log.info("route arrow: %s", "on the minimap" if at_arrow is not None
+                     else "its next step is off the part of the minimap shown")
 
     def _clear(self) -> None:
         self._dots = []

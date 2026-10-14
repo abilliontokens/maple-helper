@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QPushButton,
+    QScrollArea,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,6 +43,7 @@ from ..i18n import I18n
 from ..store import DEFAULT_SETTINGS, Settings
 from . import mapview, theme
 from .controls import FlowLayout, Switch
+from .gamesearch import SCROLLBAR_W, rim
 from .glass import SHADOW, EdgeResize
 from .hotkeybox import HotkeyBox
 from .location import LOCATION
@@ -90,6 +92,9 @@ WORD_ICON_PX = 15       # the small one beside the word
 TOOL_ICON_PX = 16       # the bar's ⚙ and ✕
 PANEL_W = 300 + 2 * SHADOW                                # the ⚙ panel's card ~300 px wide, its shadow around it
 PANEL_SIDE = SHADOW + 16
+PANEL_GUTTER = 4       # between the ⚙ panel's sections and their scrollbar, which shows in the side margin...
+PANEL_BAR = SCROLLBAR_W + PANEL_GUTTER   # ...this much of it: the sections keep their place and width either way
+PANEL_SPARE = 16       # the ⚙ panel's height stays this far inside its screen's room: past it, its sections scroll
 FOLLOW_MS = 80         # a transparency drag: every other window over the game follows at most this often
 # what "Reset to default look" puts back (the hotkey is no look: it stays)
 LOOK_KEYS = ("overlay_tint", "overlay_accent", "npc_overlay_opacity", "game_toolbar_icons")
@@ -229,7 +234,8 @@ class _BarLayout(FlowLayout):
 def panel_qss() -> str:
     """The ⚙ panel's style in the glass's colours now (palette()): a title, small muted section heads, labels with
     their picked value, one-line hints (its accent-lit controls paint themselves: the swatches' rings, the slider,
-    the switches, the key box)."""
+    the switches, the key box), and the thin scrollbar of the windows over the game (gamesearch.glass_qss's) for
+    the sections when they scroll."""
     pal = palette()
     faint = "rgba(60,60,67,0.30)" if pal.light else "rgba(235,235,245,0.30)"
     return f"""
@@ -248,6 +254,10 @@ QToolButton#Reset {{ background: transparent; color: {pal.muted}; border: none; 
                      font-size: 12px; font-weight: 600; }}
 QToolButton#Reset:hover {{ color: {pal.text}; }}
 QToolButton#Reset:disabled {{ color: {faint}; }}
+QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR_W}px; margin: 0; }}
+QScrollBar::handle:vertical {{ background: {rim(0.25, pal)}; border-radius: 4px; min-height: 30px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 """
 
 
@@ -305,7 +315,8 @@ class _SettingsPanel(QWidget):
     the game's minimap, and whether screenshots see the windows over the game (the bar's minimap_toggled: the app
     follows). Each choice is written, applies at once and stays; "Reset to default look" puts the look back. ✕, the ⚙
     again or Esc closes it (Esc once the panel has been clicked into: like the search window it takes the keyboard
-    only then, never on opening)."""
+    only then, never on opening). It is never taller than its screen: with too little room there for every section
+    (a 1080p screen at 125 %), they scroll under the title row, which stays put to drag the panel by and close it."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -323,13 +334,14 @@ class _SettingsPanel(QWidget):
         self._opacity = OPACITY_DEFAULT
         self.setFixedWidth(PANEL_W)
         self._pal = None                    # the glass's colours its style and icons were made in (refresh)
-        col = QVBoxLayout(self)
-        col.setContentsMargins(PANEL_SIDE, TOP + 4, PANEL_SIDE, BOTTOM + 6)
-        col.setSpacing(0)
+        outer = QVBoxLayout(self)
+        # the side margins' inner PANEL_BAR is the title row's and the sections': their scrollbar shows in it (_fit)
+        outer.setContentsMargins(PANEL_SIDE - PANEL_BAR, TOP + 4, PANEL_SIDE - PANEL_BAR, BOTTOM + 6)
+        outer.setSpacing(0)
         # the title row: drags the panel; its ✕ closes it
-        head = _Header()
+        head = self._head = _Header()
         hrow = QHBoxLayout(head)
-        hrow.setContentsMargins(0, 0, 0, 0)
+        hrow.setContentsMargins(PANEL_BAR, 0, PANEL_BAR, 0)
         hrow.setSpacing(8)
         self._title = QLabel(objectName="Title")
         self._close = QToolButton(objectName="Close", text=theme.SYMBOL_ICONS["close"])
@@ -337,7 +349,20 @@ class _SettingsPanel(QWidget):
         self._close.clicked.connect(self._close_clicked)
         hrow.addWidget(self._title, 1)
         hrow.addWidget(self._close, 0, Qt.AlignTop)
-        col.addWidget(head)
+        outer.addWidget(head)
+        # every section under it, in a body that scrolls while the panel is taller than its screen has room for (_fit)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.viewport().setAutoFillBackground(False)      # the glass shows through
+        outer.addWidget(self._scroll, 1)
+        body = QWidget()
+        col = self._body_lay = QVBoxLayout(body)
+        col.setContentsMargins(PANEL_BAR, 0, PANEL_BAR, 0)
+        col.setSpacing(0)
+        self._scroll.setWidget(body)
+        body.setAutoFillBackground(False)                          # (setWidget turns it on: the glass shows through)
         # Look: the glass tint as tiles, the accent as dots, each named beside its label
         self._look_head = self._section(col, first=True)
         self._tint_label, self._tint_name = self._label_row(col)
@@ -503,7 +528,8 @@ class _SettingsPanel(QWidget):
 
     def refresh(self) -> None:
         """Every choice back in step with the settings (the Settings dialog may have changed them), the panel's
-        style and icons in the glass's colours now, and its own glass at the transparency they give."""
+        style and icons in the glass's colours now, its own glass at the transparency they give, and its height: what
+        the sections need, at most the room on its screen (_fit)."""
         t, rtl, s = self.t, self.t.rtl, self._settings
         accent, _ = accent_of(s)
         pal = palette()
@@ -570,21 +596,48 @@ class _SettingsPanel(QWidget):
             switch.set_accent(accent)
             switch.setAccessibleName(t(key))
         self._reset.setEnabled(any(s[k] != DEFAULT_SETTINGS[k] for k in LOOK_KEYS))
-        self.resize(PANEL_W, self.layout().totalHeightForWidth(PANEL_W))     # the hints wrapped at its width
+        self._fit(self._room())
         self.update()
 
     def paintEvent(self, e) -> None:
         _paint_glass(self, self._opacity)
 
     def place_under(self, btn) -> None:
-        """Under the ⚙ that opened it, centred on it, kept on its screen."""
+        """Under the ⚙ that opened it, centred on it, kept on its screen and no taller than the room there (_fit:
+        the sections scroll past it; the panel may open on another screen than the primary one)."""
         g = btn.mapToGlobal(QPoint(0, btn.height()))
+        self._fit(self._room(g))
         screen = QGuiApplication.screenAt(g) or QGuiApplication.primaryScreen()
         room = screen.availableGeometry()
         x = min(max(room.left(), g.x() + btn.width() // 2 - self.width() // 2),
                 max(room.left(), room.right() - self.width() + 1))
         y = min(max(room.top(), g.y() + 4), max(room.top(), room.bottom() - self.height() + 1))
         self.move(x, y)
+
+    def _room(self, at: QPoint | None = None) -> int:
+        """The most height the panel takes: the room between the taskbar and the top of its screen (the one at `at`,
+        the ⚙'s; else the one under the panel's centre), PANEL_SPARE kept."""
+        screen = (QGuiApplication.screenAt(self.geometry().center() if at is None else at)
+                  or QGuiApplication.primaryScreen())
+        return screen.availableGeometry().height() - PANEL_SPARE
+
+    def _fit(self, room: int) -> None:
+        """As tall as the title row and every section need (the hints wrapped at the panel's width), at most `room`:
+        past it the sections scroll under the title row, their scrollbar in the side margin's PANEL_BAR (the right;
+        the left in Hebrew, where Qt moves it), so they keep their place and width either way. With the room for
+        them all, no scrollbar."""
+        m, b = self.layout().contentsMargins(), self._body_lay.contentsMargins()
+        # the sections at their own width (the panel's less its side margins), whatever room the scrollbar has now
+        body = self._body_lay.totalHeightForWidth(PANEL_W - 2 * PANEL_SIDE + b.left() + b.right())
+        needed = m.top() + self._head.sizeHint().height() + body + m.bottom()
+        scrolls = needed > room
+        near = PANEL_GUTTER if scrolls else PANEL_BAR            # the sections' margin on the scrollbar's side
+        rtl = self.t.rtl
+        self._body_lay.setContentsMargins(near if rtl else PANEL_BAR, 0, PANEL_BAR if rtl else near, 0)
+        # shown exactly when they don't fit: Qt's own as-needed guess, made at the width before the scrollbar, could
+        # leave it off for a few pixels' overflow and the sections spread over its room
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls else Qt.ScrollBarAlwaysOff)
+        self.resize(PANEL_W, min(needed, room))
 
     # ------------------------------------------------------------ the choices
 

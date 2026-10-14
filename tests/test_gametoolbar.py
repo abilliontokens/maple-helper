@@ -5,7 +5,7 @@ and its place on the screen — above the minimap's box (LOCATION.box) and with 
 kept after a drag. Its width is the player's too: the buttons wrap into as many rows as the width leaves room for.
 Every button has its line icon in its text's colours; in icons mode the icon alone. The ⚙ panel's choices (the glass
 tint, the accent, the transparency, icons instead of words, the bar's key, the Minimap switches, Reset) are written
-and followed live."""
+and followed live; the panel is no taller than its screen, its sections scrolling under its title row."""
 import os
 
 import pytest
@@ -686,6 +686,48 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
     finally:
         w.close()
         w._panel.close()
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_panel_is_no_taller_than_its_screen_and_its_sections_scroll(qapp, isolated_store, lang):
+    """The sections need more height than the offscreen screen has: the panel stops inside the screen's room
+    and the sections scroll under the title row, the last row (Reset) out of sight until scrolled to. Their scrollbar
+    sits in the side margin (the left one in Hebrew), so they keep the place and width they have without it."""
+    from maplehelper.ui import gametoolbar
+    w = gametoolbar.GameToolbar(isolated_store.Settings(), I18n(lang))
+    try:
+        w.refresh()
+        w._gear.click()
+        p = w._panel
+        assert p.height() <= QGuiApplication.primaryScreen().availableGeometry().height()
+        view, sb = p._scroll.viewport(), p._scroll.verticalScrollBar()
+        assert p._scroll.widget().height() > view.height() and sb.isVisibleTo(p) and sb.maximum() > 0
+        side, x = gametoolbar.PANEL_SIDE, sb.mapTo(p, QPoint(0, 0)).x()
+        assert x + sb.width() <= side if lang == "he" else x >= gametoolbar.PANEL_W - side
+        assert p._tints.mapTo(p, QPoint(0, 0)).x() == side and p._tints.width() == gametoolbar.PANEL_W - 2 * side
+        reset_bottom = lambda: p._reset.mapTo(view, QPoint(0, p._reset.height())).y()  # noqa: E731
+        assert reset_bottom() > view.height()
+        sb.setValue(sb.maximum())
+        assert 0 < reset_bottom() <= view.height()
+    finally:
+        w.close()
+        w._panel.close()
+
+
+def test_with_room_for_every_section_the_panel_has_no_scrollbar(bar, monkeypatch):
+    """A screen with the room (_room says so): the panel as tall as its sections need, with no scrollbar, nothing out
+    of sight, and the sections in the same place and width as when they scroll."""
+    from maplehelper.ui import gametoolbar
+    monkeypatch.setattr(gametoolbar._SettingsPanel, "_room", lambda self, at=None: 5000)
+    w, _ = bar
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    sb, side = p._scroll.verticalScrollBar(), gametoolbar.PANEL_SIDE
+    assert p.height() > QGuiApplication.primaryScreen().availableGeometry().height()     # the room, not the screen
+    assert not sb.isVisibleTo(p) and sb.maximum() == 0
+    assert p._scroll.widget().height() == p._scroll.viewport().height()
+    assert p._tints.mapTo(p, QPoint(0, 0)).x() == side and p._tints.width() == gametoolbar.PANEL_W - 2 * side
 
 
 def test_a_panel_choice_signals_the_app_to_restyle_every_window(bar):
