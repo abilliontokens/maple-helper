@@ -109,11 +109,11 @@ def win(qapp, settings, profiles, kb):
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide)
-    LOCATION.here = LOCATION.follow = LOCATION.guide = None
+    old = (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.route_dest)
+    LOCATION.here = LOCATION.follow = LOCATION.guide = LOCATION.route_dest = None
     LOCATION.state = ""
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide = old
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.route_dest = old
 
 
 # a fake route graph: what the detail window reads of one — names, streets and minimap frames, no pictures
@@ -755,6 +755,47 @@ def test_an_npc_elsewhere_shows_the_way_there_step_by_step_with_each_maps_pictur
     win._settings["game_rides"] = False
     win.rides_changed()
     assert _texts(d)[1:] == ["The way from here on foot", *says(walk)]
+
+
+def test_guide_me_there_points_the_route_arrow_at_the_map_and_stop_lets_it_go(
+        win, qapp, clean_location, graph, monkeypatch):
+    """A map with a way there from the player's: "Guide me there" under its steps picks it for the game minimap's
+    route arrow (LOCATION.route_dest), and the page then says so over "Stop the route arrow", which lets it go; a
+    pick in the ◎ window shows here too. No button with ⚙'s route arrow off, on the map itself, or with no way
+    known (the player's map not read yet)."""
+    from maplehelper import gamelookup
+    from maplehelper.routes import Leg
+    walk = (Leg(MID, FAR, "portal", "the door", spot=(0.9, 0.5)),)
+
+    def way_to(kb, here, to, rides=True):
+        if here is None:
+            return gamelookup.Way(None, (), False)
+        return gamelookup.Way(here, () if here == to else walk, True)
+    monkeypatch.setattr(gamelookup, "way_to", way_to)
+    monkeypatch.setattr(gamelookup, "map_monsters", lambda kb, key: [])
+    clean_location.set(_here(MID))
+    win.open("monster_npc")
+    d = win._detail
+    d.open_view("map", f"map/{FAR}")
+    guiding = "Route arrow: to Far Map"
+    assert d.route_btn is not None and d.route_btn.text() == "Guide me there" and guiding not in _texts(d)
+    d.route_btn.click()
+    assert clean_location.route_dest == FAR                      # the game's minimap points the way there
+    assert d.route_btn.text() == "Stop the route arrow" and _texts(d)[-1] == guiding
+    d.route_btn.click()
+    assert clean_location.route_dest is None
+    assert d.route_btn.text() == "Guide me there" and guiding not in _texts(d)
+    clean_location.set_route_dest(FAR)                           # picked in the ◎ window: the page follows
+    assert d.route_btn.text() == "Stop the route arrow" and _texts(d)[-1] == guiding
+    win._settings["minimap_route_arrow"] = False                 # ⚙'s route arrow off: the steps, no button
+    d.redraw()
+    assert d.route_btn is None and _texts(d)[:2] == ["The way from here on foot", "1 · Fake Town"]
+    assert guiding not in _texts(d)
+    win._settings["minimap_route_arrow"] = True
+    clean_location.set(_here(FAR))                               # on the map itself: nowhere to guide to
+    assert d.route_btn is None and _texts(d) == ["You're on this map"]
+    clean_location.set(None)                                     # their map not read yet: no way known
+    assert d.route_btn is None and _texts(d) == ["The way from here on foot", win.t("lk_way_unknown_here")]
 
 
 def test_the_maps_are_listed_before_anything_is_typed_and_a_search_narrows_them(win, qapp, kb, monkeypatch):

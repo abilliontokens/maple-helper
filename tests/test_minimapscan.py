@@ -37,10 +37,11 @@ def env(qapp, isolated_store, kb, monkeypatch):
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box
+    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest
     LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = None, "", None, None, None
+    LOCATION.route_dest = None
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = old
+    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest = old
 
 
 @pytest.fixture(autouse=True)
@@ -350,6 +351,34 @@ def test_the_follow_also_runs_while_a_guide_is_on_the_players_map(env, clean_loc
         clean_location.set_guide(("100000000", (0.5, 0.5), "npc/303"))
         assert not sc._wants_follow()                      # a guide elsewhere rings nothing here
         clean_location.set_guide(None)
+        assert not sc._wants_follow()
+    finally:
+        sc.stop()
+
+
+def test_the_follow_also_runs_while_a_route_leads_off_the_players_map(env, clean_location):
+    """The fast follow keeps the route's arrow placed on the game's minimap too (ui/portaldots.py), hidden portals
+    or not: while a route is picked to another map and the arrow's setting is on. Arrived (the route's map is the
+    player's), the setting off, or no route: nothing keeps it running."""
+    from types import SimpleNamespace
+
+    from maplehelper.minimap import Here
+    s, _, kb = env
+    sc = _make_scanner(s, kb)
+    try:
+        sc._graph = SimpleNamespace(hidden_spots=lambda m: [], name=lambda m: m)
+        clean_location.set(Here("010003000", None))
+        assert not sc._wants_follow()                      # nothing to follow for: no portals, no guide, no route
+        clean_location.set_route_dest("020000000")
+        assert sc._wants_follow()                          # the arrow needs the follow to stay placed
+        s["minimap_hidden_portals"] = False
+        assert sc._wants_follow()                          # the dots' setting off: the route keeps it running
+        s["minimap_route_arrow"] = False
+        assert not sc._wants_follow()                      # the arrow's setting off: nothing to place
+        s["minimap_route_arrow"] = True
+        clean_location.set_route_dest("010003000")
+        assert not sc._wants_follow()                      # arrived: the route's map is the player's
+        clean_location.set_route_dest(None)
         assert not sc._wants_follow()
     finally:
         sc.stop()

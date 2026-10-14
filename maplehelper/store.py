@@ -175,6 +175,7 @@ DEFAULT_SETTINGS = {
     "presence_sent": {},          # what that ping last marked as sent: {"ever", "day", "month"}
     "minimap_scan_interval": 1.0,  # seconds between two reads of the minimap (where the player is)
     "minimap_hidden_portals": True,  # blue dots on the game's minimap where its invisible teleports are (ui/portaldots.py)
+    "minimap_route_arrow": True,  # orange arrow on the game's minimap at the next step toward the picked place (ui/portaldots.py)
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)
     "npc_overlay_geom": None,     # where the player left it: {"x","y","w","h"}; None: beside the minimap box
     "npc_overlay_opacity": 0.85,  # its background's opacity, 0.3-1.0 (the game shows through)

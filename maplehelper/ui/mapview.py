@@ -412,6 +412,7 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         self._way: WayFromHere | None = None
         self._first = None                    # (picture, map, leg|None, npc spot|None) of the first card
         self._legend = None                   # the first card's legend of the dots (MapLegend)
+        self.route_btn: QPushButton | None = None    # "Guide me there" / "Stop the route arrow" under a way
         outer = QVBoxLayout(self.content)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll = scroll = QScrollArea()
@@ -438,6 +439,7 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         self.settings = settings
         self._place(chat)
         LOCATION.changed.connect(self._on_location)
+        LOCATION.routed.connect(self._on_routed)
         self.finished.connect(lambda *_: self._remember())
 
     def showEvent(self, e):
@@ -475,10 +477,11 @@ class MapLocationDialog(EdgeResize, GlassDialog):
 
     def _remember(self) -> None:
         """Closed (its button, the X, Esc): it opens there next time, at its size once the player resized it."""
-        try:
-            LOCATION.changed.disconnect(self._on_location)
-        except (RuntimeError, TypeError):
-            pass                              # never connected, or already gone with the window
+        for signal, slot in ((LOCATION.changed, self._on_location), (LOCATION.routed, self._on_routed)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass                              # never connected, or already gone with the window
         if self.settings is not None:
             p = self.pos()
             if self._user_sized:
@@ -489,12 +492,13 @@ class MapLocationDialog(EdgeResize, GlassDialog):
 
     def show_map(self, key: str) -> None:
         """Where a map, an NPC or a quest's NPCs are (one window: a second ◎ shows its thing here instead of opening
-        another). With the player's live map known, the way from there instead of the generic ways in."""
+        another). With the player's live map known, the way from there instead of the generic ways in, and under it,
+        while Settings has the minimap's route arrow on (settings["minimap_route_arrow"]), Guide me there (_route_button)."""
         t, rtl, g = self.t, self.t.rtl, routes.of(self.kb)
         self.key = key
         self._shown_cap = self._picture_cap()     # the width the new cards' pictures draw at
         clear(self.lay)
-        self._way, self._first, self._legend = None, None, None
+        self._way, self._first, self._legend, self.route_btn = None, None, None, None
         mid = g.of_key(key) if key.startswith("map/") else None
         name = g.name(mid) if mid else (self.kb.get(key) or {}).get("name", key)
         here = LOCATION.here
@@ -533,6 +537,8 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                         role = spot.role
                         self.lay.addWidget(QLabel(bidi.plain(t(role), rtl), objectName="ToolHeader"))
                     self.lay.addWidget(self._card(g, spot))
+                if self.settings is None or self.settings["minimap_route_arrow"]:    # no settings (a test): on
+                    self._route_button(way.dest)
         self.lay.addStretch(1)
         self._fit_height()
 
@@ -562,6 +568,12 @@ class MapLocationDialog(EdgeResize, GlassDialog):
             pic.setPixmap(pm)
         except RuntimeError:
             pass                                       # closed meanwhile
+
+    def _on_routed(self, _dest) -> None:
+        """The route arrow picked or let go, here or on the search's map page (LOCATION.routed): a way with its
+        button is shown again, the button saying what a click does now."""
+        if self.route_btn is not None:
+            self.show_map(self.key)
 
     def _picture_cap(self) -> int:
         """The width a map picture may take: the card's inside width at the window's current width."""
@@ -677,6 +689,20 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                                                       cap_w=self._shown_cap),
                                         g.name(way.dest), (path, npc_at, npc_at is not None, None))
         return card
+
+    def _route_button(self, dest: str) -> None:
+        """Under the way: "Guide me there", which has the game's minimap point its orange route arrow at each next
+        step to this map (LOCATION.route_dest, ui/portaldots.py), or "Stop the route arrow" while it already does,
+        which lets it go. A click needs no rebuild of its own: the pick is LOCATION.routed, which shows the way
+        again (_on_routed)."""
+        t = self.t
+        said = "route_arrow_stop" if LOCATION.route_dest == dest else "route_arrow_pick"
+        btn = QPushButton(bidi.button(t(said), t.rtl), objectName="Secondary")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setAutoDefault(False)
+        btn.clicked.connect(lambda _=False: LOCATION.set_route_dest(None if LOCATION.route_dest == dest else dest))
+        self.route_btn = btn
+        self.lay.addWidget(btn, 0, Qt.AlignHCenter)
 
     def _here_card(self, g, way: WayFromHere, you) -> QFrame:
         """Already on the destination map: said, with the player's blue dot (and the NPC's for an NPC)."""

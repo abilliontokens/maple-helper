@@ -441,13 +441,16 @@ class MapleHelperApp:
 
     def _game_rides_toggled(self) -> None:
         """The toolbar's ⚙ panel's Cabs & Teleports switch: a way already shown follows it, in the search's detail
-        page and in the ◎ where-is-it window."""
+        page, in the ◎ where-is-it window and in the route's arrow on the game's minimap."""
         search = getattr(self, "game_search", None)
         if search is not None:
             search.rides_changed()
         where = self.__dict__.get("_windows", {}).get("map")
         if where is not None and where.isVisible() and where.key:
             where.show_map(where.key)
+        dots = getattr(self, "portal_dots", None)
+        if dots is not None:
+            dots.refresh()          # the route's arrow on the game's minimap points along the new way
 
     def _grind_toggled(self) -> None:
         """The toolbar's Grind button (or the bar's own Hide) flipped settings["grind_bar"]: the bar shows or hides,

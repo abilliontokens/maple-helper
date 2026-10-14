@@ -12,14 +12,17 @@ class _Location(QObject):
     fast follow between reads (ui/minimapscan.py): where the last aligned map's picture lies in the box now, as
     (map, View | None), None when it no longer matches (another map, the loading screen). `guided` is the NPC the
     player asked to be guided to (ui/npcoverlay.py), as (map, spot on its minimap picture, NPC key) or None; the
-    game-minimap overlay (ui/portaldots.py) rings it. `boxed` is where the game's minimap window is on screen now,
-    the box the reads and the follow grab ({"x","y","w","h"} in capture pixels), found on its own at the game's top
-    left; None while it isn't there."""
+    game-minimap overlay (ui/portaldots.py) rings it. `routed` (`route_dest`) is the map the player picked a route
+    to, as its routes.Graph id (like "010003000") or None; the same overlay puts an orange arrow at the next portal
+    or NPC on the way there. `boxed` is where the game's minimap window is on screen now, the box the reads and the
+    follow grab ({"x","y","w","h"} in capture pixels), found on its own at the game's top left; None while it isn't
+    there."""
 
     changed = Signal(object)          # Here | None
     status = Signal(str)              # "" (no read yet, or recognized), "unknown" (read, not recognized)
     followed = Signal(object)         # (map, View | None)
     guided = Signal(object)           # (map, (fx, fy), "npc/<id>") | None
+    routed = Signal(object)           # str | None (destination map id)
     boxed = Signal(object)            # {"x","y","w","h"} | None
 
     def __init__(self):
@@ -28,6 +31,7 @@ class _Location(QObject):
         self.state = ""
         self.follow: tuple | None = None
         self.guide: tuple | None = None
+        self.route_dest: str | None = None
         self.box: dict | None = None
 
     def set(self, here: Here | None) -> None:
@@ -49,6 +53,11 @@ class _Location(QObject):
         if guide != self.guide:
             self.guide = guide
             self.guided.emit(guide)
+
+    def set_route_dest(self, dest: str | None) -> None:
+        if dest != self.route_dest:
+            self.route_dest = dest
+            self.routed.emit(dest)
 
     def set_box(self, box: dict | None) -> None:
         if box != self.box:

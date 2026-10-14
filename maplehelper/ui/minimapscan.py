@@ -10,11 +10,11 @@ title for the map and aligning its picture for the dot) runs on a worker thread,
 The answer comes back through a signal, and the chat's character card and the map windows read it from
 ui/location.LOCATION.
 
-Between reads, while something draws on the game's minimap (the hidden-portal dots, or the guided NPC's ring), a
-fast follow (back to back while the minimap moves, every FOLLOW_IDLE_MS while it is still; no OCR) grabs the last
-read's box and tracks where the aligned map's picture lies in it as the game scrolls the minimap, and says at once
-when it stops matching (a teleport, the loading screen): LOCATION.followed. That loss starts a whole read right
-away."""
+Between reads, while something draws on the game's minimap (the hidden-portal dots, the route's arrow, or the guided
+NPC's ring), a fast follow (back to back while the minimap moves, every FOLLOW_IDLE_MS while it is still; no OCR)
+grabs the last read's box and tracks where the aligned map's picture lies in it as the game scrolls the minimap, and
+says at once when it stops matching (a teleport, the loading screen): LOCATION.followed. That loss starts a whole read
+right away."""
 from __future__ import annotations
 
 import logging
@@ -212,12 +212,16 @@ class MinimapScanner(QObject):
 
     def _wants_follow(self) -> bool:
         """The fast follow runs while something on the game's minimap moves with its scroll: the hidden-portal
-        dots (the setting on, the player's map has hidden portals) or the guided NPC's ring (a guide set for the
-        player's own map, ui/npcoverlay.py)."""
+        dots (the setting on, the player's map has hidden portals), the route's arrow (the setting on, a route picked
+        to another map than the player's: LOCATION.route_dest) or the guided NPC's ring (a guide set for the player's
+        own map, ui/npcoverlay.py)."""
         here = LOCATION.here
         if here is None or self._graph is None:
             return False
         if self._settings["minimap_hidden_portals"] and self._graph.hidden_spots(here.map):
+            return True
+        dest = LOCATION.route_dest
+        if self._settings["minimap_route_arrow"] and dest and dest != here.map:
             return True
         guide = LOCATION.guide
         return guide is not None and guide[0] == here.map

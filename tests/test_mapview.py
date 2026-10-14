@@ -320,6 +320,40 @@ def test_the_window_shows_the_way_from_the_live_map(tiny, isolated_store):
         d.close()
 
 
+def test_guide_me_there_picks_the_ways_map_for_the_route_arrow_and_stop_lets_it_go(tiny, isolated_store):
+    """Perion's ◎ with the player on Henesys: "Guide me there" under the way picks Perion for the game minimap's
+    route arrow (LOCATION.route_dest), the button then "Stop the route arrow", which lets it go; a pick on the
+    search's map page shows here too. No button with ⚙'s route arrow off, or once the player is on Perion."""
+    kb, _ = tiny
+    settings = isolated_store.Settings()
+    old = LOCATION.route_dest
+    LOCATION.route_dest = None
+    LOCATION.set(Here(HENESYS, (0.5, 0.5)))
+    d = mapview.MapLocationDialog(kb, "en", "", settings)
+    try:
+        d.show()
+        d.show_map(f"map/{PERION}")
+        app.processEvents()
+        assert d.route_btn is not None and d.route_btn.text() == "Guide me there"
+        d.route_btn.click()
+        assert LOCATION.route_dest == PERION and d.route_btn.text() == "Stop the route arrow"
+        d.route_btn.click()
+        assert LOCATION.route_dest is None and d.route_btn.text() == "Guide me there"
+        LOCATION.set_route_dest(PERION)                       # picked on the search's map page: the button follows
+        assert d.route_btn.text() == "Stop the route arrow"
+        settings["minimap_route_arrow"] = False               # ⚙'s route arrow off: the way, no button
+        d.show_map(f"map/{PERION}")
+        assert d.route_btn is None and d.title_label.text() == "From Henesys to Perion"
+        settings["minimap_route_arrow"] = True
+        LOCATION.set(Here(PERION, (0.5, 0.5)))                # already there: nowhere to guide to
+        app.processEvents()
+        assert d.route_btn is None and d.title_label.text() == "From Perion to Perion"
+    finally:
+        LOCATION.set(None)
+        LOCATION.route_dest = old
+        d.close()
+
+
 def test_clamp_size_keeps_a_saved_size_on_screen():
     big, small = QRect(0, 0, 1920, 1040), QRect(0, 0, 1280, 720)
     minimum = QSize(mapview.MIN_W, mapview.MIN_H)

@@ -1114,6 +1114,15 @@ STRINGS = {
     "minimap_hidden_portals": {"he": "פורטלים נסתרים במיני-מפה", "en": "Hidden portals on the minimap"},
     "minimap_hidden_portals_hint": {"he": "נקודה כחולה קטנה במיני-מפה של המשחק בכל מקום עם טלפורט בלתי נראה.",
                                     "en": "A small blue dot on the game's minimap wherever an invisible teleport is."},
+    "minimap_route_arrow": {"he": "חץ מסלול במיני-מפה", "en": "Route arrow on the minimap"},
+    "minimap_route_arrow_hint": {
+        "he": "חץ כתום במיני-מפה של המשחק בפורטל הבא או אצל הדמות הבאה בדרך למקום שבחרתם. "
+              "בוחרים מפה (בחיפוש המפות או בחלון ה-◎ שלה) ולוחצים 'הדריכו אותי לשם'.",
+        "en": "An orange arrow on the game's minimap at the next portal or NPC on the way to the place you picked. "
+              "Pick a map (Maps search, or its ◎ window) and choose 'Guide me there'."},
+    "route_arrow_pick": {"he": "הדריכו אותי לשם", "en": "Guide me there"},
+    "route_arrow_stop": {"he": "עצירת חץ המסלול", "en": "Stop the route arrow"},
+    "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
     "overlays_in_screenshots": {"he": "החלונות שמעל המשחק בצילומי מסך", "en": "Show the overlays in screenshots"},
     "overlays_in_screenshots_hint": {
         "he": "דלוק: צילום מסך (גם של Windows) רואה את הסרגל, החלונות והנקודות שמעל המשחק, כדי שתוכלו לצלם ולשתף אותם. "

@@ -1291,6 +1291,8 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
         sec.add_row(t("minimap_scan_interval"), self.scan, hint=t("minimap_scan_hint"), hint_below=True)
         self.hidden_portals = Switch(settings["minimap_hidden_portals"])
         sec.add_row(t("minimap_hidden_portals"), self.hidden_portals, hint=t("minimap_hidden_portals_hint"))
+        self.route_arrow = Switch(settings["minimap_route_arrow"])
+        sec.add_row(t("minimap_route_arrow"), self.route_arrow, hint=t("minimap_route_arrow_hint"))
         self.game_toolbar = Switch(settings["game_toolbar"])
         sec.add_row(t("game_toolbar"), self.game_toolbar, hint=t("game_toolbar_hint"))
         # the key that shows or hides the bar from any program (the bar's ✕ toast and the tray item name it too)
@@ -2102,6 +2104,7 @@ class SettingsDialog(_ApiKeyEntry, GlassDialog):
             "instant_answers": self.instant.isChecked(),
             "minimap_scan_interval": SCAN_CHOICES[max(0, self.scan.currentIndex())],
             "minimap_hidden_portals": self.hidden_portals.isChecked(),
+            "minimap_route_arrow": self.route_arrow.isChecked(),
             "game_toolbar": self.game_toolbar.isChecked(),
             "game_toolbar_hotkey": self.toolbar_hotkey.key(),
             "overlays_in_screenshots": self.overlay_shots.isChecked(),

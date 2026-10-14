@@ -733,7 +733,8 @@ class DetailWindow(EdgeResize, QWidget):
     and never takes the keyboard from the game. Each page opens with a header card — the thing's picture, its name
     and chips, a muted line — over its titled blocks. Its views are a history — a row's click pushes one, ‹ Back
     pops, a new search click starts it over. While it shows an NPC on the player's map it guides them: the sentence
-    and the picture's blue dot follow the player, and the game's own minimap rings the spot (LOCATION.guide).
+    and the picture's blue dot follow the player, and the game's own minimap rings the spot (LOCATION.guide). The way
+    to another map ends in "Guide me there" (Settings' route arrow on): the game minimap's arrow along it (LOCATION.route_dest).
     Its edges resize it (EdgeResize): the size the player drags it to is kept (game_detail_size) and its pictures
     follow the width; until then it is DETAIL_W wide and as tall as its page, up to DETAIL_H."""
 
@@ -756,6 +757,7 @@ class DetailWindow(EdgeResize, QWidget):
         self.hit_figures: list[QFrame] = []         # a monster page's Hit & damage figures (_hit_damage)
         self.stats_link: QPushButton | None = None  # ... and its "Type your stats", while stats are missing
         self.market_link: QPushButton | None = None  # an item page's "Free Market prices", for a tradeable item
+        self.route_btn: QPushButton | None = None   # the way's "Guide me there" / "Stop the route arrow" (_way)
         col = QVBoxLayout(self)
         col.setContentsMargins(SIDE, TOP, SIDE, BOTTOM)
         col.setSpacing(8)
@@ -789,6 +791,7 @@ class DetailWindow(EdgeResize, QWidget):
         col.addWidget(self._scroll, 1)
         self._retext_chrome()
         LOCATION.changed.connect(self._moved)
+        LOCATION.routed.connect(self._moved)        # the route arrow picked or let go, here or in the ◎ window
 
     # ------------------------------------------------------------ the views
 
@@ -1136,7 +1139,9 @@ class DetailWindow(EdgeResize, QWidget):
         """The way from the player's map to this one, step by step as the ◎ window draws it, in a block of its own:
         the step's number and map, what to do there, and the map's picture with the portal (orange) or the NPC
         (green) marked, the player's blue dot on the first; already there, no way known, or their map not read
-        yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"])."""
+        yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"]).
+        Under the steps, while Settings has the minimap's route arrow on (settings["minimap_route_arrow"]), the button that
+        points it along this way (_route_button)."""
         o = self._owner
         t = o.t
         here = LOCATION.here
@@ -1160,7 +1165,25 @@ class DetailWindow(EdgeResize, QWidget):
                 pic = self._picture_label(g.minimap(leg.frm), leg.spot, leg.kind != "portal", you, 2 * BLOCK_PAD)
                 if pic is not None:
                     block.add(pic)
+            if o._settings["minimap_route_arrow"]:
+                self._route_button(block, g, to_map)
         self._add(block)
+
+    def _route_button(self, block: _Block, g, to_map: str) -> None:
+        """The way's last row: "Guide me there", which has the game's minimap point its orange route arrow at each
+        next step to this map (LOCATION.route_dest, ui/portaldots.py); while it already does, a muted line saying so
+        over "Stop the route arrow", which lets it go. A click needs no redraw of its own: the pick is LOCATION.routed,
+        which draws the page again (_moved), so the button always says what a click does now."""
+        t = self._owner.t
+        guiding = LOCATION.route_dest == to_map
+        if guiding:
+            block.add(self._note(t("route_arrow_guiding", name=bidi.ltr_block(self._map_name(g, to_map), t.rtl))))
+        self.route_btn = QPushButton(bidi.button(t("route_arrow_stop" if guiding else "route_arrow_pick"), t.rtl))
+        self.route_btn.setCursor(Qt.PointingHandCursor)
+        self.route_btn.setFocusPolicy(Qt.NoFocus)
+        self.route_btn.clicked.connect(
+            lambda _=False: LOCATION.set_route_dest(None if LOCATION.route_dest == to_map else to_map))
+        block.add(self.route_btn)
 
     def _item_chips(self, key: str) -> list[tuple[str, str]]:
         """An item's header chips: its type's words in the UI's language ("Equip", "One-Handed Sword";
@@ -1271,7 +1294,7 @@ class DetailWindow(EdgeResize, QWidget):
                             # and the window folded to its header after the first view, offscreen render)
 
     def _clear_body(self) -> None:
-        self.hit_figures, self.stats_link, self.market_link = [], None, None
+        self.hit_figures, self.stats_link, self.market_link, self.route_btn = [], None, None, None
         while self._rows:
             w = self._rows.pop()
             self._rows_lay.removeWidget(w)
@@ -1287,8 +1310,10 @@ class DetailWindow(EdgeResize, QWidget):
                 LOCATION.set_guide(None)
 
     def _moved(self, _here: object = None) -> None:
-        """The player moved (a Qt slot too: LOCATION.changed): the view of an NPC or a map is drawn again —
-        on the map they're on the sentence and the blue dot follow them, another map and the guide is let go."""
+        """The player moved, or the route arrow was picked or let go (a Qt slot too: LOCATION.changed and
+        LOCATION.routed): the view of an NPC or a map is drawn again — on the map they're on the sentence and the
+        blue dot follow them, another map and the guide is let go, the way's button says what a click does now.
+        Hidden, nothing is drawn: every view is drawn again as it opens."""
         if self.isVisible() and self._stack and self._stack[-1][0] in ("npc", "map"):
             self._draw()
 
