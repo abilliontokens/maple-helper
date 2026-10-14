@@ -419,7 +419,9 @@ def fill_images() -> None:
 # The site's Pathfinder and World Map read one data file, /_data/maps.json: every map with its portals (the map each
 # leads to, by id) and NPCs. The map pages say the same in prose ("Connected Maps ( 9 )" on one line, names only:
 # two maps called "Mushroom Town" can't be told apart there, and nothing says which way a portal goes), so the route
-# graph comes from that file, cut down by maplehelper/mapdata.py (the app rebuilds an old routes.json with it too).
+# graph comes from that file, cut down by maplehelper/mapdata.py (the app rebuilds an old routes.json with it too):
+# routes_data is the one shape both writers use, marked "all_pads" now that it keeps every hidden pad (the type-4
+# warps, and each pad on a shared spot), so a nightly file and an app-rebuilt one read the same.
 # The Pathfinder's taxi towns are written in its own script, read from there.
 
 if str(ROOT) not in sys.path:

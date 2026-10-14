@@ -124,11 +124,11 @@ The model — every line of this is an assumption fitted to the data, not a fact
    sideways), so the 960-unit climb on Pig Farm's rope at x=1964 cost 961 and the
    pad-free way through it beat the way through t007 from (140, -493); at 5 per unit
    that climb alone costs some 4800, so wherever a pad actually skips a long climb
-   it is named, as it is in play. From (140, -493) itself t007 is still not named,
-   measured after this change: every way to Utah shares that final climb, and t007
-   only cuts short a fall and a floor walk its landing is already beside, so its way
-   (7832) stays behind the pad-free way (7581) — pricing a climb both ways share
-   cannot separate them, and naming it there would take a different change. The
+   it is named, as it is in play. From (140, -493) itself every way to Utah shares
+   that final climb, and t007 only cuts short a fall and a floor walk its landing
+   is already beside, so its way (7832) stays behind the pad-free way (7581) by
+   251 — pricing a climb both ways share cannot separate them; rule 9, the model's
+   own resolution, is what names it there. The
    same weight applies down a rope: a ladder down is still climbed, rung by rung,
    and where a player would simply drop, rule 4's fall edge is the cheap way
    instead. A fall itself stays flat FALL_COST plus its sideways drift at walking
@@ -141,27 +141,65 @@ The model — every line of this is an assumption fitted to the data, not a fact
    the fixed effort does the climb-pricing work. Charging the height at 5 as well
    would price one jump at some 550–590, near twice the rope for the same rise, for
    a single airborne motion that is not a sustained climb.
+9. Resolution and ties. Within a span the exact entry and exit points are not
+   tracked (see the summary below), so a cost is an estimate whose last few percent
+   the model itself cannot stand behind: where exactly along their platform the
+   player stands, and where along the target's platform the target stands, moves
+   the real effort while the computed cost steps by whole fragments. Measured
+   on the live KB (2026-10-14, ground from terrain.json for 108 maps): for spots
+   on the same
+   joined platform (rule 1's fragments joined into one walk) — the player moved
+   along it, and separately the target moved along its own — the computed cheapest
+   cost moved by a median of 90 map units (one span's width: span widths across
+   those maps run a median of 50, 90 at the 75th percentile). As a share of the
+   way's cost that spread is meaningless on a trivial way, so it is read off the
+   1478 platform ways costing at least 1000 (median way 3028): there the spread's
+   median share is 3.44% of the way's cost. That share is MODEL_RESOLUTION. Inside
+   it two ways are indistinguishable to this model, and the tie goes to the pad:
+   the player asked to be shown the teleports, and a pad way that ties is the one
+   a player takes. Outside it the pad-free way still wins outright — this is a
+   tie-break at the model's own resolution, not a thumb on the scale. On Utah's
+   Pig Farm that means t007 is named from (140, -493): its way loses by 251 on
+   7581, 3.3%, inside the band; a pad way losing by more is still not named, and
+   [] still means exactly that — no teleport is worth taking. Standing at Utah's
+   own spot the pad-free way costs 0, the band around it is 0 wide, and nothing
+   is named. The 28 spawn points of that map (the site's maps.json spawns toward
+   Utah) name a pad from 13 of them before this rule and 18 after — the five
+   added are four t007 ways and one t005 way, losing by 228–251 (3.1–3.4%) —
+   not from nearly all: a band read off a wider part of the spread (its
+   75th-percentile share, 9%) would name 27 of the 28, which is how a too-wide
+   band would show itself.
 
 `pads` returns the teleports on the cheapest walk, in the order taken: effort, not
 pad-count, decides. Walking into a span costs its horizontal length, a rope
 CLIMB_WEIGHT per unit of height climbed, a fall a flat FALL_COST (plus its sideways
 drift), a jump its height plus JUMP_EFFORT (and its sideways
 drift, when it lands past the lower span's end), and a teleport a flat TELEPORT_COST
-— about nothing, since the teleport itself is instant, but not zero,
-so a pad that only ties a walk or a fall is not named for it. [] is returned only when
-that cheapest walk uses no teleport at all: a pad is named exactly when it makes the
-way cheaper than walking, climbing, falling and jumping do without it, however many
-jumps that walk takes. Within a span the exact entry and exit points are not tracked,
-so costs are map-unit estimates good enough to order ways, not exact distances.
+— about nothing, since the teleport itself is instant, but not zero, so it still
+counts in a way's cost. The teleports returned are those of the cheapest pad-using
+way when that way wins outright, and also when it only ties the cheapest pad-free
+way within the model's resolution (rule 9, MODEL_RESOLUTION of the pad-free
+cost); [] is returned only when every pad-using way loses by more than that, or
+none reaches at all: no teleport is worth taking. However many jumps a way takes
+does not decide it; effort does. Within a span the exact entry and exit points
+are not tracked, so costs are map-unit estimates good enough to order ways
+clearly apart, not to separate ways a few percent apart — rule 9 again.
 
-Cost, by counting rather than by benchmark: the model is built once per map (`Walk.of`).
+Cost, by counting and by timing: the model is built once per map (`Walk.of`).
 Utah's Pig Farm, among the largest maps, gives 355 spans, 297 walls and 11 ropes; the
 walls sit in the same x-bin index as the spans, so each join or fall probe tests the few
 walls in its neighbourhood rather than scanning them all. Joining, rope, fall and jump
 edges are a few per span (the jump pass compares every pair of spans — some 126k pairs —
 but keeps only the few that come within a jump of each other), so a query's Dijkstra
 search visits a few hundred nodes and relaxes a few thousand edges, and jump ends are
-snapped once and remembered by their points.
+snapped once and remembered by their points. Rule 9 does not add a second search: it
+adds the pad-using layer to that same search, walked only as far as the band can
+reach (states past it are never pushed, and the search stops when the pad-using
+layer settles at the goal). Timed on that map against the live KB (2026-10-14,
+500-query averages, this machine), a query from (140, -493) toward Utah took
+0.27 ms before this rule and 0.57 ms after it — the second layer costs about
+0.3 ms on the largest map; a pad-winning spot took 0.31 ms before and 0.45 ms
+after, and standing at the target itself is unchanged at some 0.02 ms.
 """
 from __future__ import annotations
 
@@ -206,9 +244,15 @@ JUMP_HEIGHT = 70.0
 # that skips it (rule 8: that all-in price is already the climb price of one tier, so
 # the height part stays at walking's 1 per unit)
 JUMP_EFFORT = 250.0
-# what a hidden teleport costs: about nothing (it is instant), but not nothing, so a
-# pad that only ties a walk or a fall is not named for it
+# what a hidden teleport costs: about nothing (it is instant), but not nothing, so it
+# still counts in a way's cost (rule 9 decides the ties that leaves)
 TELEPORT_COST = 5.0
+# the model's resolution (rule 9): two ways at most this share of the pad-free way's
+# cost apart are indistinguishable to a model that does not track where within a span
+# a way enters or leaves it — measured as the median share (3.44%) by which the
+# computed cheapest cost moves for spots on the same joined platform, across the KB's
+# maps with ground, on ways costing at least 1000 (see rule 9)
+MODEL_RESOLUTION = 0.034
 # a span this far past a rope's end still counts as served by that rope (rule 3): one jump
 # (JUMP_HEIGHT, rule 5's measured tier) — the player jumps up to grab the bottom end, and
 # jumps off the top end onto the span above, so a span farther past an end than one jump
@@ -557,10 +601,12 @@ class Walk:
     def pads(self, you, target, jumps) -> list | None:
         """The hidden teleports the cheapest real walk from `you` to `target` takes, in the
         order taken: the very objects passed in `jumps` (each with `.frm`, `.to` and `.name`,
-        all in map units). [] when the cheapest walk, climb, fall and jump there uses no
-        teleport at all. None when either end cannot be snapped to the ground, or no walk
-        reaches the target at all: the ground cannot answer, and the caller falls back to
-        its own heuristic."""
+        all in map units). The cheapest pad-using way is returned when it beats the
+        cheapest pad-free way, and also when it only ties it within the model's
+        resolution (rule 9); [] when every pad-using way loses by more than that, or
+        none reaches at all — no teleport is worth taking. None when either end
+        cannot be snapped to the ground, or no walk reaches the target at all: the
+        ground cannot answer, and the caller falls back to its own heuristic."""
         if you is None or target is None:
             return None
         start, goal = self._snap(you), self._snap(target)
@@ -571,37 +617,58 @@ class Walk:
             snapped = self._snap_jump(jump)
             if snapped is not None:
                 teleports[snapped[0]].append((snapped[1], jump))
-        # Dijkstra over spans by effort alone (see the module docstring): every edge —
-        # walk, rope, fall, jump up or teleport — pays its own cost, and the teleports
-        # on the cheapest path are the answer, so a pad is named only when it beats
-        # every pad-free way, and a long climb of jumps can lose to a pad that skips it
-        best: dict[int, float] = {start: 0.0}
-        came: dict[int, tuple[int, object]] = {}
-        queue = [(0.0, 0, start)]
+        # One Dijkstra over spans in two layers — pad-free, and pad-using (a teleport
+        # edge moves a way into the second layer, which keeps every later pad) — by
+        # effort alone (see the module docstring): every edge — walk, rope, fall,
+        # jump up or teleport — pays its own cost. The first layer settled at the
+        # goal prices the band (rule 9): states past it are never pushed, and the
+        # search stops as soon as the pad-using layer settles at the goal, so the
+        # second layer is only ever walked as far as the tie could still reach.
+        best: dict[tuple[int, int], float] = {(start, 0): 0.0}
+        came: dict[tuple[int, int], tuple[tuple[int, int], object]] = {}
+        queue = [(0.0, 0, start, 0)]
         n = 0
+        free: float | None = None
+        bound = math.inf
+        pad_cost: float | None = None
         while queue:
-            cost, _, here = heapq.heappop(queue)
-            if cost != best.get(here):
+            cost, _, here, used = heapq.heappop(queue)
+            if cost != best.get((here, used)):
                 continue
-            if here == goal:
+            if cost > bound:
                 break
+            if here == goal:
+                if used:
+                    pad_cost = cost
+                    break
+                free = cost
+                bound = cost + MODEL_RESOLUTION * cost
+                continue
             for nxt, step in self._base[here]:
                 key = cost + step
-                if nxt not in best or key < best[nxt]:
-                    best[nxt], came[nxt] = key, (here, None)
+                if key > bound:
+                    continue
+                state = (nxt, used)
+                if state not in best or key < best[state]:
+                    best[state], came[state] = key, ((here, used), None)
                     n += 1
-                    heapq.heappush(queue, (key, n, nxt))
+                    heapq.heappush(queue, (key, n, nxt, used))
             for nxt, jump in teleports[here]:
                 key = cost + TELEPORT_COST
-                if nxt not in best or key < best[nxt]:
-                    best[nxt], came[nxt] = key, (here, jump)
+                if key > bound:
+                    continue
+                state = (nxt, 1)
+                if state not in best or key < best[state]:
+                    best[state], came[state] = key, ((here, used), jump)
                     n += 1
-                    heapq.heappush(queue, (key, n, nxt))
-        if goal not in best:
-            return None
-        out, at = [], goal
-        while at != start:
-            at, jump = came[at][0], came[at][1]
-            if jump is not None:
-                out.append(jump)
-        return out[::-1]
+                    heapq.heappush(queue, (key, n, nxt, 1))
+        if pad_cost is not None:
+            # a pad-using way settled at the goal: outright cheapest (it settled
+            # before the pad-free way), the only way there, or within the band
+            out, at = [], (goal, 1)
+            while at != (start, 0):
+                at, jump = came[at][0], came[at][1]
+                if jump is not None:
+                    out.append(jump)
+            return out[::-1]
+        return [] if free is not None else None

@@ -234,6 +234,35 @@ def test_a_pad_that_saves_nothing_is_not_named():
     assert walk.pads((10, 100), (150, 200), [pad]) == []
 
 
+def test_a_pad_way_within_the_models_resolution_is_named():
+    """A pad way that loses only inside the model's resolution (rule 9 in
+    terrain.py: MODEL_RESOLUTION, 3.4% of the pad-free way's cost, measured from
+    how far the computed cost moves for spots on the same joined platform) is a
+    tie the model cannot tell apart, and the tie goes to the pad. Here a fall
+    lands on the floor for 1 and the walk east along it costs some 2200, while
+    the pad lands on that same floor for 5 and the same walk follows: 2205
+    against 2201, well inside the band, so the pad is named even though it does
+    not win outright."""
+    ground = [[0, 400, 200, 400]] + \
+        [[x, 600, x + 100, 600] for x in range(0, 2400, 100)]
+    pad = Jump((50, 400), (150, 600), "t001")
+    walk = Walk.of(ground, [])
+    assert walk.pads((10, 400), (2350, 600), [pad]) == [pad]
+
+
+def test_a_pad_way_losing_by_more_than_the_resolution_is_not_named():
+    """The same long walk east, but the pad lands 500 units west of where the
+    fall lands: its way pays that 500 again on top of the teleport, some 2705
+    against 2201 — a loss of about 23%, far past the model's resolution
+    (rule 9), so the pad-free way wins outright and [] keeps its meaning: no
+    teleport is worth taking."""
+    ground = [[0, 400, 200, 400]] + \
+        [[x, 600, x + 100, 600] for x in range(-400, 2400, 100)]
+    pad = Jump((50, 400), (-350, 600), "t001")
+    walk = Walk.of(ground, [])
+    assert walk.pads((10, 400), (2350, 600), [pad]) == []
+
+
 def test_a_steep_segment_is_a_wall_not_a_walk_up():
     # slope 2 (100 up over 50 across): too steep to stand on, so it joins nothing upward
     ground = [[0, 200, 100, 200], [100, 200, 150, 100], [150, 100, 250, 100]]

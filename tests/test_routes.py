@@ -465,6 +465,9 @@ def test_no_routes_file_means_no_graph(kb):
 # ---------------------------------------------------------------- the nightly file
 
 def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
+    """The nightly file the app routes with. Its premise changed with the reader: a second teleport on a spot
+    already listed ("hide02" below, on hide01's spot) used to be dropped as a duplicate; the site keeps distinct
+    pads on one spot (Up and Up's np04/np05/np06), so the scrape now keeps both, as the app's own rebuild does."""
     import scrape_meowdb
     maps = [{"id": "000000001", "name": "A", "streetName": "S", "region": "R", "isTown": True, "returnMap": "000000001",
              "hasMinimapImage": True, "minimapWidth": 160, "minimapHeight": 80, "miniMapCenterX": 80,
@@ -473,7 +476,7 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
                                                {"name": "door", "type": 1, "toMapId": "000000002", "x": 5, "y": 6}],
              "intraPortals": [{"name": "hide01", "type": 1, "x": 7, "y": 8, "toName": "hide01_1"},
                               {"name": "trap", "type": 3, "x": 9, "y": 10, "toName": "h001"},
-                              {"name": "dup", "type": 1, "x": 7, "y": 8, "toName": "hide01"},
+                              {"name": "hide02", "type": 1, "x": 7, "y": 8, "toName": "hide01"},
                               {"name": "shown", "type": 2, "x": 11, "y": 12, "toName": "x"}],
              "npcs": [{"id": "7", "name": "Regular Cab", "x": 3, "y": 4}], "monsters": [1, 2, 3]},
             {"id": "000000002", "name": "B", "portals": [], "npcs": []},
@@ -492,13 +495,14 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
     data = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
     assert data["taxi"] == ["000000001", "000000002"]
     assert data["landings"] is True             # it carries the landing points: the app never rebuilds a nightly file
+    assert data["all_pads"] is True             # ... and every pad: nor for the pads the old reader dropped
     a = data["maps"][0]
     assert a["portals"] == [{"to": "000000002", "name": "out", "x": 1, "y": 2},      # none to a map it doesn't know
                             {"to": "000000002", "name": "door", "x": 5, "y": 6}]
-    # the invisible teleports (type 1 press-up, type 3 touch), to other maps and within it, once per spot; the game
-    # draws the visible ones (type 2) itself
+    # the invisible teleports (type 1 press-up, type 3 touch), to other maps and within it, every one of them —
+    # hide02 stands on hide01's spot and is kept beside it; the game draws the visible ones (type 2) itself
     assert a["hidden"] == [{"name": "door", "x": 5, "y": 6}, {"name": "hide01", "x": 7, "y": 8},
-                           {"name": "trap", "x": 9, "y": 10}]
+                           {"name": "trap", "x": 9, "y": 10}, {"name": "hide02", "x": 7, "y": 8}]
     assert data["maps"][1]["hidden"] == [] and "scene" not in data["maps"][1]   # no NPCs: no terrain fetched
     assert a["minimap"] == [160, 80, 80, 40] and a["npcs"][0]["name"] == "Regular Cab" and "monsters" not in a
     assert "scene" not in a                                                           # a minimap: no room frame
@@ -511,8 +515,11 @@ def test_scrape_keeps_the_route_data_it_needs(monkeypatch, tmp_path):
 
 def test_a_hidden_teleport_within_the_map_keeps_where_it_lands():
     """The site's intraPortals say where each one lands (toX, toY): kept as to_x, to_y, the point that lets the app
-    name the pad to take (Utah's Pig Farm's t001 lifts the player to st00). One on a spot already listed is still
-    dropped, and a hidden portal to another map, landing on no point of this one, keeps the shape it had."""
+    name the pad to take (Utah's Pig Farm's t001 lifts the player to st00). The premise changed on one point: a
+    pad on a spot already listed ("again", on t001's spot below) used to be dropped as a duplicate, but a spot
+    can hold distinct teleports landing in different places (the site's Up and Up pads np04/np05/np06 share one),
+    so it is kept now, with its own landing. A hidden portal to another map, landing on no point of this one,
+    keeps the shape it had."""
     from maplehelper import mapdata
     m = {"portals": [{"name": "out00", "type": 2, "toMapId": "010001080", "x": 1469, "y": -808},
                      {"name": "hide00", "type": 1, "toMapId": "010001080", "x": 5, "y": 6}],
@@ -524,6 +531,7 @@ def test_a_hidden_teleport_within_the_map_keeps_where_it_lands():
                           {"name": "shown", "type": 2, "x": 11, "y": 12, "toName": "x", "toX": 1, "toY": 2}]}
     assert mapdata.hidden_portals(m) == [{"name": "hide00", "x": 5, "y": 6},
                                          {"name": "t001", "x": -1463, "y": -155, "to_x": -1480, "to_y": -637},
+                                         {"name": "again", "x": -1463, "y": -155, "to_x": 9, "to_y": 9},
                                          {"name": "t004", "x": -141, "y": 86, "to_x": 0, "to_y": -630}]
 
 

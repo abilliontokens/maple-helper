@@ -6,7 +6,8 @@ The nightly scrape (tools/scrape_meowdb.py) builds it with this, and so does the
 before routes.json carried the hidden teleports gave a player no dots at all, with nothing to tell them why (0.18.0's
 KB, 2026-10-11, on macOS too), so the app rebuilds that file from the site when the KB it loaded lacks them. It does
 so, once, for a file without their landing points too (no LANDINGS mark: every KB built before 2026-10-14), which the
-app needs to say which pad to take on a map full of them (Utah's Pig Farm)."""
+app needs to say which pad to take on a map full of them (Utah's Pig Farm), and once more for a file built before
+every pad was kept (no ALL_PADS mark: the type-4 warps and the second pad on a shared spot were dropped)."""
 from __future__ import annotations
 
 import json
@@ -29,14 +30,20 @@ TERRAIN_FILE = TERRAIN
 SOURCE = "NiaMeowDB (meowdb.com) map data, as its Pathfinder reads it"
 MAP_ID = re.compile(r"^\d{9}$")
 # the game's portal kinds (the map data's "type"): 2 is drawn on the minimap (the blue ring), 1 is invisible (stand on it
-# and press up) and 3 is a touch teleport (walk or fall into it); the app draws the invisible ones on the game's minimap
-HIDDEN_PORTAL_TYPES = (1, 3)
+# and press up), 3 is a touch teleport (walk or fall into it) and 4 is a same-map warp with no ring drawn either (the
+# site's only ones are the "join00" pads of the fitness-test rooms); the site draws each of 1, 3 and 4 as a warp, and
+# the app draws the invisible ones on the game's minimap
+HIDDEN_PORTAL_TYPES = (1, 3, 4)
 # routes_data's mark on the file: its hidden teleports carry where each one within the map lands ("to_x", "to_y").
 # A file without it was built before they did, and the app rebuilds it once (outdated)
 LANDINGS = "landings"
 # routes_data's mark that the KB also carries terrain.json (the walk model's ground for maps with hidden teleports).
 # A file without it predates that file, and the app rebuilds it once (outdated)
 TERRAIN_MARK = "terrain"
+# routes_data's mark that its hidden list is every hidden teleport the site records (the type-4 warps, and each pad
+# on a spot more than one pad stands on: built before it, a shared spot kept only the first). A file without it
+# predates that, and the app rebuilds it once (outdated)
+ALL_PADS = "all_pads"
 APP_PAUSE = 0.5         # seconds between the app's own requests to the site (the nightly scrape waits 1 s)
 APP_UA = "MapleHelper (MapleStory Classic companion app; used with NiaMeowDB permission)"
 
@@ -44,15 +51,16 @@ log = logging.getLogger("maplehelper")
 
 
 def hidden_portals(m: dict) -> list[dict]:
-    """The map's invisible teleports, to other maps and within it (the hidden passages: "hide01" to "hide01_1"), each
-    once per spot. One within the map (the site's intraPortals: "t001" to "st00") keeps the point it lands on as
-    "to_x", "to_y": the landing point is what lets the app say which pad to take to the next step on a map full of
-    them (Utah's Pig Farm has 16). One to another map lands on no point of this one: its name, x and y alone."""
-    out, seen = [], set()
+    """The map's invisible teleports, to other maps and within it (the hidden passages: "hide01" to "hide01_1"), every
+    one of them: two on one spot are two teleports (Up and Up's "np04", "np05" and "np06" all stand at (461, 610) and
+    land in three places), so no spot is ever deduped away. One within the map (the site's intraPortals: "t001" to
+    "st00") keeps the point it lands on as "to_x", "to_y": the landing point is what lets the app say which pad to
+    take to the next step on a map full of them (Utah's Pig Farm has 16). One to another map lands on no point of
+    this one: its name, x and y alone."""
+    out = []
     for p in [*(m.get("portals") or []), *(m.get("intraPortals") or [])]:
-        x, y = p.get("x") or 0, p.get("y") or 0
-        if p.get("type") in HIDDEN_PORTAL_TYPES and (x, y) not in seen:
-            seen.add((x, y))
+        if p.get("type") in HIDDEN_PORTAL_TYPES:
+            x, y = p.get("x") or 0, p.get("y") or 0
             row = {"name": p.get("name") or "", "x": x, "y": y}
             if p.get("toX") is not None and p.get("toY") is not None:
                 row["to_x"], row["to_y"] = p["toX"], p["toY"]
@@ -62,9 +70,9 @@ def hidden_portals(m: dict) -> list[dict]:
 
 def routes_data(maps: list[dict], taxi: list[str], scenes: dict[str, list] | None = None) -> dict:
     """What the app routes with, from the site's map data: ids, names, portals and NPCs with their minimap spots, and
-    the invisible teleports it marks on the game's minimap, with where each one within the map lands (the file marked
-    LANDINGS). `scenes`: for maps with no minimap, the frame of their room picture ([width, height, x offset,
-    y offset], scene_frame), kept as "scene"."""
+    the invisible teleports it marks on the game's minimap, with where each one within the map lands and every pad
+    kept (the file marked LANDINGS and ALL_PADS). `scenes`: for maps with no minimap, the frame of their room
+    picture ([width, height, x offset, y offset], scene_frame), kept as "scene"."""
     out, ids = [], {str(m.get("id") or "") for m in maps}
     for m in maps:
         mid = str(m.get("id") or "")
@@ -83,7 +91,7 @@ def routes_data(maps: list[dict], taxi: list[str], scenes: dict[str, list] | Non
         if mm is None and (scenes or {}).get(mid):
             row["scene"] = scenes[mid]
         out.append(row)
-    return {"source": SOURCE, "taxi": taxi, LANDINGS: True, TERRAIN_MARK: True, "maps": out}
+    return {"source": SOURCE, "taxi": taxi, LANDINGS: True, TERRAIN_MARK: True, ALL_PADS: True, "maps": out}
 
 
 def scene_frame(terrain: dict | None) -> list | None:
@@ -194,14 +202,14 @@ def _read(root: Path) -> dict | None:
 
 def outdated(data: dict | None) -> bool:
     """routes.json built before it carried the invisible teleports (maps, and not one with a "hidden" list: a map with
-    none has an empty one), before they carried where each one lands (no LANDINGS mark), or before the KB carried
-    terrain.json (no TERRAIN_MARK): rebuilt, once, since the file written has all three. No file or no maps is not
-    this case: there is nothing to route with anyway."""
+    none has an empty one), before they carried where each one lands (no LANDINGS mark), before the KB carried
+    terrain.json (no TERRAIN_MARK), or before every pad was kept (no ALL_PADS mark): rebuilt, once, since the file
+    written has all four. No file or no maps is not this case: there is nothing to route with anyway."""
     data = data or {}
     maps = data.get("maps")
     if not isinstance(maps, list) or not maps:
         return False
-    return (not data.get(LANDINGS) or not data.get(TERRAIN_MARK)
+    return (not data.get(LANDINGS) or not data.get(TERRAIN_MARK) or not data.get(ALL_PADS)
             or not any(isinstance(m, dict) and "hidden" in m for m in maps))
 
 
@@ -246,7 +254,7 @@ def refresh(root: Path, fetch=_fetch, pause=lambda: time.sleep(APP_PAUSE)) -> bo
     write_terrain(Path(root) / TERRAIN, terrain)
     write_routes(path, data)
     log.info("routes: rebuilt from NiaMeowDB's map data (the KB's file lacked the hidden teleports, where they "
-             "land or the terrain): %d maps, %d with hidden teleports, %d with landing points, %d room frames, "
+             "land, every pad or the terrain): %d maps, %d with hidden teleports, %d with landing points, %d room frames, "
              "%d with ground",
              len(data["maps"]), sum(1 for m in data["maps"] if m["hidden"]),
              sum(1 for m in data["maps"] if any("to_x" in h for h in m["hidden"])),
