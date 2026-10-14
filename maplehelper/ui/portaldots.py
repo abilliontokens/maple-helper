@@ -4,9 +4,9 @@ search's NPC page) with a green arrow pointing down at it, and an arrow pointing
 the way to the map the player picked a route to (LOCATION.route_dest). Either arrow points at the pad of a hidden
 teleport on the player's own map instead when one cuts their walk to its spot (routes.Graph.shortcut_path: its blue dot,
 where to stand), the guided NPC's ring staying on the NPC. When that cheapest way takes more than one pad in a row,
-every later pad shown gets a smaller numbered marker in the arrow's colours (2, 3, 4: at most the search's own
-SHORTCUT_PADS in all), so the whole chain reads in order on the player's own map; a later pad off the part shown,
-or one the arrow's name pill would cover, is left out. The minimap often shows only part of the map: an NPC, a
+every later pad shown gets a smaller numbered marker in the arrow's colours (2, 3, 4, …: every pad of the chain,
+however many), so the whole chain reads in order on the player's own map; a later pad off the part shown, or one
+the arrow's name pill would cover, is left out. The minimap often shows only part of the map: an NPC, a
 step or a pad off the part shown gets a bigger arrow just inside the edge of the part shown instead, pointing toward
 it (the NPC no ring then). All of it on a click-through window laid over the minimap's box (LOCATION.box: the game's
 minimap window found at its top left, else the box the player drew), and moved with it. The map comes from each
@@ -97,8 +97,6 @@ TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen
 CHAIN_MARK_PX = 14                  # its marker's width in screen pixels: smaller than the arrow (ARROW_SIZE_PX
                                     # long), wider than a blue dot, its bright fill on its dark rim and its order
                                     # number in the rim inside it, so it reads on a busy minimap
-CHAIN_MARKS_MAX = 4                 # at most this many pads of a chain are marked in all (the first by its arrow):
-                                    # the search's own depth (routes.SHORTCUT_PADS), so never a fifth marker
 # an arrow's shortcut (_ask_shortcut: the route's toward its next step, the guided NPC's toward the NPC):
 # routes.Graph.shortcut_path asked from the player's own spot (LOCATION.here.spot) by the cell it falls in, this
 # many across and down the map's picture: asked again only once a read has their dot in another cell (it moves a
@@ -584,13 +582,13 @@ class PortalDots(QWidget):
 
     def _chain_marks(self, view: View, chain: list, tag: _Tag | None) -> list[_Mark]:
         """The later pads of an arrow's chain (`chain`, _shortcut or _npc_shortcut), numbered from 2, as markers to
-        draw at this refresh: at most CHAIN_MARKS_MAX pads in all (the first already has the arrow), each later pad
-        only when the part of the minimap shown has its spot (View.at), and left out when the arrow's name pill
-        (`tag`, when its setting placed one) would cover its marker — the pill already names the way, and a number
-        under it would only clutter the minimap. From the chain the one search already picked: no routing here."""
+        draw at this refresh: every later pad, however many the chain has, each only when the part of the minimap
+        shown has its spot (View.at), and left out when the arrow's name pill (`tag`, when its setting placed one)
+        would cover its marker — the pill already names the way, and a number under it would only clutter the
+        minimap. From the chain the one search already picked: no routing here."""
         marks: list[_Mark] = []
         r = CHAIN_MARK_PX / 2 / self._ratio
-        for n, jump in enumerate(chain[1:CHAIN_MARKS_MAX], start=2):
+        for n, jump in enumerate(chain[1:], start=2):
             at = view.at(jump.frm)
             if at is None:
                 continue

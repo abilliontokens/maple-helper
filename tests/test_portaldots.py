@@ -778,13 +778,13 @@ def test_a_one_pad_answer_draws_no_numbers(dots, shortcuts):
 
 def test_a_second_pad_off_the_part_shown_or_under_the_name_pill_is_skipped(dots, shortcuts):
     """A later pad is drawn only where the minimap shows it: one off the part shown gets no marker, and neither
-    does one the arrow's name pill would cover (the pill already names the way; a number under it is clutter). At
-    most CHAIN_MARKS_MAX pads are marked in all, however long a chain a graph hands back."""
+    does one the arrow's name pill would cover (the pill already names the way; a number under it is clutter). A
+    five-pad chain draws markers 2, 3, 4 and 5: every later pad is numbered, however long the chain."""
     from PySide6.QtCore import QPointF
 
     from maplehelper.minimap import Here, View
     from maplehelper.routes import Jump
-    from maplehelper.ui import portaldots
+
     w, s, loc = dots
     s["minimap_hidden_portals"] = False
     s["route_hidden_teleports"] = True
@@ -801,13 +801,13 @@ def test_a_second_pad_off_the_part_shown_or_under_the_name_pill_is_skipped(dots,
     _place(loc, _here())                                            # the whole picture shown, its pill placed
     w.refresh()                                                     # forced: LOCATION only emits on change
     assert w._tag is not None and w._arrow_marks == []
-    many = [first] + [Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name=f"t00{n}") for n in range(2, 7)]
+    many = [first] + [Jump(frm=(0.9, 0.9), to=(0.95, 0.95), name=f"t00{n}") for n in range(2, 6)]
     shortcuts.path = many
     w._arrow_chain, w._jump_cell = [], None
     _place(loc, _here())                                            # the whole picture shown again (an unchanged read)
     w.refresh()                                                     # forced: LOCATION only emits on change
     assert shortcuts.asked == [("010003000", (0.3, 0.3), (0.5, 0.5))] * 3     # every case's chain actually asked
-    assert [m.n for m in w._arrow_marks] == [2, 3, 4][:portaldots.CHAIN_MARKS_MAX - 1]
+    assert [m.n for m in w._arrow_marks] == [2, 3, 4, 5]
 
 
 def test_the_chain_markers_blink_with_the_arrow_and_go_with_its_settings(dots, shortcuts):

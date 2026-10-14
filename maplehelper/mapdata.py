@@ -24,6 +24,8 @@ MAPS_DATA = f"{BASE}/_data/maps.json"
 # room's NPCs on the picture (the map page's own NPC markers use it), where the game itself folds the minimap.
 MAP_TERRAIN = f"{BASE}/_data/map-terrain/{{id}}.json"
 ROUTES = "routes.json"
+TERRAIN = "terrain.json"
+TERRAIN_FILE = TERRAIN
 SOURCE = "NiaMeowDB (meowdb.com) map data, as its Pathfinder reads it"
 MAP_ID = re.compile(r"^\d{9}$")
 # the game's portal kinds (the map data's "type"): 2 is drawn on the minimap (the blue ring), 1 is invisible (stand on it
@@ -32,6 +34,9 @@ HIDDEN_PORTAL_TYPES = (1, 3)
 # routes_data's mark on the file: its hidden teleports carry where each one within the map lands ("to_x", "to_y").
 # A file without it was built before they did, and the app rebuilds it once (outdated)
 LANDINGS = "landings"
+# routes_data's mark that the KB also carries terrain.json (the walk model's ground for maps with hidden teleports).
+# A file without it predates that file, and the app rebuilds it once (outdated)
+TERRAIN_MARK = "terrain"
 APP_PAUSE = 0.5         # seconds between the app's own requests to the site (the nightly scrape waits 1 s)
 APP_UA = "MapleHelper (MapleStory Classic companion app; used with NiaMeowDB permission)"
 
@@ -78,8 +83,7 @@ def routes_data(maps: list[dict], taxi: list[str], scenes: dict[str, list] | Non
         if mm is None and (scenes or {}).get(mid):
             row["scene"] = scenes[mid]
         out.append(row)
-    out.sort(key=lambda m: m["id"])
-    return {"source": SOURCE, "taxi": taxi, LANDINGS: True, "maps": out}
+    return {"source": SOURCE, "taxi": taxi, LANDINGS: True, TERRAIN_MARK: True, "maps": out}
 
 
 def scene_frame(terrain: dict | None) -> list | None:
@@ -92,23 +96,69 @@ def scene_frame(terrain: dict | None) -> list | None:
     return [right - left, bottom - top, -left, -top] if right > left and bottom > top else None
 
 
-def scene_frames(maps: list[dict], fetch, pause) -> dict[str, list]:
-    """The room frame of every map with NPCs and no minimap (about 40), one terrain file each: fetch(url) -> text or
-    None, pause() between requests."""
+def _scene_id(m: dict) -> str | None:
+    mid = str(m.get("id") or "")
+    return mid if MAP_ID.match(mid) and not m.get("hasMinimapImage") and m.get("npcs") else None
+
+
+def _pad_id(m: dict) -> str | None:
+    mid = str(m.get("id") or "")
+    return mid if MAP_ID.match(mid) and hidden_portals(m) else None
+
+
+def _terrain_files(maps: list[dict], fetch, pause, ids: set[str]) -> dict[str, dict]:
+    """The parsed terrain file of each wanted map, one request each (in map order): fetch(url) -> text or None,
+    pause() between requests. A map whose file can't be fetched or parsed is simply left out."""
     out = {}
     for m in maps:
         mid = str(m.get("id") or "")
-        if not MAP_ID.match(mid) or m.get("hasMinimapImage") or not m.get("npcs"):
+        if mid not in ids or mid in out:
             continue
-        raw = fetch(MAP_TERRAIN.format(id=mid))
+        try:
+            raw = fetch(MAP_TERRAIN.format(id=mid))
+        except Exception:          # noqa: BLE001 - one map's ground missing: the engine falls back for that map
+            raw = None
         pause()
         try:
-            frame = scene_frame(json.loads(raw)) if raw else None
-        except json.JSONDecodeError:
-            frame = None
-        if frame:
+            terrain = json.loads(raw) if raw else None
+        except (json.JSONDecodeError, TypeError):
+            terrain = None
+        if isinstance(terrain, dict):
+            out[mid] = terrain
+    return out
+
+
+def scene_frames(maps: list[dict], fetch, pause, terrain: dict[str, dict] | None = None) -> dict[str, list]:
+    """The room frame of every map with NPCs and no minimap (about 40), one terrain file each: fetch(url) -> text or
+    None, pause() between requests. `terrain`: terrain files already fetched (see _terrain_files), reused as-is."""
+    if terrain is None:
+        terrain = _terrain_files(maps, fetch, pause, {mid for m in maps if (mid := _scene_id(m))})
+    out = {}
+    for m in maps:
+        mid = _scene_id(m)
+        if mid and (frame := scene_frame(terrain.get(mid))):
             out[mid] = frame
     return out
+
+
+def terrain_data(maps: list[dict], fetch, pause=lambda: None, terrain: dict[str, dict] | None = None) -> dict:
+    """terrain.json: the ground the walk model needs (footholds "fh", ropes/ladders "lr" as [x, y_a, y_b] — a
+    vertical segment, the third value the other end's y, read from the data rather than documented by the site) for
+    every map with hidden teleports, coordinates as the site's ints. Everything else in the terrain file ("vr",
+    "nd", "ct", "version") is dropped. `terrain`: terrain files already fetched, reused as-is; a map whose file
+    can't be fetched is left out (the engine falls back to the straight-line heuristic for it)."""
+    if terrain is None:
+        terrain = _terrain_files(maps, fetch, pause, {mid for m in maps if (mid := _pad_id(m))})
+    out = {}
+    for m in maps:
+        mid = _pad_id(m)
+        if not mid or mid not in terrain:
+            continue
+        ground = terrain[mid]
+        fh = ground.get("fh") if isinstance(ground.get("fh"), list) else []
+        lr = [row[:3] for row in ground.get("lr") or [] if isinstance(row, list) and len(row) >= 3]
+        out[mid] = {"fh": fh, "lr": lr}
+    return {"source": SOURCE, "maps": out}
 
 
 def write_routes(path: Path, data: dict) -> None:
@@ -119,6 +169,17 @@ def write_routes(path: Path, data: dict) -> None:
     tmp.write_text(head + ', "maps": [\n' + ",\n".join(json.dumps(m, ensure_ascii=False) for m in data["maps"])
                    + "\n]}\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+def write_terrain(path: Path, data: dict) -> None:
+    """terrain.json written whole, then swapped in (like write_routes): a reader never sees half a file, and a
+    failed write leaves no temp file behind."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------- the app's own check
@@ -133,13 +194,15 @@ def _read(root: Path) -> dict | None:
 
 def outdated(data: dict | None) -> bool:
     """routes.json built before it carried the invisible teleports (maps, and not one with a "hidden" list: a map with
-    none has an empty one), or before they carried where each one lands (no LANDINGS mark): rebuilt, once, since the
-    file written has both. No file or no maps is not this case: there is nothing to route with anyway."""
+    none has an empty one), before they carried where each one lands (no LANDINGS mark), or before the KB carried
+    terrain.json (no TERRAIN_MARK): rebuilt, once, since the file written has all three. No file or no maps is not
+    this case: there is nothing to route with anyway."""
     data = data or {}
     maps = data.get("maps")
     if not isinstance(maps, list) or not maps:
         return False
-    return not data.get(LANDINGS) or not any(isinstance(m, dict) and "hidden" in m for m in maps)
+    return (not data.get(LANDINGS) or not data.get(TERRAIN_MARK)
+            or not any(isinstance(m, dict) and "hidden" in m for m in maps))
 
 
 def needs_refresh(root: Path) -> bool:
@@ -173,13 +236,19 @@ def refresh(root: Path, fetch=_fetch, pause=lambda: time.sleep(APP_PAUSE)) -> bo
         log.warning("routes: NiaMeowDB's map data not available, the hidden teleports wait for the next try")
         return False
     pause()
-    data = routes_data(maps, [str(t) for t in (old or {}).get("taxi") or []], scene_frames(maps, fetch, pause))
+    wanted = {mid for m in maps if (mid := _scene_id(m)) or (mid := _pad_id(m))}
+    ground = _terrain_files(maps, fetch, pause, wanted)
+    data = routes_data(maps, [str(t) for t in (old or {}).get("taxi") or []],
+                       scene_frames(maps, fetch, pause, ground))
+    terrain = terrain_data(maps, fetch, pause, ground)
     if not data["maps"] or not outdated(_read(root)):
         return False        # nothing usable, or a KB update brought a new file meanwhile: that one stays
+    write_terrain(Path(root) / TERRAIN, terrain)
     write_routes(path, data)
-    log.info("routes: rebuilt from NiaMeowDB's map data (the KB's file lacked the hidden teleports or where they "
-             "land): %d maps, %d with hidden teleports, %d with landing points, %d room frames",
+    log.info("routes: rebuilt from NiaMeowDB's map data (the KB's file lacked the hidden teleports, where they "
+             "land or the terrain): %d maps, %d with hidden teleports, %d with landing points, %d room frames, "
+             "%d with ground",
              len(data["maps"]), sum(1 for m in data["maps"] if m["hidden"]),
              sum(1 for m in data["maps"] if any("to_x" in h for h in m["hidden"])),
-             sum(1 for m in data["maps"] if "scene" in m))
+             sum(1 for m in data["maps"] if "scene" in m), len(terrain["maps"]))
     return True
