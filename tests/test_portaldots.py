@@ -5,9 +5,10 @@ an NPC off the part shown, the route's in the colour its setting picks and the N
 size picked, with a name beside each saying what to click there, and blinking together with the flash setting; each
 on the pad of a hidden teleport that cuts the walk to its spot with the Hidden teleport routes switch on (the NPC's
 ring staying on the NPC); the walking path drawn under an arrow with its switch on, broken where the part shown
-ends; how many maps are still to go beside the route's arrow, the way worked out again said there after a stray,
-and the arrow going quiet on another map with Guide the whole way off; and the dots' switch, gone from Settings to
-the bar's ⚙ panel."""
+ends; how many maps are still to go on a strip just under the minimap box (the window grown by its height alone,
+the strip above the box for a minimap at the foot of its screen), the way worked out again said there after a
+stray, and the arrow going quiet on another map with Guide the whole way off; and the dots' switch, gone from
+Settings to the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -2097,28 +2098,43 @@ def test_a_pad_of_the_walk_is_a_dotted_hop_not_a_stroke_across_the_map(dots, sho
     assert any(on) and not all(on)                                  # dotted: a hop, never one stroke across the map
 
 
-@pytest.mark.parametrize("left, said", [(3, "3 maps to go"), (1, "Last map")])
-def test_the_name_pill_says_how_many_maps_are_left(dots, journeys, left, said):
-    """Beside the route's arrow its name pill carries the count from LOCATION.journey
-    (settings["minimap_route_steps"], on by default): how many maps are still to pass through, and its own wording
-    on the last one. Off, the name alone as before."""
+def test_the_name_pill_names_only_what_the_arrow_points_at(dots, journeys):
+    """The count no longer rides on the arrow's name pill: with a journey published and the switch on, the pill
+    beside the route's arrow names what the arrow points at and nothing else (the count is under the box,
+    _make_strip)."""
     w, s, loc = dots
     s["language"] = "en"
     s["minimap_hidden_portals"] = False
-    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})           # room on the pill for both
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})           # room on the pill for both, were it to carry it
+    journeys.answer = _journey(left=3)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert s["minimap_route_steps"] is True and loc.journey is journeys.answer
+    assert w._tag.text == "→ Bush Road"
+    assert w._strip is not None and "3 maps to go" in w._strip.text
+
+
+@pytest.mark.parametrize("left, said", [(3, "3 maps to go"), (1, "Last map")])
+def test_the_strip_under_the_box_says_how_many_maps_are_left(dots, journeys, left, said):
+    """A strip just under the minimap box carries the count from LOCATION.journey
+    (settings["minimap_route_steps"], on by default): the map the player is heading to and how many maps are still
+    to pass through, with its own wording on the last one — off the minimap's own picture, which is small and
+    busy."""
+    w, s, loc = dots
+    s["language"] = "en"
+    s["minimap_hidden_portals"] = False
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})           # room for the strip's words
     journeys.answer = _journey(left=left)
     loc.set_route_dest("020000000")
     _place(loc, _here(panel=(0, 0, 600, 200)))
-    assert s["minimap_route_steps"] is True
-    assert loc.journey is journeys.answer and w._tag.text == "→ Bush Road · " + said
-    s["minimap_route_steps"] = False
-    w.refresh()
-    assert w._tag.text == "→ Bush Road"
+    assert loc.journey is journeys.answer
+    assert w._strip.text == "Henesys · " + said
+    assert w._strip.rect.top() == 200 and w._strip.rect.right() <= 600     # just under the box, inside it across
 
 
-def test_straying_off_the_way_says_so_beside_the_arrow(dots, journeys):
+def test_straying_off_the_way_says_so_on_the_strip(dots, journeys):
     """A wrong portal puts the player off the way, and the journey worked out from where they now stand says so
-    (Journey.off): the read after says it beside the arrow, in place of the count."""
+    (Journey.off): the read after says it on the strip, in place of the count — and never on the pill."""
     w, s, loc = dots
     s["language"] = "en"
     s["minimap_hidden_portals"] = False
@@ -2126,7 +2142,83 @@ def test_straying_off_the_way_says_so_beside_the_arrow(dots, journeys):
     journeys.answer = _journey(left=4, off=True)
     loc.set_route_dest("020000000")
     _place(loc, _here(panel=(0, 0, 600, 200)))
-    assert w._tag.text == "→ Bush Road · Off the way — worked it out again from here"
+    assert w._strip.text == "Henesys · Off the way — worked it out again from here"
+    assert w._tag.text == "→ Bush Road"
+
+
+@pytest.mark.parametrize("case", ["switch_off", "nothing_armed", "arrived"])
+def test_nothing_to_say_draws_no_strip_and_grows_no_window(dots, journeys, case):
+    """Nothing to say, nothing drawn: the switch off (settings["minimap_route_steps"]), no route armed, or the
+    player already on the map they picked (Journey.arrived, which clears the arrow with it). The window must not
+    grow for an empty strip."""
+    from PySide6.QtCore import QRect
+    w, s, loc = dots
+    s["language"] = "en"
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})
+    journeys.answer = _journey(left=0, arrived=True) if case == "arrived" else _journey(left=3)
+    if case != "nothing_armed":
+        loc.set_route_dest("020000000")
+    if case == "switch_off":
+        s["minimap_route_steps"] = False
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert w.isVisible() and w._strip is None
+    assert w.geometry() == QRect(100, 100, 600, 200)
+
+
+def test_the_strip_grows_the_window_down_and_moves_nothing_over_the_box(dots, journeys):
+    """The window grows down by exactly the strip's height and keeps its top-left, which every mark over the box
+    is measured from: the dots, the arrow and its pill are placed where they were without the strip, and every
+    pixel drawn over the box is the same pixel."""
+    from PySide6.QtCore import QRect
+    w, s, loc = dots
+    s["language"] = "en"
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})
+    journeys.answer = _journey(left=3)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    h = int(w._strip.rect.height())
+    placed, with_strip = (list(w._dots), w._arrow, w._tag.rect), w.grab().toImage()
+    assert h > 0 and w._shift == 0.0 and w.geometry() == QRect(100, 100, 600, 200 + h)
+    s["minimap_route_steps"] = False
+    w.refresh()
+    bare = w.grab().toImage()
+    assert w._strip is None and w.geometry() == QRect(100, 100, 600, 200)       # the strip's height, and no more
+    assert (list(w._dots), w._arrow, w._tag.rect) == placed
+    # every row of the box, the one next to the strip included: nothing of the strip may spill onto it
+    assert all(with_strip.pixelColor(x, y) == bare.pixelColor(x, y)
+               for x in range(0, 600, 3) for y in range(200))
+
+
+def test_a_minimap_at_the_foot_of_the_screen_puts_the_strip_above_the_box(dots, journeys, qapp):
+    """The strip stays on the screen the minimap is on: with no room under the box it goes above it instead, the
+    window growing up and every mark over the box — the dots, the arrow, its pill, the path — drawn that much
+    down, so each lands over the box exactly where it did without the strip. The strip itself never moves with
+    them: it keeps the window's own top rows."""
+    from PySide6.QtCore import QPointF, QRect
+    w, s, loc = dots
+    s["language"] = "en"
+    geo = qapp.primaryScreen().geometry()
+    box = {"x": geo.x() + 100, "y": geo.y() + geo.height() - 200, "w": 200, "h": 200}
+    loc.set_box(box)
+    journeys.answer = _journey(left=3)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 200, 200)))
+    h = int(w._strip.rect.height())
+    assert h > 0 and w._strip.rect.top() == 0 and w._shift == float(h)
+    assert w.geometry() == QRect(box["x"], box["y"] - h, 200, 200 + h)
+    assert w.geometry().bottom() <= geo.bottom()                    # all of it on the screen the minimap is on
+    assert w._dots[0] == QPointF(60, 45)                            # placed from the box's top-left as ever ...
+    above = w.grab().toImage()
+    assert above.pixelColor(int(w._strip.rect.center().x()), int(w._strip.rect.center().y())).alpha()
+    s["minimap_route_steps"] = False                                # ... and the same box with no strip at all
+    w.refresh()
+    assert w._strip is None and w._shift == 0.0 and w.geometry() == QRect(box["x"], box["y"], 200, 200)
+    bare = w.grab().toImage()
+    # every mark drawn over the box, that much down and nowhere else — and every row of it, the one next to the
+    # strip included: the strip keeps the window's own top rows and spills onto none of the box's
+    assert all(above.pixelColor(x, y + h) == bare.pixelColor(x, y)
+               for x in range(0, 200, 2) for y in range(200))
+    assert above.pixelColor(60, 45 + h) == bare.pixelColor(60, 45)      # the dot's own pixel, moved with the rest
 
 
 def test_with_guiding_the_whole_way_off_the_arrow_goes_quiet_on_another_map(dots, journeys):

@@ -61,12 +61,19 @@ costs a ground search, so it is asked where the arrow's own answer is asked, onc
 another of the picture's cells (SHORTCUT_CELLS, as the pad chain's own asking), and never for a follow frame; it
 blinks with its arrow and is drawn under it and under the numbered markers.
 
-Beside the route's arrow its name pill says how many maps are still to go (minimap_route_steps: arrow_maps_left,
-arrow_maps_left_one on the last one), and on the read after a wrong portal that the way was worked out again from
-where the player stands (route_off_track). The count comes from LOCATION.journey, the way from the player's CURRENT
-map to the map they picked: this window works it out (journey.of) where it works out the arrow's own step and
-publishes it (LOCATION.set_journey), once for a map, a destination and the switches and never for a follow frame,
-and clears it whenever the arrow guides nothing. A panel with no room for the count keeps the name alone.
+Under the minimap box, outside the game's own picture, a strip says where the player is heading and how many maps
+are still to go (minimap_route_steps: the map they picked by name, then arrow_maps_left, arrow_maps_left_one on the
+last one), and on the read after a wrong portal that the way was worked out again from where they stand
+(route_off_track). It is drawn small, in the route's arrow's own colours on its dark rim, so it reads over whatever
+the game draws under its minimap, and it blinks with the arrows when they blink: it is the route arrow's own word,
+and a strip left steady beside a blinking arrow would read as something else's. The window grows down by exactly
+the strip's height and keeps its top-left, so every mark over the box — the dots, the ring, the arrows, the
+numbered markers, the paths — lands where it did; a minimap at the foot of its screen puts the strip above the box
+instead, the window growing up and the marks drawn that much down, which leaves them over the box just the same.
+Nothing to say draws nothing and grows nothing: the switch off, no route armed, or the player already there. The
+count comes from LOCATION.journey, the way from the player's CURRENT map to the map they picked: this window works
+it out (journey.of) where it works out the arrow's own step and publishes it (LOCATION.set_journey), once for a
+map, a destination and the switches and never for a follow frame, and clears it whenever the arrow guides nothing.
 
 Guiding the whole way (minimap_route_follow, on unless it is turned off) decides what happens once the player
 leaves the map the arrow was armed on: on, the map they picked stands and the way is worked out afresh from
@@ -79,7 +86,7 @@ import math
 import sys
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QWidget
 
@@ -132,7 +139,14 @@ TAG_CHARS = 18                  # a name longer than this many characters is cut
 TAG_PAD_X, TAG_PAD_Y = 0.5, 0.1     # the pill's room around its words, across and above/below, in its letters' size
 TAG_ALPHA = 0.85                # how opaque the pill's fill (the arrow's rim) is, the minimap a touch through it
 TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen pixels
-TAG_SEP = " · "                 # between the name and how many maps are still to go (minimap_route_steps)
+# the strip under the minimap box (minimap_route_steps, _make_strip): where the player is heading and how many maps
+# are still to go, in the route arrow's own colours on its dark rim, outside the game's picture
+STRIP_FONT_PX = 11          # its letters in screen pixels: small, and the same whatever size the arrows are set
+                            # to, so how far the window grows below the box never moves with another setting
+STRIP_PAD_X, STRIP_PAD_Y = 0.6, 0.25    # its backing's room around the words, across and above/below, in letters
+STRIP_ALPHA = 0.92          # how opaque that backing is: the game draws its own panels under the minimap, and the
+                            # words must read over whatever is there
+STRIP_SEP = " · "           # between the map the player is heading to and how many maps are still to go
 # the walking path under an arrow (minimap_path_line, _path_segs): a line along routes.Graph.walk_path's points in
 # the arrow's own fill, thinner than the arrow and this see-through, so it reads as the trail and never competes
 # with the instruction; a pad of the way is a dotted hop from the pad to where it lands, never a walk across the map
@@ -215,6 +229,14 @@ class _Tag(NamedTuple):
     """The name beside an arrow (PortalDots._make_tag), in the window's pixels."""
     text: str       # what it says: its glyph and the name, cut short and kept one block (bidi.ltr_block)
     rect: QRectF    # its pill (_tag_rect)
+    font: QFont
+    rtl: bool       # its language reads right to left (Hebrew): its words laid out so
+
+
+class _Strip(NamedTuple):
+    """The strip under (or over) the minimap box (PortalDots._make_strip), in the window's pixels."""
+    text: str       # the map the player is heading to and how many maps are still to go (STRIP_SEP between them)
+    rect: QRectF    # its dark backing, as wide as the words need and never wider than the box
     font: QFont
     rtl: bool       # its language reads right to left (Hebrew): its words laid out so
 
@@ -584,11 +606,11 @@ def _ask_path(graph, here: Here, target: tuple[float, float], kept: tuple) -> tu
 
 
 def _steps_words(settings, j) -> tuple[str, dict] | None:
-    """What the count beside the route's arrow says (minimap_route_steps, LOCATION.journey), an i18n key and what it
-    carries: how many maps are still to pass through (arrow_maps_left; arrow_maps_left_one on the last one), or that
-    the way was worked out again from where the player stands after they strayed off it (route_off_track, the read
-    after). None with the switch off, with no journey published, and on the map they picked: there is nothing left
-    to count."""
+    """What the strip under the minimap box says of the way (minimap_route_steps, LOCATION.journey), an i18n key
+    and what it carries: how many maps are still to pass through (arrow_maps_left; arrow_maps_left_one on the last
+    one), or that the way was worked out again from where the player stands after they strayed off it
+    (route_off_track, the read after). None with the switch off, with no journey published, and on the map they
+    picked: there is nothing left to count, and nothing to say draws no strip."""
     if j is None or not _on(settings, "minimap_route_steps"):
         return None
     if j.off:
@@ -676,6 +698,18 @@ def _tag_rect(at: QPointF, angle: float, back: float, front: float, w: float, h:
     return fallback
 
 
+def _strip_above(rect: QRect, screens: list[tuple[QRect, float]], h: int) -> bool:
+    """Whether the strip goes above the minimap box instead of under it, where it belongs (PortalDots.refresh): a
+    minimap at the foot of its screen has no room under it, and a strip drawn off the screen's edge says nothing.
+    The screen is the one holding the box's middle, as the box's own placing picks it (regionpick.from_capture).
+    Under the box with no screen to ask, with none holding its middle, and when there is no room above it either
+    (a box taller than its screen): nothing better is to be had there."""
+    for geo, _ratio in screens:
+        if geo.contains(rect.center()):
+            return rect.y() + rect.height() + h > geo.y() + geo.height() and rect.y() - h >= geo.y()
+    return False
+
+
 class PortalDots(QWidget):
     """The dots', the guided NPC's ring's and arrow's and the route's arrow's window over the minimap box. Never
     takes a click, the focus, or a place in the minimap reads. The route's arrow points at its way's next step, or at
@@ -694,10 +728,13 @@ class PortalDots(QWidget):
     placed and the setting is on. The guided NPC's is drawn over the route's. Under each arrow its walking path is
     drawn (minimap_path_line, _ask_path, _path_segs: routes.Graph.walk_path toward that arrow's own spot, asked on
     the cell the pad chains are asked on and placed afresh each refresh, its pieces broken where the part shown
-    ends and a pad's hop dotted), and beside the route's arrow's name how many maps are still to go
-    (minimap_route_steps, _steps_words) from the journey this window works out and publishes at the arrow's own
-    cache point (_journey, LOCATION.journey). With Guide the whole way off (minimap_route_follow) the route's
-    arrow guides only on the map it was armed on and goes quiet, journey and all, once the player leaves it."""
+    ends and a pad's hop dotted). Under the box a strip says where the player is heading and how many maps are
+    still to go (minimap_route_steps, _steps_words, _make_strip) from the journey this window works out and
+    publishes at the arrow's own cache point (_journey, LOCATION.journey): the window grows by exactly that
+    strip's height, down from its top-left — or up, with the marks drawn that much down (_shift), for a minimap at
+    the foot of its screen — so every mark over the box lands where it did. With Guide the whole way off
+    (minimap_route_follow) the route's arrow guides only on the map it was armed on and goes quiet, journey,
+    strip and all, once the player leaves it."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -756,6 +793,10 @@ class PortalDots(QWidget):
         self._arrow_scale = 1.0
         self._arrow_fill, self._arrow_rim = _arrow_colors(settings)
         self._tag: _Tag | None = None   # the name beside the route's arrow (_make_tag) while placed, its setting on
+        # the strip under the minimap box while the journey has something to say (_make_strip), and how far down
+        # the box's own marks are drawn for it (0 unless the strip had to go above the box)
+        self._strip: _Strip | None = None
+        self._shift = 0.0
         # the guided NPC's arrow, placed as the route's is (_aim): on the NPC, inside the ring, or on the pad of a
         # hidden teleport that cuts the walk there (_npc_shortcut), or while the part shown hasn't it, its tip at the
         # panel's edge; its turn from pointing down, which it is, the name beside it, and what the log last said
@@ -849,7 +890,10 @@ class PortalDots(QWidget):
         self._arrow_said = _say("route arrow", what, (self._arrow_key, jump), aim, self._arrow_said)
         what = f"the hidden teleport {npc_jump.name}" if npc_jump is not None else "the NPC"
         self._npc_said = _say("npc arrow", what, (guide, npc_jump), npc_aim, self._npc_said)
-        if not at and at_ring is None and aim is None and npc_aim is None:
+        # what the strip under the box has to say of the way, if anything (_steps_words): something to say is
+        # something to show, even with every mark off the part the minimap shows
+        note = _steps_words(self._settings, LOCATION.journey)
+        if not at and at_ring is None and aim is None and npc_aim is None and note is None:
             self._clear()
             return
         screens = [(s.geometry(), s.devicePixelRatio()) for s in QGuiApplication.screens()]
@@ -870,8 +914,7 @@ class PortalDots(QWidget):
         self._arrow_fill, self._arrow_rim = _arrow_colors(self._settings)
         # the names beside them, with their setting on: placed by the arrows just placed, inside the panel shown
         label = self._settings["minimap_arrow_label"]
-        self._tag = (self._make_tag(_tag_words(graph, leg, jump), aim, view.panel,
-                                    _steps_words(self._settings, LOCATION.journey))
+        self._tag = (self._make_tag(_tag_words(graph, leg, jump), aim, view.panel)
                      if aim is not None and label else None)
         self._npc_tag = (self._make_tag(_npc_words(self._kb, guide[2], npc_jump), npc_aim, view.panel)
                          if npc_aim is not None and label else None)
@@ -884,8 +927,18 @@ class PortalDots(QWidget):
         self._npc_path = self._path_segs(view, self._npc_path_pts) if npc_aim is not None else []
         self._flash((self._arrow is not None or self._npc_arrow is not None)
                     and bool(self._settings["minimap_arrow_flash"]))
-        if self.geometry() != rect:
-            self.setGeometry(rect)
+        # the strip under the box (_make_strip): the window grows by exactly its height and keeps its top-left, so
+        # every mark just placed lands where it did; a box at the foot of its screen takes the strip above it
+        # instead, the window growing up and the marks drawn that much down (_shift) — over the box all the same
+        strip = self._make_strip(note, graph, rect.width()) if note is not None else None
+        h = 0 if strip is None else int(strip.rect.height())
+        up = bool(h) and _strip_above(rect, screens, h)
+        self._shift = float(h) if up else 0.0
+        self._strip = (strip if strip is None or up
+                       else strip._replace(rect=strip.rect.translated(0.0, float(rect.height()))))
+        grown = QRect(rect.x(), rect.y() - (h if up else 0), rect.width(), rect.height() + h)
+        if self.geometry() != grown:
+            self.setGeometry(grown)
         if not self.isVisible():
             self.show()
             set_capturable(self, self._settings)     # off the minimap reads' shots, unless the player asked
@@ -946,7 +999,7 @@ class PortalDots(QWidget):
     def _journey(self, graph, here: Here, dest: str | None, rides: bool, hidden: bool, guiding: bool) -> None:
         """Work out the whole way from the player's CURRENT map to the map they picked (journey.of: its legs from
         here, how many maps are still to go, and whether they strayed off the way it last knew) and publish it for
-        everyone who shows it — the count beside this window's own arrow first of all (_steps_words,
+        everyone who shows it — the strip under this window's own box first of all (_steps_words, _make_strip,
         LOCATION.journey). Nobody else writes it. Worked out where the arrow's own step is worked out and on the
         same key (the player's map, the map picked, the switches), so the follow frames between reads publish
         nothing and nothing new is searched a frame; cleared (None) whenever the arrow guides nothing: no route
@@ -1043,16 +1096,14 @@ class PortalDots(QWidget):
             last = now
         return segs
 
-    def _make_tag(self, words: tuple[str, str], aim: _Aim, panel: tuple[float, float, float, float],
-                  note: tuple[str, dict] | None = None) -> _Tag | None:
+    def _make_tag(self, words: tuple[str, str], aim: _Aim,
+                  panel: tuple[float, float, float, float]) -> _Tag | None:
         """The name beside an arrow just placed at `aim` (settings["minimap_arrow_label"]), in the language the app's
         settings pick (Hebrew until one is): `words`, an i18n key and the name it carries (_tag_words: what to click
         there, for the route's; _npc_words: the NPC's own, for the guided NPC's). A game name, so one left-to-right
         block in a Hebrew line, cut short with "…" past about TAG_CHARS characters or what the panel's width leaves
         it, never its glyph. Its letters sized with the arrow, its pill just behind the arrow's tail (_tag_rect) and
         all of it EDGE_GAP_PX inside the panel (`panel`: the view's, in box pixels), as the sign at the edge keeps.
-        `note` says how many maps are still to go, after the name on the one pill (_steps_words, the route's arrow
-        alone): a panel with no room for both keeps the name alone, which is the instruction.
         None when there is no name or the panel no room for it."""
         t = I18n(self._settings["language"] or "he")
         key, name = words
@@ -1074,22 +1125,40 @@ class PortalDots(QWidget):
         if shown in ("", "…"):
             return None
         text = t(key, name=bidi.ltr_block(shown, t.rtl))
-        if note is not None:
-            text += TAG_SEP + t(note[0], **note[1])
-        while True:
-            w, h = fm.horizontalAdvance(text) + 2 * pad_x, fm.height() + 2 * pad_y
-            box = (x0 + inset, x1 - inset - w, y0 + inset, y1 - inset - h)     # where its top-left corner may go
-            if box[0] <= box[1] and box[2] <= box[3]:
-                break
-            if note is None:
-                return None
-            note, text = None, t(key, name=bidi.ltr_block(shown, t.rtl))     # no room for the count: the name alone
+        w, h = fm.horizontalAdvance(text) + 2 * pad_x, fm.height() + 2 * pad_y
+        box = (x0 + inset, x1 - inset - w, y0 + inset, y1 - inset - h)     # where its top-left corner may go
+        if box[0] > box[1] or box[2] > box[3]:
+            return None
         ys = [y * self._arrow_scale * k for _, y in (EDGE_ARROW_PX if aim.edge else ARROW_PX)]
         # the mark on a spot may have it below its tip instead (no room above it, by the panel's top); the sign at
         # the edge never: past its tip is the panel's edge
         rect = _tag_rect(QPointF(aim.x / self._ratio, aim.y / self._ratio), aim.angle, -min(ys), max(ys), w, h, box,
                          TAG_GAP_PX * k, flip=not aim.edge)
         return _Tag(text, rect, font, t.rtl)
+
+    def _make_strip(self, note: tuple[str, dict], graph, width: float) -> _Strip | None:
+        """The strip under the minimap box (`note`, _steps_words: what the way has to say), in the language the
+        app's settings pick (Hebrew until one is): the map the player is heading to by name (LOCATION.journey.dest,
+        a game name, so one left-to-right block in a Hebrew line) and, past STRIP_SEP, how many maps are still to
+        go — or that the way was worked out again from where they stand. On a dark backing as wide as the words
+        need and never wider than the box (`width`, the window's), its letters STRIP_FONT_PX whatever size the
+        arrows are set to. Its rect sits at the window's top here; refresh drops it under the box unless the box
+        is at the foot of its screen (_strip_above). None when the box is too narrow for a readable word of it:
+        there is nothing to draw, and the window must not grow for nothing."""
+        t = I18n(self._settings["language"] or "he")
+        k = 1.0 / self._ratio       # screen pixels to the window's, as every measure here
+        font = theme.app_font(max(1, round(STRIP_FONT_PX * k)))
+        font.setBold(True)
+        fm = QFontMetricsF(font)
+        pad_x, pad_y = STRIP_PAD_X * font.pixelSize(), STRIP_PAD_Y * font.pixelSize()
+        text = bidi.ltr_block(_name(graph, LOCATION.journey.dest), t.rtl) + STRIP_SEP + t(note[0], **note[1])
+        room = width - 2 * pad_x
+        shown = fm.elidedText(text, Qt.ElideRight, room) if room > 0 else ""
+        if shown in ("", "…"):
+            return None
+        w = min(fm.horizontalAdvance(shown) + 2 * pad_x, float(width))
+        h = float(math.ceil(fm.height() + 2 * pad_y))     # whole window pixels: the window grows by just this
+        return _Strip(shown, QRectF((width - w) / 2, 0.0, w, h), font, t.rtl)
 
     def _clear(self) -> None:
         self._dots = []
@@ -1106,6 +1175,8 @@ class PortalDots(QWidget):
         self._npc_tag = None
         self._npc_marks = []
         self._npc_path = []
+        self._strip = None
+        self._shift = 0.0
         self._flash(False)
         if self.isVisible():
             self.hide()
@@ -1121,19 +1192,24 @@ class PortalDots(QWidget):
             self._flash_timer.start()
 
     def _blink(self) -> None:
-        """The flash timer's beat: both arrows, their names, their chains' numbered markers and their walking paths
-        hidden, or shown again (they alone: the dots and the ring stay)."""
+        """The flash timer's beat: both arrows, their names, their chains' numbered markers, their walking paths
+        and the strip under the box hidden, or shown again (they alone: the dots and the ring stay)."""
         self._flash_on = not self._flash_on
         self.update()
 
     def paintEvent(self, e) -> None:
-        shown = self._flash_on      # blinking (_flash): both arrows, their names, chain markers and paths with
-        route = shown and self._arrow is not None     # out every other beat
+        shown = self._flash_on      # blinking (_flash): both arrows, their names, chain markers, paths and the
+        route = shown and self._arrow is not None       # strip under the box, out and in every other beat
         npc = shown and self._npc_arrow is not None
-        if not self._dots and self._ring is None and not route and not npc:
+        strip = self._strip if shown else None
+        if not self._dots and self._ring is None and not route and not npc and strip is None:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if strip is not None:
+            self._draw_strip(p, strip)
+        # ... and everything else measured from the box's own top-left, wherever the strip left the window's
+        p.translate(0.0, self._shift)
         p.setPen(QPen(OUTLINE, 1.0 / self._ratio))
         p.setBrush(FILL)
         r = DOT_PX / 2 / self._ratio
@@ -1163,6 +1239,27 @@ class PortalDots(QWidget):
             for mark in self._npc_marks:
                 self._draw_mark(p, mark, RING_FILL, RING_RIM)
         p.end()
+
+    def _draw_strip(self, p: QPainter, strip: _Strip) -> None:
+        """The strip under the minimap box (paintEvent, _make_strip): its words in the route arrow's fill on that
+        arrow's dark rim, the backing STRIP_ALPHA opaque so they read over whatever the game draws there — the
+        pill's own dark-on-bright treatment, outside the game's picture. Drawn and left out with the arrows
+        (paintEvent's beat): it is the route arrow's own word.
+
+        Its whole edge is drawn a full pen inside its rect, not straddling it as the name pill's does: the window
+        grows by exactly the strip's height, so an edge on the rect's own line would hand the row next to it —
+        the box's first or last — a sliver of the strip, and no row over the box is the strip's to touch."""
+        line = 1.0 / self._ratio
+        back = QColor(self._arrow_rim)
+        back.setAlphaF(STRIP_ALPHA)
+        p.setPen(QPen(self._arrow_fill, line))
+        p.setBrush(back)
+        box = strip.rect.adjusted(line, line, -line, -line)     # all of it, pen and all, inside its rect
+        p.drawRoundedRect(box, box.height() / 4, box.height() / 4)
+        p.setFont(strip.font)
+        p.setLayoutDirection(Qt.RightToLeft if strip.rtl else Qt.LeftToRight)
+        p.setPen(self._arrow_fill)
+        p.drawText(strip.rect, Qt.AlignCenter, strip.text)
 
     def _draw_mark(self, p: QPainter, mark: _Mark, fill: QColor, rim: QColor) -> None:
         """One later pad's numbered marker (paintEvent), in its arrow's colours: a smaller bright disc on its dark
