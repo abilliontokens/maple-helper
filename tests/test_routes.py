@@ -302,6 +302,36 @@ def test_shortcut_path_uses_the_maps_real_ground_when_the_kb_has_it(world, monke
     assert g2.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == bare.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0))
 
 
+def test_walk_path_gives_the_grounds_way_as_spots_on_the_picture(world):
+    """Graph.walk_path: the walking path the map's real ground finds (terrain.Walk.path), every point back
+    on the map's minimap picture as a fraction of its size — the inverse of the map units shortcut_path
+    hands the engine — so whoever draws it never sees a map unit. The floor here is two fragments joined
+    end to end and the ledge is 600 above it, out of reach of anything but the pad, so the way is a walk
+    east along the floor and the pad up to the ledge; its "pad" steps are shortcut_path's pads, in that
+    order. [] where there is nothing to draw: no ground for the map, an end the ground cannot place, no
+    player dot, no map — and nothing said in the log for any of them, the pad query saying it once a run
+    already."""
+    kb, _ = world
+    (Path(kb.root) / routes.TERRAIN_FILE).write_text(json.dumps({"source": "test", "maps": {HENESYS: {
+        "fh": [[-800, 300, 0, 300], [0, 300, 800, 300], [400, -300, 800, -300]], "lr": []}}}), encoding="utf-8")
+    g = routes.Graph(kb, {"maps": [
+        {**_map(HENESYS, "Henesys", town=True),
+         "hidden": [{"name": "t001", "x": 600, "y": 300, "to_x": 600, "to_y": -300}]},
+        {**_map(PERION, "Perion", town=True),
+         "hidden": [{"name": "east", "x": -650, "y": 0, "to_x": 500, "to_y": 0}]}]})
+    you, target = _at(-700, 300), _at(700, -300)
+    steps = g.walk_path(HENESYS, you, target)
+    assert steps == [(_at(-700, 300), "walk", ""), (_at(0, 300), "walk", ""), (_at(700, -300), "pad", "t001")]
+    assert all(0 <= x <= 1 and 0 <= y <= 1 for (x, y), _, _ in steps)
+    assert [name for _, kind, name in steps if kind == "pad"] == \
+           [j.name for j in g.shortcut_path(HENESYS, you, target)]
+    assert g.walk_path(PERION, _at(-700, 0), _at(700, 0)) == []        # no ground for the map
+    assert g.walk_path(HENESYS, _at(-700, 3000), target) == []         # the ground cannot place the player
+    assert g.walk_path(HENESYS, None, target) == [] and g.walk_path(HENESYS, you, None) == []
+    assert g.walk_path("999999999", you, target) == []
+    assert "_ground_fallback_said" not in g.__dict__                   # the path says nothing in the log
+
+
 def _secret(kb):
     """Henesys to Snail Garden: one hidden teleport (hide01), or the walk through both hunting grounds; Perion only
     through Hunting Ground II's hidden teleport. Henesys' hidden way to Hunting Ground I is listed before its drawn

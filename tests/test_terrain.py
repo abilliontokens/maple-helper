@@ -1,5 +1,6 @@
 """The terrain walk model (maplehelper/terrain.py): which hidden teleports a real walk across
-a map takes, from hand-built ground only — no KB, no network, no site data.
+a map takes, and the walk itself step by step, from hand-built ground only — no KB, no
+network, no site data.
 
 Coordinates are map units with y growing downward, as in the module: a smaller y is a higher
 platform. `lr` entries are [x, y_a, y_b], the two ends of a rope or ladder (see the module
@@ -7,7 +8,7 @@ docstring for the measurements that reading comes from).
 """
 from dataclasses import dataclass
 
-from maplehelper.terrain import Walk
+from maplehelper.terrain import Step, Walk
 
 
 @dataclass(frozen=True)
@@ -384,3 +385,62 @@ def test_a_point_with_no_ground_below_within_reach_snaps_to_nothing():
     # nearest-span fallback either: the ground cannot say where the point is
     walk = Walk.of([[0, 200, 200, 200]], [])
     assert walk.pads((100, 0), (150, 200), []) is None
+
+
+def test_the_path_walks_the_ground_in_order_saying_how_each_step_was_made():
+    """Walk.path walks the very way Walk.pads names, a step per span it passes through: off the
+    start ledge by a fall east (the span below starts 20 past the drop, inside the drift), up one
+    tier by a jump onto the ledge 20 past that span's end, up the rope at x=390 to its top end,
+    the pad on to where it lands, and a walk along the fragment joined to that landing. Each step
+    says where the way met its span — where the player stands on the first, where the move onto it
+    lands in between (the pad's own landing on its own step), where the target lies on the last —
+    and how it got there, a pad naming itself."""
+    pad = Jump((450, -300), (650, -1000), "t007")
+    ground = [[0, 100, 100, 100],           # the ledge the player starts on
+              [120, 200, 260, 200],         # 100 below and 20 east of its end: a fall
+              [280, 140, 400, 140],         # one tier (60) up, 20 past that span's end: a jump
+              [380, -300, 500, -300],       # 440 up: only the rope gets there
+              [600, -1000, 760, -1000],     # where the pad lands, out of reach of everything else
+              [760, -1000, 900, -1000]]     # joined to it end to end: one walk on
+    walk = Walk.of(ground, [[390, 140, -300]])        # a rope at x=390, an end on each of those spans
+    steps = walk.path((10, 100), (880, -1000), [pad])
+    assert steps == [Step((10.0, 100.0), "walk", ""), Step((120.0, 200.0), "fall", ""),
+                     Step((280.0, 140.0), "jump", ""), Step((390.0, -300.0), "rope", ""),
+                     Step((650.0, -1000.0), "pad", "t007"), Step((880.0, -1000.0), "walk", "")]
+    assert [s.name for s in steps if s.kind == "pad"] == \
+           [p.name for p in walk.pads((10, 100), (880, -1000), [pad])]
+
+
+def test_the_paths_pads_are_the_pads_answer_in_the_same_order():
+    """The chain of two pads above, walked: the path's "pad" steps are those pads, in the order
+    taken, each where it lands (the last step is where the target lies, with the pad that got
+    there named on it). A way with no pad in it has a path all the same, never []: from where
+    the player stands to where the target is."""
+    first, second = Jump((40, 300), (40, 200), "t001"), Jump((160, 200), (160, 100), "t002")
+    walk = Walk.of([[0, 300, 200, 300], [0, 200, 200, 200], [0, 100, 200, 100]], [])
+    steps = walk.path((10, 300), (180, 100), [second, first])
+    assert [s for s in steps if s.kind == "pad"] == [Step((40.0, 200.0), "pad", "t001"),
+                                                     Step((180.0, 100.0), "pad", "t002")]
+    assert [s.name for s in steps if s.kind == "pad"] == \
+           [p.name for p in walk.pads((10, 300), (180, 100), [second, first])]
+    joined = Walk.of([[0, 100, 100, 100], [100, 100, 200, 100]], [])
+    assert joined.pads((10, 100), (190, 100), []) == []
+    assert joined.path((10, 100), (190, 100), []) == [Step((10.0, 100.0), "walk", ""),
+                                                      Step((190.0, 100.0), "walk", "")]
+
+
+def test_the_path_is_none_exactly_where_the_ground_cannot_answer():
+    """path says None in each case pads says None — an end the ground cannot place, and a target
+    no way reaches — and in none other, so a caller may read one off the other."""
+    walk = Walk.of([[0, 100, 200, 100]], [])
+    assert walk.pads((1000, 1000), (100, 100), []) is None     # the player off the ground
+    assert walk.path((1000, 1000), (100, 100), []) is None
+    assert walk.pads((100, 100), (1000, 1000), []) is None     # the target off the ground
+    assert walk.path((100, 100), (1000, 1000), []) is None
+    assert walk.path(None, (100, 100), []) is None
+    # the ledge 140 up is past a jump and no rope reaches it: no way at all until its pad is offered
+    pad = Jump((50, 300), (50, 160), "t001")
+    steep = Walk.of([[0, 300, 200, 300], [0, 160, 200, 160]], [])
+    assert steep.pads((10, 300), (150, 160), []) is None and steep.path((10, 300), (150, 160), []) is None
+    assert steep.path((10, 300), (150, 160), [pad]) == [Step((10.0, 300.0), "walk", ""),
+                                                        Step((150.0, 160.0), "pad", "t001")]

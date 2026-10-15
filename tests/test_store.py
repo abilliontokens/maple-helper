@@ -10,6 +10,14 @@ def test_settings_defaults_and_persistence(isolated_store):
     assert isolated_store.Settings()["language"] == "en"
 
 
+def test_the_navigation_settings_start_on(isolated_store):
+    """The arrow guides the whole way, counts the maps left and draws the walking path on the game's minimap, and the
+    app's own map window draws the hidden teleports as arrows: all four on for a new player."""
+    s = isolated_store.Settings()
+    assert s["minimap_route_follow"] is True and s["minimap_route_steps"] is True
+    assert s["minimap_path_line"] is True and s["map_teleport_arrows"] is True
+
+
 def test_settings_keep_new_defaults_for_old_files(isolated_store):
     isolated_store.Settings.path.write_text('{"language": "he"}', encoding="utf-8")
     s = isolated_store.Settings()

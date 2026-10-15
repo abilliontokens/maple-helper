@@ -350,22 +350,26 @@ class _Hint(QLabel):
 
 class _SettingsPanel(QWidget):
     """The bar's ⚙ panel, one card in the same glass over the game, its sections in two columns read from the
-    leading edge (mirrored in Hebrew). The first holds the bar's own look and settings. Look: the glass colour of
-    every window over the game as tiles of each tint and the lit buttons' accent as dots, the picked one ringed and
-    named; Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead of words, and
-    the bar's show/hide key in the same key box Settings has. The second holds the way and the minimap. Directions:
-    Cabs & Teleports, whether the way to a found NPC or map rides cabs and NPC teleports or walks, and Hidden teleport
-    routes, whether it may take the invisible teleports (the blue dots) when they make it shorter (the bar's
-    rides_toggled: a way shown is found again); Minimap: the hidden portals' blue dots and the route's arrow on the
-    game's minimap, the arrow's colour as dots (the picked one ringed and named), its size on a slider in whole
-    pixels, the name beside it (the map its portal leads to, or the NPC to talk to) and whether it flashes, a notice
-    on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the windows over
-    the game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it in the row's
-    tooltip (_Hint). Each choice is written, applies at once and stays; "Reset to default look", under both columns,
-    puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like the search
-    window it takes the keyboard only then, never on opening). Side by side the sections fit a 1080p screen at 125 %
-    (about 800 px of room) whole; on a screen shorter than they need they scroll under the title row, which stays put
-    to drag the panel by and close it."""
+    leading edge (mirrored in Hebrew). The first holds the bar's own look and settings and navigation. Look: the
+    glass colour of every window over the game as tiles of each tint and the lit buttons' accent as dots, the picked
+    one ringed and named; Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead
+    of words, and the bar's show/hide key in the same key box Settings has; Navigation, under a head of its own:
+    whether the arrow guides the whole way across maps, whether it says how many maps are left, whether the walking
+    path is drawn on the game's minimap, and whether Maple Helper's own map window draws each hidden teleport as an
+    arrow to where it lands — down this column, where there is room, rather than under the arrow's own switches,
+    which left the second one scrolling on a 1080p screen. The second holds the way and the minimap. Directions:
+    Cabs & Teleports, whether the way to a found NPC or map rides cabs and NPC teleports or walks, and Hidden
+    teleport routes, whether it may take the invisible teleports (the blue dots) when they make it shorter (the
+    bar's rides_toggled: a way shown is found again); Minimap: the hidden portals' blue dots and the route's arrow
+    on the game's minimap, the arrow's colour as dots (the picked one ringed and named), its size on a slider in
+    whole pixels, the name beside it (the map its portal leads to, or the NPC to talk to) and whether it flashes, a
+    notice on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the
+    windows over the game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it
+    in the row's tooltip (_Hint). Each choice is written, applies at once and stays; "Reset to default look", under
+    both columns, puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like
+    the search window it takes the keyboard only then, never on opening). Side by side the sections fit a 1080p
+    screen at 125 % (about 800 px of room) whole; on a screen shorter than they need they scroll under the title
+    row, which stays put to drag the panel by and close it."""
 
     changed = Signal()          # a look choice applied: every window over the game follows (app.py wires it)
     hotkey_changed = Signal()   # the bar's key picked or cleared here: the app binds the new one
@@ -460,6 +464,22 @@ class _SettingsPanel(QWidget):
         row.addWidget(self._hotkey, 0, Qt.AlignVCenter)
         col.addLayout(row)
         self._hotkey_hint = self._hint(col)
+        # Navigation: the arrow guiding the whole way across maps rather than one step, how many maps are left said
+        # beside it, the walking path drawn on the game's minimap, and — the odd one out, so its label names the
+        # window — the teleport arrows on Maple Helper's own map window. Their own head, and down this column: four
+        # more rows under the arrow's own switches left the second column scrolling on a 1080p screen at 125 %,
+        # where this one had room to spare.
+        self._nav_head = self._section(col)
+        (self._route_follow_label, self._route_follow,
+         self._route_follow_hint) = self._switch_row(col, self._pick_route_follow)
+        col.addSpacing(10)
+        # the three under it say all there is to say in their labels: no hint line of their own
+        self._route_steps_label, self._route_steps, _ = self._switch_row(col, self._pick_route_steps, hint=False)
+        col.addSpacing(10)
+        self._path_line_label, self._path_line, _ = self._switch_row(col, self._pick_path_line, hint=False)
+        col.addSpacing(10)
+        (self._teleport_arrows_label, self._teleport_arrows,
+         _) = self._switch_row(col, self._pick_teleport_arrows, hint=False)
         col.addStretch(1)                           # (the shorter column's rows stay at its top)
         # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button), and
         # whether it may take the invisible teleports (the blue dots) where they make it shorter
@@ -554,8 +574,9 @@ class _SettingsPanel(QWidget):
         col.addWidget(lb)
         return lb
 
-    def _switch_row(self, col, picked) -> tuple[QLabel, _GlassSwitch, _Hint]:
-        """A label at the leading edge, its switch at the trailing one (a click: picked), and its hint under them."""
+    def _switch_row(self, col, picked, hint: bool = True) -> tuple[QLabel, _GlassSwitch, _Hint | None]:
+        """A label at the leading edge, its switch at the trailing one (a click: picked), and its hint under them;
+        hint=False leaves the row without one, for a label that says all there is to say."""
         row = QHBoxLayout()
         row.setSpacing(12)
         label, switch = QLabel(objectName="Label"), _GlassSwitch()
@@ -564,7 +585,7 @@ class _SettingsPanel(QWidget):
         row.addWidget(label, 1)
         row.addWidget(switch, 0, Qt.AlignVCenter)
         col.addLayout(row)
-        return label, switch, self._hint(col)
+        return label, switch, (self._hint(col) if hint else None)
 
     def _swatches(self, kind: str, presets: dict, colour_of, picked, spacing: int = 0) -> QWidget:
         """A row of colours, one per preset, across its column's width: tiles side by side (spacing), or dots spread
@@ -599,7 +620,8 @@ class _SettingsPanel(QWidget):
         self._close.setAccessibleName(t("tbs_close"))
         self._close.setToolTip(t("tbs_close"))
         for lb, key in ((self._look_head, "tbs_look"), (self._opacity_head, "tbs_opacity_head"),
-                        (self._bar_head, "tbs_bar"), (self._way_head, "tbs_way"), (self._minimap_head, "tbs_minimap")):
+                        (self._bar_head, "tbs_bar"), (self._way_head, "tbs_way"), (self._minimap_head, "tbs_minimap"),
+                        (self._nav_head, "tbs_navigation")):
             lb.setText(bidi.plain(t(key) if rtl else t(key).upper(), rtl))
         tint = s["overlay_tint"] if s["overlay_tint"] in TINTS else next(iter(TINTS))      # a stale name: today's
         accent_key = s["overlay_accent"] if s["overlay_accent"] in ACCENTS else next(iter(ACCENTS))
@@ -618,7 +640,11 @@ class _SettingsPanel(QWidget):
                         (self._arrow_label_label, "tbs_arrow_label"),
                         (self._arrow_flash_label, "tbs_arrow_flash"),
                         (self._arrival_label, "tbs_arrival"),
-                        (self._overlay_shots_label, "overlays_in_screenshots")):
+                        (self._overlay_shots_label, "overlays_in_screenshots"),
+                        (self._route_follow_label, "set_route_follow"),
+                        (self._route_steps_label, "set_route_steps"),
+                        (self._path_line_label, "set_path_line"),
+                        (self._teleport_arrows_label, "set_teleport_arrows")):
             lb.setText(bidi.plain(t(key), rtl))
         # each row's hint: its first sentence on the line under the row, all of it in the tooltip of that line, of the
         # row's label and of its control (the key box keeps its own: how to pick a key)
@@ -634,7 +660,8 @@ class _SettingsPanel(QWidget):
                 (self._arrow_flash_hint, "tbs_arrow_flash_hint", self._arrow_flash_label, self._arrow_flash),
                 (self._arrival_hint, "tbs_arrival_hint", self._arrival_label, self._arrival),
                 (self._overlay_shots_hint, "overlays_in_screenshots_hint", self._overlay_shots_label,
-                 self._overlay_shots)):
+                 self._overlay_shots),
+                (self._route_follow_hint, "set_route_follow_tip", self._route_follow_label, self._route_follow)):
             # Hebrew: two pixels' room at the right, where a line as wide as the column drew its first letter past
             # the label's edge, cut off (the line is measured in whole pixels, the glyphs overhang)
             hint.setContentsMargins(0, 0, 2 if rtl else 0, 0)
@@ -666,7 +693,7 @@ class _SettingsPanel(QWidget):
         self._hotkey.set_key(s["game_toolbar_hotkey"])
         self._hotkey.set_accent(accent)
         self._hotkey.set_label(t("tb_hotkey"))
-        # Directions' and the Minimap's switches: each on from its setting, named as its label
+        # Directions', the Minimap's and Navigation's switches: each on from its setting, named as its label
         for switch, key, name in ((self._rides, "game_rides", "tb_rides"),
                                   (self._hidden_routes, "route_hidden_teleports", "tb_hidden_routes"),
                                   (self._hidden_portals, "minimap_hidden_portals", "minimap_hidden_portals"),
@@ -674,7 +701,11 @@ class _SettingsPanel(QWidget):
                                   (self._arrow_label, "minimap_arrow_label", "tbs_arrow_label"),
                                   (self._arrow_flash, "minimap_arrow_flash", "tbs_arrow_flash"),
                                   (self._arrival, "minimap_arrival_notice", "tbs_arrival"),
-                                  (self._overlay_shots, "overlays_in_screenshots", "overlays_in_screenshots")):
+                                  (self._overlay_shots, "overlays_in_screenshots", "overlays_in_screenshots"),
+                                  (self._route_follow, "minimap_route_follow", "set_route_follow"),
+                                  (self._route_steps, "minimap_route_steps", "set_route_steps"),
+                                  (self._path_line, "minimap_path_line", "set_path_line"),
+                                  (self._teleport_arrows, "map_teleport_arrows", "set_teleport_arrows")):
             switch.setChecked(bool(s[key]))
             switch.set_accent(accent)
             switch.setAccessibleName(t(name))
@@ -837,6 +868,28 @@ class _SettingsPanel(QWidget):
         captures or stays out of them at once (minimap_toggled: the app's _apply_overlay_capture)."""
         self._settings["overlays_in_screenshots"] = self._overlay_shots.isChecked()
         self._bar.minimap_toggled.emit()
+
+    def _pick_route_follow(self, _=False) -> None:
+        """Guiding the whole way: written, and the arrow either keeps leading map after map, re-pointing on each new
+        read and working the way out again after a wrong portal, or leads one step only (minimap_toggled)."""
+        self._settings["minimap_route_follow"] = self._route_follow.isChecked()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_route_steps(self, _=False) -> None:
+        """How many maps are left: written, and the count comes or goes beside the arrow (minimap_toggled)."""
+        self._settings["minimap_route_steps"] = self._route_steps.isChecked()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_path_line(self, _=False) -> None:
+        """The walking path on the game's minimap: written, and the line the ground model works out is drawn there or
+        not (minimap_toggled)."""
+        self._settings["minimap_path_line"] = self._path_line.isChecked()
+        self._bar.minimap_toggled.emit()
+
+    def _pick_teleport_arrows(self, _=False) -> None:
+        """The teleport arrows on Maple Helper's own map window: written only. No minimap_toggled: nothing over the
+        game changes, and the map window takes the setting the next time it draws."""
+        self._settings["map_teleport_arrows"] = self._teleport_arrows.isChecked()
 
     def _reset_look(self, _=False) -> None:
         """The look the app starts with: today's dark glass, green accent, 85 % and words on the buttons."""

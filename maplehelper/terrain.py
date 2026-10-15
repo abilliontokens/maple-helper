@@ -4,7 +4,8 @@
 minimap picture. On a platform maze that line is a lie: the player cannot walk it, and the pads
 are how the map is crossed at all. This module is the honest version. Given a map's footholds
 and ropes (NiaMeowDB's terrain for the map, stored in the KB's terrain.json) and the map's
-hidden teleports, `Walk.pads` names the teleports the cheapest real walk uses, in order.
+hidden teleports, `Walk.pads` names the teleports the cheapest real walk uses, in order, and
+`Walk.path` gives that very walk step by step.
 
 Qt-free and KB-free on purpose: the caller (`routes.Graph`) owns reading terrain.json, turning
 picture fractions into map units, and falling back to its straight-line heuristic when this
@@ -279,12 +280,31 @@ best of three 2000-query runs, this machine, with the rope-end prices in): the
 landing 0.690 ms and 0.695 ms, the three-pad chain from (-1191, -220) 0.512 ms and
 0.504 ms, and standing at the target itself 0.017 ms and 0.018 ms — at most 0.02 ms
 on the largest map, which is inside the spread between runs.
+
+`path` reads that same search out as the way itself, step by step — one point per span the
+way passes through, how the way got onto it, and a pad's name where a pad did — so `pads`
+is `path`'s teleports and neither answer costs a second search. What each move is (a walk,
+a fall, a rope, a jump up) and where it lands on the span it reaches are worked out once
+per map, while the edges are built, so a query reads them off rather than deriving them,
+and a query that asks for no way back — every `pads` query — never even reads the way's
+spans. Timed on Utah's Pig Farm against the live KB (2026-10-15, best of five 2000-query
+runs, both models built from the same ground in one process): the three-pad chain from
+(-1191, -220) cost 0.545 ms before this and 0.536 ms after, the (140, -493) tie 0.755 ms
+and 0.758 ms, standing at the target itself 0.020 ms and 0.020 ms — the difference is
+inside the spread between runs, and the after side is the faster one as often as not.
+Building a map's model keeps one tuple per edge where it kept a float, which costs it about
+the same or a little more (60.7 ms against 64.4 ms for that map's 355 spans on the quietest
+run, the two indistinguishable on busier ones), once per map. KB-wide (115 maps with ground,
+33,899 queries from span middles toward each map's pad landings) `pads` answers exactly what
+it answered before, and each of the 33,464 ways it answers has a path whose pads are that
+answer.
 """
 from __future__ import annotations
 
 import heapq
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 # a foothold stands a player up when its rise over its run is at most this (see rule 1 above)
 STAND_SLOPE = 1.0
@@ -439,8 +459,18 @@ def _segments_properly_cross(ax: float, ay: float, bx: float, by: float,
         ((d3 > 1e-9 and d4 < -1e-9) or (d3 < -1e-9 and d4 > 1e-9))
 
 
+class Step(NamedTuple):
+    """One point of a walk (`Walk.path`): where the way meets one span, in map units; how it
+    got there ("walk", "fall", "rope", "jump" or "pad"); and the teleport's name on a "pad"
+    step, "" on every other."""
+
+    at: tuple[float, float]
+    kind: str
+    name: str
+
+
 class Walk:
-    """One map's walkable ground, built once (`Walk.of`) and asked per query (`pads`)."""
+    """One map's walkable ground, built once (`Walk.of`) and asked per query (`pads`, `path`)."""
 
     def __init__(self, fh, lr):
         self._spans: list[_Span] = []
@@ -469,14 +499,17 @@ class Walk:
         for i, w in enumerate(self._walls):
             for b in range(math.floor(w.x0 / _BIN), math.floor(w.x1 / _BIN) + 1):
                 self._walls_by_x.setdefault(b, []).append(i)
-        edges: list[dict[int, float]] = [dict() for _ in self._spans]
+        # every move from a span: what it costs, what kind of move it is, and where on the span
+        # it reaches it lands — the kind and the landing worked out once here, while the edges
+        # are built, so that `path` costs a query nothing (`_base` is what a query reads)
+        edges: list[dict[int, tuple[float, str, tuple[float, float]]]] = [dict() for _ in self._spans]
         self._edges = edges
         self._join_fragments()
         self._platform_of = self._joined_platforms()
         self._join_ropes(lr or [])
         self._join_falls()
         self._join_jumps()
-        self._base = [sorted(e.items()) for e in edges]
+        self._base = [sorted((j, move[0]) for j, move in e.items()) for e in edges]
         self._snapped: dict[tuple, tuple[int, int] | None] = {}
 
     @classmethod
@@ -513,13 +546,13 @@ class Walk:
 
     # ------------------------------------------------------------ building
 
-    def _add(self, i: int, j: int, cost: float, both: bool = True) -> None:
+    def _add(self, i: int, j: int, cost: float, kind: str, at: tuple[float, float]) -> None:
+        """Keep the cheapest move from span i to span j, with what kind of move it is and where
+        on j it lands (`path`'s point for j when the way takes this move)."""
         if i == j:
             return
-        if cost < self._edges[i].get(j, math.inf):
-            self._edges[i][j] = cost
-        if both and cost < self._edges[j].get(i, math.inf):
-            self._edges[j][i] = cost
+        if cost < self._edges[i].get(j, (math.inf,))[0]:
+            self._edges[i][j] = (cost, kind, at)
 
     def _near(self, x_lo: float, x_hi: float) -> list[int]:
         """The spans covering any of the x-bins between two x values, each once."""
@@ -591,8 +624,8 @@ class Walk:
                                    for w in (self._walls[k] for k in
                                              self._near_walls(min(px, qx), max(px, qx))))):
                         continue    # a wall stands on the join: not one walk (rule 2)
-                    self._add(i, j, self._spans[j].width, both=False)
-                    self._add(j, i, s.width, both=False)
+                    self._add(i, j, self._spans[j].width, "walk", (qx, qy))
+                    self._add(j, i, s.width, "walk", (px, py))
 
     def _join_ropes(self, lr) -> None:
         """Every span a rope crosses, ends near, or passes beside joins every other, both
@@ -614,13 +647,15 @@ class Walk:
                 y = s.y_at(near_x)
                 side = abs(x - near_x)
                 if side <= ROPE_X_DIST and top - ROPE_END_DIST <= y <= bottom + ROPE_END_DIST:
-                    joined.append((i, y, 0.5))    # crossed, or within a jump past an end
+                    joined.append((i, near_x, y, 0.5))   # crossed, or within a jump past an end
                 elif side <= ROPE_SIDE_DIST and top <= y <= bottom:
                     # passed beside, between the ends: a jump on or off sideways (rule 5)
-                    joined.append((i, y, JUMP_EFFORT + side))
-            for a, (i, yi, ci) in enumerate(joined):
-                for j, yj, cj in joined[a + 1:]:
-                    self._add(i, j, abs(yi - yj) * CLIMB_WEIGHT + ci + cj)
+                    joined.append((i, near_x, y, JUMP_EFFORT + side))
+            for a, (i, xi, yi, ci) in enumerate(joined):
+                for j, xj, yj, cj in joined[a + 1:]:
+                    cost = abs(yi - yj) * CLIMB_WEIGHT + ci + cj
+                    self._add(i, j, cost, "rope", (xj, yj))
+                    self._add(j, i, cost, "rope", (xi, yi))
 
     def _join_falls(self) -> None:
         """From each probe point along a span, a one-way cheap drop to the first span below
@@ -645,7 +680,7 @@ class Walk:
                         below.append((yb, j, xb))
                 for yb, j, xb in sorted(below):
                     if not self._wall_crosses(xa, ya, xb, yb):
-                        self._add(i, j, FALL_COST + abs(xb - xa), both=False)
+                        self._add(i, j, FALL_COST + abs(xb - xa), "fall", (xb, yb))
                         break
 
     def _join_jumps(self) -> None:
@@ -662,8 +697,11 @@ class Walk:
                     continue
                 overlap_lo, overlap_hi = max(lo.x0, hi.x0), min(lo.x1, hi.x1)
                 if overlap_lo <= overlap_hi:
-                    rise = min(lo.y_at(overlap_lo) - hi.y_at(overlap_lo),
-                               lo.y_at(overlap_hi) - hi.y_at(overlap_hi))
+                    rise_lo = lo.y_at(overlap_lo) - hi.y_at(overlap_lo)
+                    rise_hi = lo.y_at(overlap_hi) - hi.y_at(overlap_hi)
+                    # the lowest rise on offer is the jump, and its end of the overlap is
+                    # where the player lands (`path`'s point for the higher span)
+                    rise, land = (rise_lo, overlap_lo) if rise_lo <= rise_hi else (rise_hi, overlap_hi)
                     drift = 0.0
                 else:
                     drift = overlap_lo - overlap_hi
@@ -671,9 +709,9 @@ class Walk:
                         continue    # past the drift: no jump lands there (rule 5)
                     near_lo = lo.x1 if hi.x0 > lo.x1 else lo.x0
                     near_hi = hi.x0 if hi.x0 > lo.x1 else hi.x1
-                    rise = lo.y_at(near_lo) - hi.y_at(near_hi)
+                    rise, land = lo.y_at(near_lo) - hi.y_at(near_hi), near_hi
                 if 1.0 < rise <= JUMP_HEIGHT:
-                    self._add(i, j, JUMP_EFFORT + rise + drift, both=False)
+                    self._add(i, j, JUMP_EFFORT + rise + drift, "jump", (land, hi.y_at(land)))
 
     # ------------------------------------------------------------ asking
 
@@ -719,18 +757,12 @@ class Walk:
             self._snapped[key] = (frm, to) if frm is not None and to is not None else None
         return self._snapped[key]
 
-    def pads(self, you, target, jumps) -> list | None:
-        """The hidden teleports the cheapest real walk from `you` to `target` takes, in the
-        order taken: the very objects passed in `jumps` (each with `.frm`, `.to` and `.name`,
-        all in map units). The cheapest pad-using way is returned when it beats the
-        cheapest pad-free way, and also when it only ties it within the model's
-        resolution (rule 9) — either way only while every pad in it carries the
-        player forward (rule 10); [] when every pad-using way loses by more than
-        that, when the cheapest one only lands the player where they already
-        effectively stand, or when none reaches at all — no teleport is worth
-        taking. None when either end cannot be snapped to the ground, or no walk
-        reaches the target at all: the ground cannot answer, and the caller falls
-        back to its own heuristic."""
+    def _ways(self, you, target, jumps):
+        """One search from `you` to `target`, the single answer behind both `pads` and `path`:
+        (the span `you` stands on, the span `target` stands on, how each state was reached,
+        what the pad-free way settled at the goal, what the pad-using way settled at it, and
+        what the pad-free way settled at, span by span). None when the ground cannot answer:
+        either end off the ground, or no way reaching the target at all."""
         if you is None or target is None:
             return None
         start, goal = self._snap(you), self._snap(target)
@@ -791,30 +823,110 @@ class Walk:
                     best[state], came[state] = key, ((here, used), jump)
                     n += 1
                     heapq.heappush(queue, (key, n, nxt, 1))
+        if free is None and pad_cost is None:
+            return None
+        return start, goal, came, free, pad_cost, reached
+
+    @staticmethod
+    def _chain(came, start: int, goal: int, used: int, whole: bool) -> tuple[list[tuple[int, object]], list]:
+        """A way settled by `_ways`, read back out of its search: its teleports in the order
+        taken, and — only where `whole` asks for it, since `pads` has no use for it and does
+        not pay for it — every span of the way with the teleport that landed on it (None where
+        a walk, a rope, a fall or a jump up did), in the order walked. One step per span of the
+        way, and nothing at all to a query that never asks for a way back."""
+        spans: list[tuple[int, object]] = []
+        out: list = []
+        at = (goal, used)
+        while at != (start, 0):
+            came_from, jump = came[at]
+            if whole:
+                spans.append((at[0], jump))
+            if jump is not None:
+                out.append(jump)
+            at = came_from
+        if whole:
+            spans.append((start, None))
+            spans.reverse()
+        out.reverse()
+        return spans, out
+
+    def _loops(self, out: list, free: float, reached: dict[int, float]) -> bool:
+        """Rule 10: a pad is worth naming only where taking it carries the player forward.
+        What remains of the walk from a span is the whole pad-free way less what reaching
+        that span pad-free cost — settled in `_ways`' first layer — so a landing the walk
+        reaches for no more than the band (rule 9) leaves as much walk as the player already
+        faces where they stand: the pad puts them back where they effectively are, and its
+        way is the pad-free way with a loop bolted on. No teleport in such a way is worth
+        taking. A landing the first layer never settles is past the band and carries the
+        player on."""
+        band = MODEL_RESOLUTION * free
+        for jump in out:
+            landed = reached.get(self._snap_jump(jump)[1])
+            if landed is not None and landed <= band:
+                return True
+        return False
+
+    def _taken(self, found, whole: bool) -> tuple[list[tuple[int, object]], list]:
+        """The way `pads` names, out of one search's answer: its teleports in the order taken,
+        and its spans with the teleport that landed on each where `whole` asks for them (what
+        `path` reads). The pad-using way when one settled at the goal — outright cheapest (it
+        settled before the pad-free way), the only way there, or within the band (rule 9) —
+        and every pad in it carries the player forward (rule 10); else the pad-free way, with
+        no pads. Where no pad-free way reaches the goal at all there is nothing to measure the
+        pad way against, and it stands."""
+        start, goal, came, free, pad_cost, reached = found
         if pad_cost is not None:
-            # a pad-using way settled at the goal: outright cheapest (it settled
-            # before the pad-free way), the only way there, or within the band
-            out, at = [], (goal, 1)
-            while at != (start, 0):
-                at, jump = came[at][0], came[at][1]
-                if jump is not None:
-                    out.append(jump)
-            # rule 10: a pad is worth naming only where taking it carries the player
-            # forward. What remains of the walk from a span is the whole pad-free
-            # way less what reaching that span pad-free cost — settled right here in
-            # the first layer — so a landing the walk reaches for no more than the
-            # band (rule 9) leaves as much walk as the player already faces where
-            # they stand: the pad puts them back where they effectively are, and its
-            # way is the pad-free way with a loop bolted on. No teleport in it is
-            # worth taking. A landing the first layer never settles is past the band
-            # and carries the player on; where no pad-free way reaches the goal at
-            # all there is nothing to measure against and the pad way is the only
-            # way there, so it stands.
-            if free is not None:
-                band = MODEL_RESOLUTION * free
-                for jump in out:
-                    landed = reached.get(self._snap_jump(jump)[1])
-                    if landed is not None and landed <= band:
-                        return []
-            return out[::-1]
-        return [] if free is not None else None
+            spans, out = self._chain(came, start, goal, 1, whole)
+            if free is None or not self._loops(out, free, reached):
+                return spans, out
+        return self._chain(came, start, goal, 0, whole)[0], []
+
+    def pads(self, you, target, jumps) -> list | None:
+        """The hidden teleports the cheapest real walk from `you` to `target` takes, in the
+        order taken: the very objects passed in `jumps` (each with `.frm`, `.to` and `.name`,
+        all in map units). The cheapest pad-using way is returned when it beats the
+        cheapest pad-free way, and also when it only ties it within the model's
+        resolution (rule 9) — either way only while every pad in it carries the
+        player forward (rule 10); [] when every pad-using way loses by more than
+        that, when the cheapest one only lands the player where they already
+        effectively stand, or when none reaches at all — no teleport is worth
+        taking. None when either end cannot be snapped to the ground, or no walk
+        reaches the target at all: the ground cannot answer, and the caller falls
+        back to its own heuristic. These are the pads of `path`, which walks the
+        very same way."""
+        found = self._ways(you, target, jumps)
+        return None if found is None else self._taken(found, False)[1]
+
+    def path(self, you, target, jumps) -> list[Step] | None:
+        """The way `pads` names, walked step by step: one Step per span the way passes through,
+        in the order walked, out of the same single search (`_ways`) that answers `pads`.
+
+        A Step's `at` is where the way meets that span, in map units: where the player stands
+        on the first span, where the target lies on the last, and in between where the move
+        onto the span lands — a teleport's own landing point (`Jump.to`, the point the map
+        draws it landing on), the rope's x at the span's height, the spot a fall or a jump up
+        comes down on, the join a walk crosses. `kind` is how the way got there ("walk",
+        "fall", "rope", "jump" or "pad"; the first span's is a "walk", nothing having got the
+        player there), and `name` is the teleport's name on a "pad" step, "" on every other.
+
+        The "pad" steps carry exactly `pads`' teleports, in the same order. None exactly when
+        `pads` returns None — the ground cannot answer — and never []: a way with no pad in it
+        still has a path, and a player standing where they are going has one step."""
+        found = self._ways(you, target, jumps)
+        if found is None:
+            return None
+        chain = self._taken(found, True)[0]
+        last = len(chain) - 1
+        steps: list[Step] = []
+        for n, (span, jump) in enumerate(chain):
+            if n == 0:
+                kind, name, at = "walk", "", self._spans[span].closest(float(you[0]), float(you[1]))
+            elif jump is not None:
+                kind, name, at = "pad", jump.name, (float(jump.to[0]), float(jump.to[1]))
+            else:
+                _, kind, at = self._edges[chain[n - 1][0]][span]
+                name = ""
+            if n == last:
+                at = self._spans[span].closest(float(target[0]), float(target[1]))
+            steps.append(Step(at, kind, name))
+        return steps

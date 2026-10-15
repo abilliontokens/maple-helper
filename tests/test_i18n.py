@@ -57,11 +57,26 @@ def test_telemetry_hint_names_what_is_sent():
 
 
 @pytest.mark.parametrize("key,kw", [("news_btn_new", {}), ("spot_crowd", {}), ("craft_head_all", {"prof": "Smithing"}),
+                                    ("arrow_maps_left", {}),
                                     ("shop_status", {"ago": "now"})])
 def test_a_count_of_one_reads_as_one(key, kw):
     """"1 חדשות", "1 items": a count that can be 1 has its own "_one" string (the audit, HEB-8)."""
     assert f"{key}_one" in STRINGS and "1 " not in I18n("he")(key, n=1, **kw)
     assert I18n("en")(key, n=1, **kw) == STRINGS[f"{key}_one"]["en"].format(n=1, **kw)
+
+
+@pytest.mark.parametrize("key", ["set_route_follow", "set_route_follow_tip", "set_route_steps", "set_path_line",
+                                 "set_teleport_arrows", "tbs_navigation", "arrow_maps_left", "arrow_maps_left_one",
+                                 "route_off_track", "map_teleport_legend"])
+def test_the_navigation_strings_are_there_in_both_languages(key):
+    """The ⚙ panel's navigation switches, the words beside the arrow (how many maps are left, and the one when the
+    way was worked out again from where the player stands) and the map window's teleport legend."""
+    assert STRINGS[key]["he"] and STRINGS[key]["en"]
+
+
+def test_the_maps_left_count_carries_it():
+    assert "{n}" in STRINGS["arrow_maps_left"]["he"] and "{n}" in STRINGS["arrow_maps_left"]["en"]
+    assert "{n}" not in STRINGS["arrow_maps_left_one"]["he"] and "{n}" not in STRINGS["arrow_maps_left_one"]["en"]
 
 
 def test_votes_read_right():

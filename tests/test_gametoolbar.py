@@ -959,6 +959,46 @@ def test_the_minimap_switches_are_in_the_gear_panel_and_signal_the_app(bar):
     assert all(b._accent == QColor(npcoverlay.ACCENTS["blue"][1]) for b in switches)
 
 
+def test_the_navigation_switches_sit_under_their_own_head_in_the_gear_panel(bar):
+    """The ⚙ panel's Navigation section, under a head of its own: guiding the whole way (with its hint under it),
+    how many maps are left, the walking path on the game's minimap, and — named for Maple Helper's own map window,
+    not the game's minimap — the teleport arrows there. All four on at first, down the first column under the
+    Toolbar section: beneath the arrow's own switches they left the second column taller than a 1080p screen at
+    125 % has room for, and the panel scrolled. Each click writes its setting; the three minimap ones say so with
+    the bar's minimap_toggled, while the map window's changes nothing over the game and stays quiet. A setting
+    changed elsewhere is back on its switch at the next refresh."""
+    w, s = bar
+    seen = []
+    w.minimap_toggled.connect(lambda: seen.append(True))
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    keys = ("minimap_route_follow", "minimap_route_steps", "minimap_path_line", "map_teleport_arrows")
+    switches = (p._route_follow, p._route_steps, p._path_line, p._teleport_arrows)
+    labels = (p._route_follow_label, p._route_steps_label, p._path_line_label, p._teleport_arrows_label)
+    names = ["Guide the whole way", "How many maps are left", "Walking path on the minimap",
+             "Teleport arrows on Maple Helper's map"]
+    assert p._nav_head.text() == "NAVIGATION"
+    assert [lb.text() for lb in labels] == names
+    assert [b.accessibleName() for b in switches] == names
+    assert [b.isChecked() for b in switches] == [True, True, True, True]
+    # down the first column (English: the left one), under the key box, not the second one
+    assert {_column(p, c) for c in (p._nav_head,) + labels} == {0} and _from_the_top(p, p._hotkey_hint, p._nav_head)
+    assert "wrong portal" in p._route_follow_hint.text()
+    p._route_follow.click()
+    assert s["minimap_route_follow"] is False and len(seen) == 1
+    p._route_steps.click()
+    assert s["minimap_route_steps"] is False and len(seen) == 2
+    p._path_line.click()
+    assert s["minimap_path_line"] is False and len(seen) == 3
+    p._teleport_arrows.click()
+    assert s["map_teleport_arrows"] is False and len(seen) == 3     # the app's own window: nothing over the game
+    for key in keys:
+        s[key] = True
+    w.refresh()                         # changed elsewhere: each switch follows
+    assert [b.isChecked() for b in switches] == [True, True, True, True]
+
+
 def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_signal_the_app(bar):
     """Under the route arrow's switch: its colour as dots (orange at first, the picked one ringed in itself and named
     beside its label), its size on a slider in whole pixels (22 at first, its px beside its label), the name beside

@@ -1134,10 +1134,26 @@ STRINGS = {
               "minimap's edge pointing the way when that step is off the part shown. It lights up on its own when "
               "you open a map in the Maps search or its ◎ window."},
     "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
+    # the ⚙ panel's navigation switches (store.py minimap_route_follow, minimap_route_steps, minimap_path_line) and
+    # the map window's own (map_teleport_arrows)
+    "set_route_follow": {"he": "ליווי לאורך כל הדרך", "en": "Guide the whole way"},
+    "set_route_follow_tip": {
+        "he": "החץ ממשיך להוביל גם אחרי שעברתם למפה הבאה, ואם נכנסתם לפורטל הלא נכון הוא מחשב את הדרך מחדש "
+              "מהמקום שאתם עומדים בו.",
+        "en": "The arrow keeps leading after each new map, and if you take a wrong portal it works the way out again "
+              "from where you stand."},
+    "set_route_steps": {"he": "כמה מפות נשארו", "en": "How many maps are left"},
+    "set_path_line": {"he": "קו ההליכה במיני-מפה", "en": "Walking path on the minimap"},
+    "set_teleport_arrows": {"he": "חצי טלפורט במפה של Maple Helper", "en": "Teleport arrows on Maple Helper's map"},
     # the name beside the route's arrow on the game's minimap (ui/portaldots.py): what to click there
     "arrow_tag_portal": {"he": "{name} ←", "en": "→ {name}"},
     "arrow_tag_hidden": {"he": "{name} ⚡", "en": "⚡ {name}"},
     "arrow_tag_npc": {"he": "{name} 💬", "en": "💬 {name}"},
+    # ... how many maps are still to go, beside it (minimap_route_steps)
+    "arrow_maps_left": {"he": "עוד {n} מפות", "en": "{n} maps to go"},
+    "arrow_maps_left_one": {"he": "המפה האחרונה", "en": "Last map"},
+    # ... and the word when a wrong portal was taken and the way was worked out again from where the player stands
+    "route_off_track": {"he": "ירדתם מהדרך — חישבתי אותה מחדש מכאן", "en": "Off the way — worked it out again from here"},
     # ... and the word when the map it points to is reached (the arrow goes with it)
     "route_arrived": {"he": "הגעתם — {name}", "en": "You're there — {name}"},
     "route_arrived_body": {"he": "חץ המסלול כבה.", "en": "The route arrow is off."},
@@ -1426,6 +1442,8 @@ STRINGS = {
     "legend_you": {"he": "אתם כאן", "en": "You are here"},
     "legend_portal": {"he": "הפורטל", "en": "The portal"},
     "legend_npc": {"he": "ה-NPC", "en": "The NPC"},
+    # the teleport arrows the map window draws, each from its pad to where it lands (map_teleport_arrows)
+    "map_teleport_legend": {"he": "טלפורט נסתר ולאן הוא מוביל", "en": "Hidden teleport and where it lands"},
     "route_here_already": {"he": "אתם כבר כאן.", "en": "You're already here."},
     "card_item_details": {"he": "פרטי הפריט: נתונים, מי מפיל אותו, Nia Notes",
                           "en": "Item details: stats, who drops it, Nia Notes"},
@@ -2512,6 +2530,8 @@ STRINGS = {
     "tbs_bar": {"he": "הסרגל", "en": "Toolbar"},
     "tbs_way": {"he": "איך מגיעים", "en": "Directions"},
     "tbs_minimap": {"he": "מיני-מפה", "en": "Minimap"},
+    # the ⚙ panel's own head over the four navigation switches (set_route_follow and the rest)
+    "tbs_navigation": {"he": "ניווט", "en": "Navigation"},
     "tbs_arrow_colour": {"he": "צבע חץ המסלול", "en": "Route arrow colour"},
     "tbs_arrow_size": {"he": "גודל חץ המסלול", "en": "Route arrow size"},
     "tbs_arrow_flash": {"he": "חץ מהבהב", "en": "Flashing arrow"},

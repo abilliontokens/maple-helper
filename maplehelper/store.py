@@ -181,6 +181,14 @@ DEFAULT_SETTINGS = {
     "minimap_arrow_flash": False,  # ... and whether it blinks, to be easy to spot on a busy minimap
     "minimap_arrow_label": True,  # ... a small name beside it: the portal's map, or the NPC to talk to
     "minimap_arrival_notice": True,   # a word when the map the arrow points to is reached, and the arrow goes
+    # the arrow guides the whole way, not one step: it re-points the moment a new map is read, and works the way out
+    # again from where the player stands after a wrong portal (ui/portaldots.py)
+    "minimap_route_follow": True,
+    "minimap_route_steps": True,  # ... and how many maps are left said beside it (ui/portaldots.py)
+    # the walking path the ground model works out, drawn over the game's minimap (ui/portaldots.py)
+    "minimap_path_line": True,
+    # the app's own map window draws each hidden teleport as an arrow from its pad to where it lands (ui/mapview.py)
+    "map_teleport_arrows": True,
     # a way takes the invisible teleports (the blue dots) when they make it shorter; off, only where nothing else goes
     "route_hidden_teleports": False,
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)

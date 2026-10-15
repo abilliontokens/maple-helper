@@ -8,7 +8,8 @@ The graph:
   blue dots the app marks) is a hidden step (Leg.hidden), unless it is a building's door (DOOR). A way takes one only
   where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route). One
   that lands on its own map ("to_x", "to_y": Utah's Pig Farm's pads) is no step, but a shortcut across that map
-  toward the way's next step, alone or in a row (Graph.shortcut_path, in the order taken; Graph.shortcut is its first).
+  toward the way's next step, alone or in a row (Graph.shortcut_path, in the order taken; Graph.shortcut is its
+  first, and Graph.walk_path is the whole way across the map those pads come from, point by point on its picture).
 - taxis: the Pathfinder's taxi towns (routes.json "taxi"), each with its cab NPC on the map.
 - boats: a KB guide that says so ("take the boat from Shanks at the dock to Lith Harbor"), one way.
 - NPC trips: an NPC whose own words offer one ("Want to head over to Florina Beach?"), and the NPC there who takes
@@ -544,6 +545,36 @@ class Graph:
         total = [c + walk(j.to, target) for c, j in zip(cost, jumps)]
         best = min(range(len(jumps)), key=total.__getitem__)
         return [jumps[i] for i in way[best]] if total[best] + margin <= walk(you, target) else []
+
+    def walk_path(self, mid: str, you: tuple[float, float] | None,
+                  target: tuple[float, float] | None) -> list[tuple[tuple[float, float], str, str]]:
+        """The walking path across the map from the player's dot to a spot, step by step, for a caller that
+        draws it (the game's minimap): (where, how it got there, a pad's name) per step, in the order walked.
+        The very way shortcut_path's pads come from (terrain.Walk.path), so its "pad" steps are those pads in
+        that order.
+
+        Every point is a spot on the map's minimap picture, as fractions of its size (Jump.frm and the rest of
+        this module's spots): the ends are turned into map units exactly as shortcut_path turns them, and the
+        engine's points are turned back the same way, so the caller never sees a map unit. "How" is one of
+        terrain's kinds — "walk", "fall", "rope", "jump" or "pad" — and the name is the teleport's on a "pad"
+        step, "" on every other.
+
+        [] when the KB has no ground for the map, when the ground cannot place one of the ends or finds no way
+        at all, and for a map or picture the graph doesn't know, or without the player's dot or the target:
+        there is no path to draw. Silent either way — the straight-line fallback the pads fall back to has no
+        path in it, and shortcut_path already says in the log once a run which maps it covers for."""
+        if mid not in self.known or not self.known[mid].minimap or you is None or target is None:
+            return []
+        ground = self._terrain_walk(mid)
+        if ground is None:
+            return []
+        mm = self.known[mid].minimap
+
+        def units(spot: tuple[float, float]) -> tuple[float, float]:
+            return spot[0] * mm[0] - mm[2], spot[1] * mm[1] - mm[3]
+        in_units = [Jump(units(j.frm), units(j.to), j.name) for j in self.hidden_jumps(mid)]
+        steps = ground.path(units(you), units(target), in_units)
+        return [(((x + mm[2]) / mm[0], (y + mm[3]) / mm[1]), kind, name) for (x, y), kind, name in steps or []]
 
     def shortcut_costs(self, mid: str, you: tuple[float, float] | None,
                        target: tuple[float, float] | None) -> tuple[float, dict[str, float]] | None:
