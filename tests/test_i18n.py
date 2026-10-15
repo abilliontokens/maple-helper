@@ -65,7 +65,7 @@ def test_a_count_of_one_reads_as_one(key, kw):
     assert I18n("en")(key, n=1, **kw) == STRINGS[f"{key}_one"]["en"].format(n=1, **kw)
 
 
-@pytest.mark.parametrize("key", ["set_route_follow", "set_route_follow_tip", "set_route_steps", "set_path_line",
+@pytest.mark.parametrize("key", ["set_route_follow", "set_route_follow_tip", "set_route_steps",
                                  "set_teleport_arrows", "tbs_navigation", "arrow_maps_left", "arrow_maps_left_one",
                                  "route_off_track", "map_teleport_legend"])
 def test_the_navigation_strings_are_there_in_both_languages(key):

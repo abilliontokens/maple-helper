@@ -6,10 +6,8 @@ The graph:
   other map's own portal, when it has one.
 - hidden teleports: a portal the game's minimap never draws (routes.json "hidden": a press-up or touch teleport, the
   blue dots the app marks) is a hidden step (Leg.hidden), unless it is a building's door (DOOR). A way takes one only
-  where nothing else gets there, or, with the player's setting on, where it makes the way shorter (Graph.route). One
-  that lands on its own map ("to_x", "to_y": Utah's Pig Farm's pads) is no step, but a shortcut across that map
-  toward the way's next step, alone or in a row (Graph.shortcut_path, in the order taken; Graph.shortcut is its
-  first, and Graph.walk_path is the whole way across the map those pads come from, point by point on its picture).
+  where nothing else gets there (Graph.route). One that lands on its own map ("to_x", "to_y": Utah's Pig Farm's pads)
+  is no step at all; the app's own map window draws it as an arrow to where it lands (Graph.hidden_jumps).
 - taxis: the Pathfinder's taxi towns (routes.json "taxi"), each with its cab NPC on the map.
 - boats: a KB guide that says so ("take the boat from Shanks at the dock to Lith Harbor"), one way.
 - NPC trips: an NPC whose own words offer one ("Want to head over to Florina Beach?"), and the NPC there who takes
@@ -22,41 +20,18 @@ from __future__ import annotations
 
 import heapq
 import json
-import logging
-import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import availability, terrain
-
-log = logging.getLogger("maplehelper")
+from . import availability
 
 ROUTES_FILE = "routes.json"
-TERRAIN_FILE = "terrain.json"     # the maps' real ground (terrain.Walk), beside ROUTES_FILE in the KB; read lazily
 FOUND_MAX = 4096                # Graph.find's remembered texts (names; the AI's free text can't grow it for ever)
 # the hidden-portal dots sit this far (map units) above the portal's own point. The game's own blue portal rings sit
 # 122-130 map units up on four live captures; dots that high read too high in game, and the owner set them lower in
 # game (2026-10-09: 125, then 100, 75, 50; 25 units is ~3 screen px at a x2 minimap) (hidden_spots)
 PORTAL_MARK_RISE = 50
-# Graph.shortcut_path names hidden teleports within the map (the pads it takes in a row) only when the way
-# through them saves at least this much walking (map units, as it measures a walk: SHORTCUT_CLIMB). A pad saves at
-# most its own jump, and the site's 324 in-map pads jump 427 units at the median in straight lines (2026-10-14; ~1000
-# with their climb counted). 125 is under the old 300 for the reason at SHORTCUT_CLIMB: with vertical travel priced
-# as it is in game, a whole screen's walk would name almost none at 300, and the pads on Utah's Pig Farm were never
-# named from its lower floors at all (measured there, below)
-SHORTCUT_MARGIN = 125
-# a step up or down costs this many steps across in Graph.shortcut_path's walk, standing for climbing: a player
-# crosses a map on foot but cannot walk upward at all — they climb it by ladders, ropes and platform jumps (the
-# KB's map data has none of them), while a pad moves them up or down for free, and moving the player up and down is
-# what most pads are for. Priced at 2.5 (with SHORTCUT_MARGIN 300) the walk was nearly straight-line, and toward
-# Utah on Utah's Pig Farm (at (0.909, 0.261) on its picture, 2026-10-14) only 9 of its 29 spawn points named any
-# pad (all its lift t004), and 173 of a 41x21 grid across the picture did. At 5 (with SHORTCUT_MARGIN 125) 18 of
-# the 29 spawn points name a pad — 17 t004 and one two-pad chain, t006 then t004, from its lower floors — and 310
-# of the grid do (14 of them two pads or more, on its lower and middle floors, where the lifts are how a player
-# gets up); standing at Utah's own spot still names none, as does a pad that only leads away: a chain is named
-# only when the whole way through it beats the walk by the margin, however the climb is priced
-SHORTCUT_CLIMB = 5
 # a building's door, as the game names its portal: in00, in01_1, jobin00. The game's minimap doesn't draw it either,
 # but the building does: a step like any portal, never Leg.hidden (gamelookup and ui.npcoverlay find buildings by it)
 DOOR = re.compile(r"in\d")
@@ -280,19 +255,17 @@ class Graph:
 
     # ------------------------------------------------------------ routing
 
-    def route(self, start: str, end: str, taxi: bool = True, teleport: bool = True,
-              hidden: bool = False) -> Route | None:
+    def route(self, start: str, end: str, taxi: bool = True, teleport: bool = True) -> Route | None:
         """The cheapest way (COST per step) from one map to another; taxi=False walks (no cab fare), teleport=False
         leaves out the NPCs who take you somewhere ("Want to head over to Florina Beach?"). Boats always count:
-        a sea has no other way across. A hidden teleport (Leg.hidden) never leaves a map out of reach: by default
-        the way takes as few as it can, so one through portals the game draws wins however long it is (a shop's
-        hidden exit, the Subway: still a way); hidden=True (the player's setting) costs one like any portal, taken
-        where it makes the way shorter, a tie going to the drawn one."""
+        a sea has no other way across. A hidden teleport (Leg.hidden) never leaves a map out of reach: the way
+        takes as few as it can, so one through portals the game draws wins however long it is (a shop's hidden
+        exit, the Subway: still a way)."""
         if start not in self.maps or end not in self.maps:
             return None
         if start == end:
             return Route(start, end)
-        # a map's best so far: (hidden steps, cost), or with hidden=True (cost, hidden steps)
+        # a map's best so far: (hidden steps, cost)
         best = {start: (0, 0)}
         came: dict[str, Leg] = {}
         queue = [((0, 0), 0, start)]
@@ -307,7 +280,7 @@ class Graph:
                 if (leg.kind == "taxi" and not taxi) or (leg.kind == "npc" and not teleport):
                     continue
                 cost, unseen = COST[leg.kind], int(leg.hidden)
-                c = (score[0] + cost, score[1] + unseen) if hidden else (score[0] + unseen, score[1] + cost)
+                c = (score[0] + unseen, score[1] + cost)
                 if leg.to not in best or c < best[leg.to]:
                     best[leg.to], came[leg.to] = c, leg
                     n += 1
@@ -416,7 +389,7 @@ class Graph:
         """The map's hidden teleports that land on the map itself, each a Jump from its blue dot (as hidden_spots
         places it) to its landing point (that point itself, not raised). One with no landing point (to another map) or
         with an end off the picture is left out; [] for a map the KB doesn't have, or one with no picture. Worked out
-        once per map, as shortcut asks for them on each call: the same list each time."""
+        once per map: the same list each time."""
         if mid not in self.known:
             return []
         memo = self.__dict__.setdefault("_jumps", {})
@@ -431,244 +404,6 @@ class Graph:
                     jumps.append(Jump(frm, to, p.get("name") or ""))
             memo[mid] = jumps
         return memo[mid]
-
-    def _terrain_walk(self, mid: str) -> terrain.Walk | None:
-        """The map's real ground as a terrain.Walk, or None when the KB has no ground for it: terrain.json beside
-        routes.json, read only when a pad chain is first asked for, its file read once and each map's Walk built
-        once (as hidden_jumps memoises), a missing file or a map without ground remembered too, so neither is
-        looked for again on every query."""
-        walks = self.__dict__.setdefault("_walks", {})
-        if mid not in walks:
-            if "_terrain_data" not in self.__dict__:
-                try:
-                    data = json.loads((Path(self.kb.root) / TERRAIN_FILE).read_text(encoding="utf-8"))
-                except (OSError, ValueError, AttributeError):
-                    data = {}
-                self._terrain_data = data if isinstance(data, dict) else {}
-            maps = self._terrain_data.get("maps")
-            entry = maps.get(mid) if isinstance(maps, dict) else None
-            walks[mid] = terrain.Walk.of(entry.get("fh") or [], entry.get("lr") or []) if isinstance(entry, dict) and entry else None
-        return walks[mid]
-
-    def _note_ground_fallback(self, mid: str, why: str) -> None:
-        """Say once a run that the straight-line measure picked the pads on a map because its real ground had
-        no answer for it (`why`: what was missing there), so a map whose ground gave no answer is told apart
-        in the log from one it walks fine. The overlay asks several times a second, so a map is named once,
-        however often it is asked about again."""
-        said = self.__dict__.setdefault("_ground_fallback_said", set())
-        if mid in said:
-            return
-        said.add(mid)
-        log.info("routes: %s on %s, so its pads are picked by straight-line distance", why, self.name(mid))
-
-    def standing_platform(self, mid: str, you: tuple[float, float] | None) -> tuple[bool, int | None]:
-        """Where a spot on the map's picture stands, for the minimap arrow's held pad (ui.portaldots):
-        (the KB has the map's real ground, the joined platform its spot stands on in that ground).
-        The spot (a fraction of the picture, as shortcut_path takes it) is turned into map units
-        exactly as shortcut_path turns it, and the ground (terrain.Walk.platform) says which joined
-        platform it snaps to. (False, None) when the KB has no ground for the map — the caller then
-        falls back to its straight-line measure, which has no platforms; (True, None) when it has
-        ground but the spot snaps to none of it, so the ground cannot say where the player stands.
-        (False, None) too for a map or picture the graph doesn't know, or without the player's dot."""
-        if mid not in self.known or not self.known[mid].minimap or you is None:
-            return False, None
-        ground = self._terrain_walk(mid)
-        if ground is None:
-            return False, None
-        mm = self.known[mid].minimap
-        return True, ground.platform((you[0] * mm[0] - mm[2], you[1] * mm[1] - mm[3]))
-
-    def shortcut_path(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
-                      margin: float = SHORTCUT_MARGIN) -> list[Jump]:
-        """The pads of the cheapest way across the map to a spot (the next step's portal or an NPC), in the order
-        they are taken; [] when walking wins, on a map with no pads (hidden_jumps), and without the player's dot
-        (`you`) or the target.
-
-        When the KB has the map's real ground (terrain.json), the pads come from that ground (terrain.Walk): the
-        Graph's spots on the map's picture are turned into map units once, here, the engine names the hidden
-        teleports of the cheapest real path over the map's footholds, ropes and ladders, and its pads are turned
-        back into the picture's Jumps. [] from the engine is its word that the player can walk there without a
-        pad; None (an end that cannot be placed on the ground, or no real path) falls back to the straight-line
-        answer below, as does a map with no ground in the KB.
-
-        Without ground the way is a shortest path over a tiny graph: the player's dot, each pad's dot (Jump.frm)
-        and the point it lands on (Jump.to), and the target, all spots on the map's minimap picture measured in
-        map units (the fractions times the picture's size). Walking between any two costs the straight line
-        between them, its up-and-down part SHORTCUT_CLIMB times over: that stands for climbing, as a player walks
-        across a map but climbs it by ladders, ropes and jumps, and moving them up and down is what most pads are
-        for. Taking a pad costs nothing (the teleport is instant) from its dot to where it lands. A walk is never
-        beaten by walking through a third point, so the cheapest way alternates walks and pads: to a pad's dot, on
-        from where it lands to the next pad's dot, and from the last landing to the target. Each round relaxes the
-        cheapest way to where each pad lands by one more pad (Bellman-Ford over at most 16 pads a map in the live
-        data: well under a millisecond, and no state kept, so the same spots name the same pads), never through a
-        pad the way already took, so pads that land on each other's dots end the search too, and the chain is
-        however many pads that search names.
-
-        That straight line may cross a wall or a gap, and one weight stands for every climb, so a pad that mainly
-        lifts the player past a long climb can still be undervalued (a known limit), and one beside a short ladder
-        overvalued — the limit the real ground above does not have."""
-        jumps = self.hidden_jumps(mid)
-        if not jumps or you is None or target is None:
-            return []
-        w, h = self.known[mid].minimap[:2]
-        ground = self._terrain_walk(mid)
-        if ground is not None:
-            mm = self.known[mid].minimap
-
-            def units(spot: tuple[float, float]) -> tuple[float, float]:
-                return spot[0] * mm[0] - mm[2], spot[1] * mm[1] - mm[3]
-            in_units = [Jump(units(j.frm), units(j.to), j.name) for j in jumps]
-            picked = ground.pads(units(you), units(target), in_units)
-            if picked is not None:
-                by_id = {id(j): i for i, j in enumerate(in_units)}
-                by_name = {j.name: i for i, j in enumerate(jumps)}
-                return [jumps[by_id[id(j)] if id(j) in by_id else by_name[j.name]] for j in picked]
-            self._note_ground_fallback(mid, "the ground had no answer from where the player stands")
-        else:
-            self._note_ground_fallback(mid, "the knowledge base has no ground")
-
-        def walk(a: tuple[float, float], b: tuple[float, float]) -> float:
-            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h * SHORTCUT_CLIMB)
-        hop = [[walk(a.to, b.frm) for b in jumps] for a in jumps]     # from where one pad lands to another's dot
-        # the cheapest way found to where each pad lands, that pad taken last: its walking, and its pads in order
-        cost = [walk(you, j.frm) for j in jumps]
-        way = [(i,) for i in range(len(jumps))]
-        for _ in range(len(jumps) - 1):
-            cost2, way2 = cost[:], way[:]
-            for p, (c, taken) in enumerate(zip(cost, way)):
-                for i, d in enumerate(hop[p]):
-                    if c + d < cost2[i] and i not in taken:
-                        cost2[i], way2[i] = c + d, taken + (i,)
-            if cost2 == cost:
-                break                       # no way got cheaper: one more pad won't make one either
-            cost, way = cost2, way2
-        total = [c + walk(j.to, target) for c, j in zip(cost, jumps)]
-        best = min(range(len(jumps)), key=total.__getitem__)
-        return [jumps[i] for i in way[best]] if total[best] + margin <= walk(you, target) else []
-
-    def walk_path(self, mid: str, you: tuple[float, float] | None,
-                  target: tuple[float, float] | None) -> list[tuple[tuple[float, float], str, str]]:
-        """The walking path across the map from the player's dot to a spot, step by step, for a caller that
-        draws it (the game's minimap): (where, how it got there, a pad's name) per step, in the order walked.
-        The very way shortcut_path's pads come from (terrain.Walk.path), so its "pad" steps are those pads in
-        that order.
-
-        Every point is a spot on the map's minimap picture, as fractions of its size (Jump.frm and the rest of
-        this module's spots): the ends are turned into map units exactly as shortcut_path turns them, and the
-        engine's points are turned back the same way, so the caller never sees a map unit. "How" is one of
-        terrain's kinds — "walk", "fall", "rope", "jump" or "pad" — and the name is the teleport's on a "pad"
-        step, "" on every other.
-
-        [] when the KB has no ground for the map, when the ground cannot place one of the ends or finds no way
-        at all, and for a map or picture the graph doesn't know, or without the player's dot or the target:
-        there is no path to draw. Silent either way — the straight-line fallback the pads fall back to has no
-        path in it, and shortcut_path already says in the log once a run which maps it covers for."""
-        if mid not in self.known or not self.known[mid].minimap or you is None or target is None:
-            return []
-        ground = self._terrain_walk(mid)
-        if ground is None:
-            return []
-        mm = self.known[mid].minimap
-
-        def units(spot: tuple[float, float]) -> tuple[float, float]:
-            return spot[0] * mm[0] - mm[2], spot[1] * mm[1] - mm[3]
-        in_units = [Jump(units(j.frm), units(j.to), j.name) for j in self.hidden_jumps(mid)]
-        steps = ground.path(units(you), units(target), in_units)
-        return [(((x + mm[2]) / mm[0], (y + mm[3]) / mm[1]), kind, name) for (x, y), kind, name in steps or []]
-
-    def shortcut_costs(self, mid: str, you: tuple[float, float] | None,
-                       target: tuple[float, float] | None) -> tuple[float, dict[str, float]] | None:
-        """What the cheapest way across the map to a spot costs, and what the cheapest way through each pad
-        first costs with it (its name -> that cost), in the measure shortcut_path picks by on this map: the
-        real ground's effort (terrain.Walk: walks, ropes, falls and jumps, a teleport TELEPORT_COST) when the
-        KB has that ground and both ends stand on it, else the straight line of shortcut_path (its up-and-down
-        part SHORTCUT_CLIMB times over, a pad free). The first cost is the cheaper of walking and every pad
-        way. Both costs of one call share its one measure, so a caller may set them against each other (the
-        minimap arrow's steady pad, ui.portaldots); two calls' never may, a spot the ground cannot place
-        falling back to the straight line from one read to the next. A pad missing from the second is one no
-        way through first reaches the spot from here at all. None on a map with no pads, without the player's
-        dot or the target, or on a map the graph doesn't know."""
-        jumps = self.hidden_jumps(mid)
-        if not jumps or you is None or target is None or mid not in self.known or not self.known[mid].minimap:
-            return None
-
-        def distances(adj: list, start: int) -> dict[int, float]:
-            best: dict[int, float] = {start: 0.0}
-            queue = [(0.0, 0, start)]
-            n = 0
-            while queue:
-                cost, _, here = heapq.heappop(queue)
-                if cost != best.get(here):
-                    continue
-                for nxt, step in adj[here]:
-                    key = cost + step
-                    if nxt not in best or key < best[nxt]:
-                        best[nxt] = key
-                        n += 1
-                        heapq.heappush(queue, (key, n, nxt))
-            return best
-
-        ground = self._terrain_walk(mid)
-        if ground is not None:
-            mm = self.known[mid].minimap
-
-            def units(spot: tuple[float, float]) -> tuple[float, float]:
-                return spot[0] * mm[0] - mm[2], spot[1] * mm[1] - mm[3]
-            in_units = [Jump(units(j.frm), units(j.to), j.name) for j in jumps]
-            start, goal = ground._snap(units(you)), ground._snap(units(target))
-            if start is not None and goal is not None:
-                teleports: list[list[tuple[int, Jump]]] = [[] for _ in ground._base]
-                for in_unit, jump in zip(in_units, jumps):
-                    snapped = ground._snap_jump(in_unit)
-                    if snapped is not None:
-                        teleports[snapped[0]].append((snapped[1], jump))
-                full = [list(edges) + [(nxt, terrain.TELEPORT_COST) for nxt, _ in teleports[i]]
-                        for i, edges in enumerate(ground._base)]
-                best = distances(full, start)
-                if goal in best:
-                    walked = distances([list(edges) for edges in ground._base], start)
-                    back: list[list[tuple[int, float]]] = [[] for _ in full]
-                    for i, edges in enumerate(full):
-                        for nxt, step in edges:
-                            back[nxt].append((i, step))
-                    onward = distances(back, goal)     # from a span, the cheapest on to the spot
-                    via = {}
-                    for in_unit, jump in zip(in_units, jumps):
-                        snapped = ground._snap_jump(in_unit)
-                        if snapped is not None and snapped[0] in walked and snapped[1] in onward:
-                            via[jump.name] = (walked[snapped[0]] + terrain.TELEPORT_COST
-                                              + onward[snapped[1]])
-                    return best[goal], via
-            self._note_ground_fallback(mid, "the ground had no answer from where the player stands")
-        else:
-            self._note_ground_fallback(mid, "the knowledge base has no ground")
-        w, h = self.known[mid].minimap[:2]
-
-        def walk(a: tuple[float, float], b: tuple[float, float]) -> float:
-            return math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h * SHORTCUT_CLIMB)
-        # from where each pad lands, the cheapest on to the spot: walk there, or walk to another pad's dot and
-        # take it for free, as shortcut_path costs it; asked backwards from the spot, once for every pad
-        adj: list[list[tuple[int, float]]] = [[] for _ in range(len(jumps) + 1)]
-        for i, jump in enumerate(jumps):
-            adj[i].append((len(jumps), walk(jump.to, target)))
-            for j, other in enumerate(jumps):
-                if i != j:
-                    adj[i].append((j, walk(jump.to, other.frm)))
-        back = [[] for _ in adj]
-        for i, edges in enumerate(adj):
-            for nxt, step in edges:
-                back[nxt].append((i, step))
-        onward = distances(back, len(jumps))
-        via = {jump.name: walk(you, jump.frm) + onward[i] for i, jump in enumerate(jumps)}
-        return min([walk(you, target), *via.values()]), via
-
-    def shortcut(self, mid: str, you: tuple[float, float] | None, target: tuple[float, float] | None,
-                 margin: float = SHORTCUT_MARGIN) -> Jump | None:
-        """The pad to take first on the cheapest way across the map to a spot (shortcut_path): from the map's real
-        ground when the KB has it, from straight-line distance when it doesn't; None when walking wins, on a map
-        with no pads, and without the player's dot (`you`) or the target. The first pad of shortcut_path."""
-        path = self.shortcut_path(mid, you, target, margin)
-        return path[0] if path else None
 
 
 def side(spot: tuple[float, float] | None) -> str:

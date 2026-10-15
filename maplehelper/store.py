@@ -185,12 +185,8 @@ DEFAULT_SETTINGS = {
     # again from where the player stands after a wrong portal (ui/portaldots.py)
     "minimap_route_follow": True,
     "minimap_route_steps": True,  # ... and how many maps are left said beside it (ui/portaldots.py)
-    # the walking path the ground model works out, drawn over the game's minimap (ui/portaldots.py)
-    "minimap_path_line": True,
     # the app's own map window draws each hidden teleport as an arrow from its pad to where it lands (ui/mapview.py)
     "map_teleport_arrows": True,
-    # a way takes the invisible teleports (the blue dots) when they make it shorter; off, only where nothing else goes
-    "route_hidden_teleports": False,
     "npc_overlay": False,         # the in-game "NPCs on this map" window over the game (ui/npcoverlay.py)
     "npc_overlay_geom": None,     # where the player left it: {"x","y","w","h"}; None: beside the minimap box
     "npc_overlay_opacity": 0.85,  # its background's opacity, 0.3-1.0 (the game shows through)

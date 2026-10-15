@@ -135,30 +135,6 @@ def test_cabs_and_teleports_is_a_switch_in_the_gear_panel_off_at_first(bar):
     assert s["game_rides"] is True and s["overlay_accent"] == "green"
 
 
-def test_hidden_teleport_routes_is_a_switch_under_cabs_and_teleports_off_at_first(bar):
-    """Off on a new install: a way takes only the portals the game shows until the player lets it take the invisible
-    teleports (the blue dots), with the switch under Cabs & Teleports in the ⚙ panel's Directions. Each flip is
-    written and said with the bar's rides_toggled (the app finds a way shown again, as for Cabs & Teleports), and a
-    setting changed elsewhere is back on the switch at the next refresh."""
-    w, s = bar
-    seen = []
-    w.rides_toggled.connect(lambda: seen.append((s["game_rides"], s["route_hidden_teleports"])))
-    w.refresh()
-    w._gear.click()
-    p = w._panel
-    column = (p._way_head, p._rides_label, p._hidden_routes_label, p._minimap_head)    # Directions, then the Minimap
-    assert {_column(p, c) for c in column} == {1} and _from_the_top(p, *column)         # down the right-hand column
-    assert p._hidden_routes_label.text() == p._hidden_routes.accessibleName() == "Hidden teleport routes"
-    assert p._hidden_routes_hint.text() == w.t("tb_hidden_routes_tip")      # the row says what the setting does
-    assert p._hidden_routes.isChecked() is False and s["route_hidden_teleports"] is False
-    p._hidden_routes.click()
-    p._hidden_routes.click()
-    assert seen == [(False, True), (False, False)]          # Cabs & Teleports left as it was
-    s["route_hidden_teleports"] = True
-    w.refresh()
-    assert p._hidden_routes.isChecked() is True
-
-
 # ------------------------------------------------------------ the searches
 
 @pytest.mark.parametrize("kind,text", [("monster_npc", "Monsters & NPCs"), ("map", "Maps"), ("item", "Items"),
@@ -737,8 +713,8 @@ def test_the_panel_is_one_width_and_mirrors_in_hebrew(qapp, isolated_store):
         assert p._arrow_label_hint.text() == bidi.plain(w.t("tbs_arrow_label_hint"), True)
         assert p._arrival_hint.text() == bidi.plain(w.t("tbs_arrival_hint"), True)
         # the new hints keep every hint's two pixels at the right (a wrapped Hebrew line's first letter overhangs)
-        hints = (p._hidden_routes_hint, p._arrow_label_hint, p._arrow_flash_hint, p._arrival_hint)
-        assert [h.contentsMargins().right() for h in hints] == [2, 2, 2, 2]
+        hints = (p._arrow_label_hint, p._arrow_flash_hint, p._arrival_hint)
+        assert [h.contentsMargins().right() for h in hints] == [2, 2, 2]
     finally:
         w.close()
         w._panel.close()
@@ -758,12 +734,12 @@ def test_the_panel_is_one_card_in_two_columns_mirrored_in_hebrew(qapp, isolated_
         first = (p._look_head, p._tint_label, p._tints, p._accent_label, p._accents, p._opacity_head,
                  p._opacity_label, p._slider, p._bar_head, p._icons_label, p._icons_hint, p._hotkey_label,
                  p._hotkey_hint)
-        second = (p._way_head, p._rides_label, p._rides_hint, p._hidden_routes_label, p._hidden_routes_hint,
+        second = (p._way_head, p._rides_label, p._rides_hint,
                   p._minimap_head, p._hidden_portals_label, p._hidden_portals_hint, p._route_arrow_label,
                   p._route_arrow_hint, p._arrow_color_label, p._arrow_colors, p._arrow_size_label, p._arrow_size,
                   p._arrow_label_label, p._arrow_label_hint, p._arrow_flash_label, p._arrow_flash_hint,
                   p._arrival_label, p._arrival_hint, p._overlay_shots_label, p._overlay_shots_hint)
-        switches = (p._rides, p._hidden_routes, p._hidden_portals, p._route_arrow, p._arrow_label, p._arrow_flash,
+        switches = (p._rides, p._hidden_portals, p._route_arrow, p._arrow_label, p._arrow_flash,
                     p._arrival, p._overlay_shots)
         lead = 1 if lang == "he" else 0                                     # the leading column, as seen
         assert {_column(p, c) for c in first + (p._icons, p._hotkey)} == {lead} and _from_the_top(p, *first)
@@ -795,7 +771,6 @@ def test_each_hint_is_one_line_under_its_row_and_whole_in_the_rows_tooltip(bar):
     rows = (("tbs_icons_hint", p._icons_hint, p._icons_label, p._icons),
             ("tb_hotkey_hint", p._hotkey_hint, p._hotkey_label, None),
             ("tb_rides_tip", p._rides_hint, p._rides_label, p._rides),
-            ("tb_hidden_routes_tip", p._hidden_routes_hint, p._hidden_routes_label, p._hidden_routes),
             ("minimap_hidden_portals_hint", p._hidden_portals_hint, p._hidden_portals_label, p._hidden_portals),
             ("minimap_route_arrow_hint", p._route_arrow_hint, p._route_arrow_label, p._route_arrow),
             ("tbs_arrow_label_hint", p._arrow_label_hint, p._arrow_label_label, p._arrow_label),
@@ -961,27 +936,26 @@ def test_the_minimap_switches_are_in_the_gear_panel_and_signal_the_app(bar):
 
 def test_the_navigation_switches_sit_under_their_own_head_in_the_gear_panel(bar):
     """The ⚙ panel's Navigation section, under a head of its own: guiding the whole way (with its hint under it),
-    how many maps are left, the walking path on the game's minimap, and — named for Maple Helper's own map window,
-    not the game's minimap — the teleport arrows there. All four on at first, down the first column under the
-    Toolbar section: beneath the arrow's own switches they left the second column taller than a 1080p screen at
-    125 % has room for, and the panel scrolled. Each click writes its setting; the three minimap ones say so with
-    the bar's minimap_toggled, while the map window's changes nothing over the game and stays quiet. A setting
-    changed elsewhere is back on its switch at the next refresh."""
+    how many maps are left, and — named for Maple Helper's own map window, not the game's minimap — the teleport
+    arrows there. All three on at first, down the first column under the Toolbar section: beneath the arrow's own
+    switches they left the second column taller than a 1080p screen at 125 % has room for, and the panel scrolled.
+    Each click writes its setting; the two minimap ones say so with the bar's minimap_toggled, while the map
+    window's changes nothing over the game and stays quiet. A setting changed elsewhere is back on its switch at
+    the next refresh."""
     w, s = bar
     seen = []
     w.minimap_toggled.connect(lambda: seen.append(True))
     w.refresh()
     w._gear.click()
     p = w._panel
-    keys = ("minimap_route_follow", "minimap_route_steps", "minimap_path_line", "map_teleport_arrows")
-    switches = (p._route_follow, p._route_steps, p._path_line, p._teleport_arrows)
-    labels = (p._route_follow_label, p._route_steps_label, p._path_line_label, p._teleport_arrows_label)
-    names = ["Guide the whole way", "How many maps are left", "Walking path on the minimap",
-             "Teleport arrows on Maple Helper's map"]
+    keys = ("minimap_route_follow", "minimap_route_steps", "map_teleport_arrows")
+    switches = (p._route_follow, p._route_steps, p._teleport_arrows)
+    labels = (p._route_follow_label, p._route_steps_label, p._teleport_arrows_label)
+    names = ["Guide the whole way", "How many maps are left", "Teleport arrows on Maple Helper's map"]
     assert p._nav_head.text() == "NAVIGATION"
     assert [lb.text() for lb in labels] == names
     assert [b.accessibleName() for b in switches] == names
-    assert [b.isChecked() for b in switches] == [True, True, True, True]
+    assert [b.isChecked() for b in switches] == [True, True, True]
     # down the first column (English: the left one), under the key box, not the second one
     assert {_column(p, c) for c in (p._nav_head,) + labels} == {0} and _from_the_top(p, p._hotkey_hint, p._nav_head)
     assert "wrong portal" in p._route_follow_hint.text()
@@ -989,14 +963,12 @@ def test_the_navigation_switches_sit_under_their_own_head_in_the_gear_panel(bar)
     assert s["minimap_route_follow"] is False and len(seen) == 1
     p._route_steps.click()
     assert s["minimap_route_steps"] is False and len(seen) == 2
-    p._path_line.click()
-    assert s["minimap_path_line"] is False and len(seen) == 3
     p._teleport_arrows.click()
-    assert s["map_teleport_arrows"] is False and len(seen) == 3     # the app's own window: nothing over the game
+    assert s["map_teleport_arrows"] is False and len(seen) == 2     # the app's own window: nothing over the game
     for key in keys:
         s[key] = True
     w.refresh()                         # changed elsewhere: each switch follows
-    assert [b.isChecked() for b in switches] == [True, True, True, True]
+    assert [b.isChecked() for b in switches] == [True, True, True]
 
 
 def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_signal_the_app(bar):

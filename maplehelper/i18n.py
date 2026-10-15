@@ -1134,7 +1134,7 @@ STRINGS = {
               "minimap's edge pointing the way when that step is off the part shown. It lights up on its own when "
               "you open a map in the Maps search or its ◎ window."},
     "route_arrow_guiding": {"he": "חץ מסלול: אל {name}", "en": "Route arrow: to {name}"},
-    # the ⚙ panel's navigation switches (store.py minimap_route_follow, minimap_route_steps, minimap_path_line) and
+    # the ⚙ panel's navigation switches (store.py minimap_route_follow, minimap_route_steps) and
     # the map window's own (map_teleport_arrows)
     "set_route_follow": {"he": "ליווי לאורך כל הדרך", "en": "Guide the whole way"},
     "set_route_follow_tip": {
@@ -1143,7 +1143,6 @@ STRINGS = {
         "en": "The arrow keeps leading after each new map, and if you take a wrong portal it works the way out again "
               "from where you stand."},
     "set_route_steps": {"he": "כמה מפות נשארו", "en": "How many maps are left"},
-    "set_path_line": {"he": "קו ההליכה במיני-מפה", "en": "Walking path on the minimap"},
     "set_teleport_arrows": {"he": "חצי טלפורט במפה של Maple Helper", "en": "Teleport arrows on Maple Helper's map"},
     # the name beside the route's arrow on the game's minimap (ui/portaldots.py): what to click there
     "arrow_tag_portal": {"he": "{name} ←", "en": "→ {name}"},
@@ -2530,7 +2529,7 @@ STRINGS = {
     "tbs_bar": {"he": "הסרגל", "en": "Toolbar"},
     "tbs_way": {"he": "איך מגיעים", "en": "Directions"},
     "tbs_minimap": {"he": "מיני-מפה", "en": "Minimap"},
-    # the ⚙ panel's own head over the four navigation switches (set_route_follow and the rest)
+    # the ⚙ panel's own head over the navigation switches (set_route_follow and the rest)
     "tbs_navigation": {"he": "ניווט", "en": "Navigation"},
     "tbs_arrow_colour": {"he": "צבע חץ המסלול", "en": "Route arrow colour"},
     "tbs_arrow_size": {"he": "גודל חץ המסלול", "en": "Route arrow size"},
@@ -2543,11 +2542,6 @@ STRINGS = {
     "tbs_arrival": {"he": "הודעה כשמגיעים", "en": "Say when you arrive"},
     "tbs_arrival_hint": {"he": "הודעה קטנה כשמגיעים למפה שהחץ מוביל אליה, והחץ כבה מעצמו.",
                          "en": "A small notice when you reach the map the arrow leads to, and the arrow turns itself off."},
-    "tb_hidden_routes": {"he": "מסלולים דרך טלפורטים נסתרים", "en": "Hidden teleport routes"},
-    "tb_hidden_routes_tip": {"he": "דלוק: הדרך עוברת גם בטלפורטים הנסתרים (הנקודות הכחולות) כשזה מקצר אותה. "
-                                   "כבוי: משתמשים בהם רק כשאין דרך אחרת (למשל ליציאה מחנות).",
-                             "en": "On: the way takes the invisible teleports (the blue dots) when they make it "
-                                   "shorter. Off: they are used only where there is no other way (a shop's exit, say)."},
     "tbs_reset": {"he": "חזרה למראה ברירת המחדל", "en": "Reset to default look"},
     "tbs_tint_dark": {"he": "כהה", "en": "Dark"},
     "tbs_tint_midnight": {"he": "כחול חצות", "en": "Midnight blue"},

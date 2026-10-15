@@ -41,17 +41,17 @@ def _on_way(last: Journey | None, dest: str, here_map: str) -> bool:
     return here_map in (first.to, first.frm)
 
 
-def of(graph, here_map: str, dest: str, *, rides: bool, hidden: bool,
+def of(graph, here_map: str, dest: str, *, rides: bool,
        last: Journey | None = None) -> Journey | None:
     """The way from `here_map` to `dest` for a player standing there, or None when there is none (or the graph does
-    not know one of the maps). `rides` lets the way take cabs and the NPCs who carry the player somewhere; `hidden`
-    lets it take a teleport the game's minimap never draws. `last` is the answer given before, which decides `off`."""
+    not know one of the maps). `rides` lets the way take cabs and the NPCs who carry the player somewhere. `last` is
+    the answer given before, which decides `off`."""
     if not here_map or not dest:
         return None
     if here_map == dest:
         return Journey(dest=dest, legs=(), left=0, off=False, arrived=True)
     off = last is not None and last.dest == dest and not _on_way(last, dest, here_map)
-    route = graph.route(here_map, dest, taxi=rides, teleport=rides, hidden=hidden)
+    route = graph.route(here_map, dest, taxi=rides, teleport=rides)
     if route is None or not route.legs:
         return None
     legs = tuple(route.legs)

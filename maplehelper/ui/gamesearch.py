@@ -1176,8 +1176,7 @@ class DetailWindow(EdgeResize, QWidget):
         """The way from the player's map to this one, step by step as the ◎ window draws it, in a block of its own:
         the step's number and map, what to do there, and the map's picture with the portal (orange) or the NPC
         (green) marked, the player's blue dot on the first; already there, no way known, or their map not read
-        yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"]), and
-        through the hidden teleports where they make it shorter when the player allows them (settings["route_hidden_teleports"]).
+        yet. On foot, or with cabs and NPC teleports when the toolbar's switch says so (settings["game_rides"]).
         While the toolbar panel has the minimap's route arrow on (settings["minimap_route_arrow"]: its switch is what
         turns this off), a way with steps arms it by itself as its view opens (_open), and while the arrow points at
         this map (LOCATION.route_dest) a muted line heading the way, under its title and over the steps, says so."""
@@ -1185,8 +1184,7 @@ class DetailWindow(EdgeResize, QWidget):
         t = o.t
         here = LOCATION.here
         rides = bool(o._settings["game_rides"])
-        way = gamelookup.way_to(o._kb, here.map if here is not None else None, to_map, rides=rides,
-                                hidden=bool(o._settings["route_hidden_teleports"]))
+        way = gamelookup.way_to(o._kb, here.map if here is not None else None, to_map, rides=rides)
         block = _Block(bidi.plain(t("lk_way_rides" if rides else "lk_way_walk"), t.rtl))
         if not way.known:
             key = "lk_way_unknown_here" if way.here is None else "lk_way_none" if rides else "lk_way_none_walk"

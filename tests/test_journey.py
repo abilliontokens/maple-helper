@@ -19,8 +19,8 @@ class StandInGraph:
         self.line = list(line)
         self.calls = []
 
-    def route(self, start, end, taxi=True, teleport=True, hidden=False):
-        self.calls.append((start, end, taxi, teleport, hidden))
+    def route(self, start, end, taxi=True, teleport=True):
+        self.calls.append((start, end, taxi, teleport))
         if start in self.line:
             maps = self.line
         elif start == "x":                       # the wrong door off "b": one portal back onto the line
@@ -38,23 +38,23 @@ class StandInGraph:
 
 def test_the_way_from_here_counts_the_maps_left():
     g = StandInGraph()
-    j = journey.of(g, "a", "d", rides=True, hidden=False)
+    j = journey.of(g, "a", "d", rides=True)
     assert j.dest == "d"
     assert [leg.to for leg in j.legs] == ["b", "c", "d"]
     assert (j.left, j.off, j.arrived) == (3, False, False)
-    assert g.calls == [("a", "d", True, True, False)]
+    assert g.calls == [("a", "d", True, True)]
 
 
 def test_the_settings_reach_the_graph():
     g = StandInGraph()
-    journey.of(g, "a", "d", rides=False, hidden=True)
-    assert g.calls == [("a", "d", False, False, True)]
+    journey.of(g, "a", "d", rides=False)
+    assert g.calls == [("a", "d", False, False)]
 
 
 def test_stepping_onto_the_next_map_keeps_to_the_way():
     g = StandInGraph()
-    first = journey.of(g, "a", "d", rides=True, hidden=False)
-    second = journey.of(g, "b", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "a", "d", rides=True)
+    second = journey.of(g, "b", "d", rides=True, last=first)
     assert second.off is False
     assert second.left == 2
     assert [leg.to for leg in second.legs] == ["c", "d"]
@@ -62,16 +62,16 @@ def test_stepping_onto_the_next_map_keeps_to_the_way():
 
 def test_standing_still_is_not_off_the_way():
     g = StandInGraph()
-    first = journey.of(g, "a", "d", rides=True, hidden=False)
-    again = journey.of(g, "a", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "a", "d", rides=True)
+    again = journey.of(g, "a", "d", rides=True, last=first)
     assert again.off is False
     assert again.left == 3
 
 
 def test_a_wrong_portal_works_the_way_out_again_from_there():
     g = StandInGraph()
-    first = journey.of(g, "a", "d", rides=True, hidden=False)
-    strayed = journey.of(g, "x", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "a", "d", rides=True)
+    strayed = journey.of(g, "x", "d", rides=True, last=first)
     assert strayed.off is True
     assert strayed.legs[0].frm == "x"
     assert [leg.to for leg in strayed.legs] == ["b", "c", "d"]
@@ -80,33 +80,33 @@ def test_a_wrong_portal_works_the_way_out_again_from_there():
 
 def test_a_first_way_is_never_off():
     g = StandInGraph()
-    assert journey.of(g, "x", "d", rides=True, hidden=False).off is False
+    assert journey.of(g, "x", "d", rides=True).off is False
 
 
 def test_a_way_to_another_destination_is_never_off():
     g = StandInGraph()
-    first = journey.of(g, "a", "c", rides=True, hidden=False)
-    other = journey.of(g, "x", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "a", "c", rides=True)
+    other = journey.of(g, "x", "d", rides=True, last=first)
     assert other.off is False
 
 
 def test_arriving_asks_the_graph_for_nothing():
     g = StandInGraph()
-    first = journey.of(g, "c", "d", rides=True, hidden=False)
-    arrived = journey.of(g, "d", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "c", "d", rides=True)
+    arrived = journey.of(g, "d", "d", rides=True, last=first)
     assert (arrived.arrived, arrived.left, arrived.legs, arrived.off) == (True, 0, (), False)
-    assert g.calls == [("c", "d", True, True, False)]
+    assert g.calls == [("c", "d", True, True)]
 
 
 def test_no_way_at_all_is_nothing():
     g = StandInGraph()
-    assert journey.of(g, "d", "a", rides=True, hidden=False) is None
+    assert journey.of(g, "d", "a", rides=True) is None
 
 
 def test_a_map_the_graph_never_heard_of_is_nothing():
     g = StandInGraph()
-    assert journey.of(g, "a", "zz", rides=True, hidden=False) is None
-    assert journey.of(g, "zz", "d", rides=True, hidden=False) is None
+    assert journey.of(g, "a", "zz", rides=True) is None
+    assert journey.of(g, "zz", "d", rides=True) is None
 
 
 # ----------------------------------------------------------------- LOCATION
@@ -128,8 +128,8 @@ def clean_location():
 
 def test_set_journey_emits_once_per_change(clean_location):
     g = StandInGraph()
-    first = journey.of(g, "a", "d", rides=True, hidden=False)
-    second = journey.of(g, "b", "d", rides=True, hidden=False, last=first)
+    first = journey.of(g, "a", "d", rides=True)
+    second = journey.of(g, "b", "d", rides=True, last=first)
     seen = []
     clean_location.journeyed.connect(seen.append)
     try:

@@ -336,7 +336,7 @@ def test_a_map_row_opens_the_maps_page_and_back_returns(win, qapp, clean_locatio
     monkeypatch.setattr(gamelookup, "map_monsters",
                         lambda kb, key: [("monster/2230104", "Stump", 15, 3)] if key == f"map/{GARDEN}" else [])
     monkeypatch.setattr(gamelookup, "way_to",
-                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
+                        lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
     win.open("monster_npc")
     win._box.setText("snail")
     pump(qapp, 200)
@@ -369,7 +369,7 @@ def test_the_next_page_is_measured_at_once_never_folded_to_the_header(win, qapp,
     monkeypatch.setattr(gamelookup, "map_monsters",
                         lambda kb, key: [("monster/2230104", "Stump", 15, 3)] if key == f"map/{GARDEN}" else [])
     monkeypatch.setattr(gamelookup, "way_to",
-                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
+                        lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
     win.open("monster_npc")
     win._box.setText("snail")
     pump(qapp, 200)
@@ -391,7 +391,7 @@ def test_the_page_window_keeps_the_size_the_player_drags_it_to(win, qapp, settin
     from maplehelper.ui import gamesearch, mapview
     monkeypatch.setattr(gamelookup, "map_monsters", lambda kb, key: [])
     monkeypatch.setattr(gamelookup, "way_to",
-                        lambda kb, here, to, rides=True, hidden=False: gamelookup.Way(here=None, legs=(), known=False))
+                        lambda kb, here, to, rides=True: gamelookup.Way(here=None, legs=(), known=False))
     widths = []
     real = mapview.route_picture
     monkeypatch.setattr(mapview, "route_picture",
@@ -733,7 +733,7 @@ def test_an_npc_on_the_players_map_guides_and_hiding_clears_it(win, qapp, kb, cl
     monkeypatch.setattr(gamelookup, "npc_place",
                         lambda kb, key, here_map=None: gamelookup.Place(MID, "Fake Town", "Fake Street", spot))
     monkeypatch.setattr(gamelookup, "map_monsters", lambda kb, key: [])
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True, hidden=False:
+    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True:
                         gamelookup.Way(here="999999999", legs=(), known=False))
     clean_location.set(_here(MID, (0.5, 0.5)))
     win.open("monster_npc")
@@ -817,7 +817,7 @@ def test_an_npc_elsewhere_shows_the_way_there_step_by_step_with_each_maps_pictur
             Leg("010020002", FAR, "npc", "Bart", npc="npc/9", spot=(0.1, 0.5)))
     monkeypatch.setattr(gamelookup, "npc_place",
                         lambda kb, key, here_map=None: gamelookup.Place(FAR, "Far Map", "Far Street", (0.5, 0.5)))
-    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True, hidden=False:
+    monkeypatch.setattr(gamelookup, "way_to", lambda kb, here, to, rides=True:
                         gamelookup.Way(here=MID, legs=ride if rides else walk, known=True))
     clean_location.set(_here(MID, (0.5, 0.5)))
     win.open("monster_npc")
@@ -877,7 +877,7 @@ def test_a_maps_page_arms_the_route_arrow_as_it_opens_and_lets_go_of_it_hidden(
     from maplehelper.routes import Leg
     walk = (Leg(MID, FAR, "portal", "the door", spot=(0.9, 0.5)),)
 
-    def way_to(kb, here, to, rides=True, hidden=False):
+    def way_to(kb, here, to, rides=True):
         if here is None:
             return gamelookup.Way(None, (), False)
         return gamelookup.Way(here, () if here == to else walk, True)

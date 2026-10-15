@@ -75,13 +75,36 @@ def test_utahs_pig_farm_inventory_matches_the_site():
 
 def test_the_rebuild_mark_bumps_with_the_kept_pads():
     """routes_data now marks the file "all_pads": a routes.json with the older marks but not this one is outdated
-    (rebuilt once), one with it is left alone. The nightly scrape writes the same shape: it builds with this very
-    routes_data."""
+    (rebuilt once), one with it is left alone. A leftover "terrain" mark from when the KB carried terrain.json
+    neither saves nor condemns a file: with the kept-pad marks present it is not rebuilt for having it, and
+    without them it is rebuilt for lacking those, not for the mark. The nightly scrape writes the same shape: it
+    builds with this very routes_data."""
     import scrape_meowdb
     assert scrape_meowdb.routes_data is mapdata.routes_data
     maps = [{"id": "000000001", "name": "A", "portals": [], "npcs": []}]
     data = mapdata.routes_data(maps, [])
     assert data[mapdata.ALL_PADS] is True and data[mapdata.LANDINGS] is True
-    old = {"landings": True, "terrain": True, "maps": [{"id": "000000001", "hidden": []}]}
+    assert "terrain" not in data
+    old = {"landings": True, "maps": [{"id": "000000001", "hidden": []}]}
     assert mapdata.outdated(old)
     assert not mapdata.outdated(data)
+    assert not mapdata.outdated({**data, "terrain": True})
+
+
+def test_scene_frames_come_from_the_sites_terrain_files():
+    """A map with NPCs and no minimap gets its room frame from its terrain file's view rectangle ("vr"), fetched
+    once; a map with a minimap is not asked for, and one whose file can't be fetched is left out."""
+    import json
+    maps = [{"id": "000000001", "name": "Shop", "npcs": [{"id": "8", "name": "Andre"}]},
+            {"id": "000000002", "name": "Town", "hasMinimapImage": True, "npcs": [{"id": "9", "name": "B"}]},
+            {"id": "000000003", "name": "Gone", "npcs": [{"id": "10", "name": "C"}]}]
+    asked = []
+
+    def fetch(url):
+        asked.append(url)
+        if url == mapdata.MAP_TERRAIN.format(id="000000001"):
+            return json.dumps({"vr": [-400, -300, 400, 300], "fh": [[0, 0, 1, 1]]})
+        return None
+    assert mapdata.scene_frames(maps, fetch, lambda: None) == {"000000001": [800, 600, 400, 300]}
+    assert asked == [mapdata.MAP_TERRAIN.format(id="000000001"),
+                     mapdata.MAP_TERRAIN.format(id="000000003")]

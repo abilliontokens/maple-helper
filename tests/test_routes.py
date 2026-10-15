@@ -1,7 +1,6 @@
 """How to get there: the route graph (KB map connections, hidden teleports, taxis, boats, NPC trips), only through
-maps in the game; routing; a map's shortcuts through its own hidden teleports; the AI's route context; the nightly
-routes.json (scrape, validation, patch notes) and the app's rebuild of an old one; the ◎ window's way from the
-player's map and a map card's way there."""
+maps in the game; routing; the AI's route context; the nightly routes.json (scrape, validation, patch notes) and
+the app's rebuild of an old one; the ◎ window's way from the player's map and a map card's way there."""
 import json
 import os
 from pathlib import Path
@@ -107,11 +106,6 @@ def test_hidden_portals_are_spots_on_the_minimap(world):
     assert ORBIS not in g.maps and g.hidden_spots(ORBIS) == [(0.5, (400 - routes.PORTAL_MARK_RISE) / 800)]
 
 
-def _at(x, y):
-    """A map point as a spot on _map's minimap: 1600 x 800 map units, the point (0, 0) at (800, 400)."""
-    return ((x + 800) / 1600, (y + 400) / 800)
-
-
 def test_a_teleport_within_the_map_jumps_from_its_dot_to_where_it_lands(world):
     """Graph.hidden_jumps: each hidden teleport with a landing point, from its blue dot (where hidden_spots puts it,
     PORTAL_MARK_RISE above its point) to the point it lands on (not raised), both spots on the minimap picture. One
@@ -130,206 +124,6 @@ def test_a_teleport_within_the_map_jumps_from_its_dot_to_where_it_lands(world):
     assert jumps[0].frm in g.hidden_spots(HENESYS)                  # the pad's end is its blue dot
     assert g.hidden_jumps(HENESYS) is jumps                         # worked out once
     assert g.hidden_jumps(PERION) == [] and g.hidden_jumps("999999999") == []
-
-
-def test_the_shortcut_is_the_pad_that_saves_the_most_walking(world):
-    """Graph.shortcut: of the map's pads, the one that makes the walk from the player's dot to the next step the
-    shortest (to its dot, then on from where it lands), measured in map units with a step up or down counted
-    SHORTCUT_CLIMB times (the dots sit PORTAL_MARK_RISE up); named only when that beats walking straight there by the
-    margin (SHORTCUT_MARGIN units unless said). None when no pad does, without the player's dot, and on a map with no
-    pads. Graph.shortcut_path is that pad alone here, and [] where shortcut is None."""
-    kb, _ = world
-
-    def pad(name, x, to_x):
-        return {"name": name, "x": x, "y": 0, "to_x": to_x, "to_y": 0}
-    g = routes.Graph(kb, {"maps": [{**_map(HENESYS, "Henesys", town=True),
-                                    "hidden": [pad("near", -650, 200), pad("best", -600, 500), pad("hop", -500, -300)]},
-                                   _map(PERION, "Perion", town=True)]})
-    _, best, hop = g.hidden_jumps(HENESYS)
-    # 1400 units across: "near" (the first, and next to the player) saves ~645 of them, "best" ~930
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == best
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [best]
-    # 500 units on: "hop" saves ~80, too few under the margin, enough under a smaller one
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) is None
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0)) == []
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=50) == hop
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0), margin=50) == [hop]
-    # next to the portal already: every pad is a detour
-    assert g.shortcut(HENESYS, _at(400, 0), _at(700, 0)) is None
-    assert g.shortcut_path(HENESYS, _at(400, 0), _at(700, 0)) == []
-    assert g.shortcut(HENESYS, None, _at(700, 0)) is None                  # no player dot
-    assert g.shortcut_path(HENESYS, None, _at(700, 0)) == []
-    assert g.shortcut(PERION, _at(-700, 0), _at(700, 0)) is None           # no pads
-    assert g.shortcut_path(PERION, _at(-700, 0), _at(700, 0)) == []
-
-
-def test_the_shortcut_is_the_first_pad_of_pads_in_a_row(world):
-    """Graph.shortcut_path takes the map's pads in a row, in the order they are taken: the cheapest way from the
-    player's dot to the next step may be two, the first landing on the second's dot, and Graph.shortcut is the
-    first of them, when the whole way beats walking straight there by the margin. Walking still wins when the way
-    saves less; a pad that leads away is never named, nor any of a map's pads that only lead away, and two pads
-    landing on each other's dots end the search (no pad taken twice, and no cap on how many a chain may take)."""
-    kb, _ = world
-
-    def pad(name, x, to_x, y=0, to_y=0):
-        return {"name": name, "x": x, "y": y, "to_x": to_x, "to_y": to_y}
-    first, second = pad("t001", -650, -350, to_y=-50), pad("t002", -350, -100)     # t001 lands on t002's dot
-    g = routes.Graph(kb, {"maps": [
-        # "back", under the player's feet, throws them to the map's left edge
-        {**_map(HENESYS, "Henesys", town=True), "hidden": [pad("back", -700, -790), first, second]},
-        {**_map(HG2, "Henesys Hunting Ground II"), "hidden": [first]},
-        {**_map(GARDEN, "Snail Garden"), "hidden": [second]},
-        # a lift, and from where it lands a pad on to the left: both away from the right edge
-        {**_map(HG1, "Henesys Hunting Ground I"),
-         "hidden": [pad("up", -600, -600, to_y=-300), pad("over", -600, -780, y=-250, to_y=-300)]},
-        # each lands on the other's dot
-        {**_map(PERION, "Perion", town=True),
-         "hidden": [pad("east", -600, 400, to_y=-50), pad("west", 400, -600, to_y=-50)]}]})
-    _, t001, t002 = g.hidden_jumps(HENESYS)
-    # 1400 units across, at SHORTCUT_CLIMB 5: alone (each on a map of its own) t001 saves ~65 of them and t002
-    # ~170, the two in a row ~345: on Henesys the chain is named, its first pad t001, not t002 and not "back", the
-    # nearest pad; t001 alone saves too little to be named, t002 alone enough
-    assert g.shortcut(HG2, _at(-700, 0), _at(700, 0)) is None
-    assert g.shortcut_path(HG2, _at(-700, 0), _at(700, 0)) == []
-    assert g.shortcut(GARDEN, _at(-700, 0), _at(700, 0)) == t002
-    assert g.shortcut_path(GARDEN, _at(-700, 0), _at(700, 0)) == [t002]
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == t001
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [t001, t002]
-    assert g.shortcut(HENESYS, _at(-700, -50), _at(700, 0)) == t001        # on "back"'s dot: t001, behind them
-    assert g.shortcut_path(HENESYS, _at(-700, -50), _at(700, 0)) == [t001, t002]
-    # 500 units on: the two in a row save ~145, enough under the margin now, too few under a bigger one
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0)) == t001
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0)) == [t001, t002]
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(-200, 0), margin=250) is None
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(-200, 0), margin=250) == []
-    # pads, but every way through them is longer than the walk: a pad that leads away is never named
-    assert g.shortcut(HG1, _at(-700, 0), _at(700, 0)) is None
-    assert g.shortcut_path(HG1, _at(-700, 0), _at(700, 0)) == []
-    # a loop: each way names its own pad and never goes round; none where going round only brings them back
-    east, west = g.hidden_jumps(PERION)
-    assert g.shortcut(PERION, _at(-700, 0), _at(700, 0)) == east
-    assert g.shortcut_path(PERION, _at(-700, 0), _at(700, 0)) == [east]
-    assert g.shortcut(PERION, _at(700, 0), _at(-700, 0)) == west
-    assert g.shortcut_path(PERION, _at(700, 0), _at(-700, 0)) == [west]
-    assert g.shortcut(PERION, _at(-700, 0), _at(-600, 0)) is None
-    assert g.shortcut_path(PERION, _at(-700, 0), _at(-600, 0)) == []
-
-
-
-def test_shortcut_is_the_first_of_shortcut_path_in_every_case(world):
-    """Graph.shortcut is Graph.shortcut_path's first pad, or None where the path is [] (walking wins, no pads, no
-    player dot): the one search, asked both ways over the same spots, never two answers."""
-    kb, _ = world
-
-    def pad(name, x, to_x, y=0, to_y=0):
-        return {"name": name, "x": x, "y": y, "to_x": to_x, "to_y": to_y}
-    g = routes.Graph(kb, {"maps": [
-        {**_map(HENESYS, "Henesys", town=True),
-         "hidden": [pad("t001", -650, -350, to_y=-50), pad("t002", -350, -100), pad("hop", -500, -300)]},
-        _map(PERION, "Perion", town=True)]})
-    cases = [(HENESYS, _at(-700, 0), _at(700, 0)), (HENESYS, _at(-700, 0), _at(-200, 0)),
-             (HENESYS, _at(400, 0), _at(700, 0)), (HENESYS, None, _at(700, 0)),
-             (HENESYS, _at(-700, 0), None), (PERION, _at(-700, 0), _at(700, 0))]
-    for mid, you, target in cases:
-        for margin in (routes.SHORTCUT_MARGIN, 50, 250):
-            path = g.shortcut_path(mid, you, target, margin=margin)
-            assert g.shortcut(mid, you, target, margin=margin) == (path[0] if path else None), (mid, you, target, margin)
-            assert len(path) <= len(g.hidden_jumps(mid))
-
-
-def test_shortcut_path_uses_the_maps_real_ground_when_the_kb_has_it(world, monkeypatch):
-    """Graph.shortcut_path with ground in the KB (terrain.json beside routes.json, written into the test KB root):
-    the pads come from terrain.Walk over that ground, in the order it names them, turned back into the picture's
-    Jumps, and Graph.shortcut is the first of them. The Graph's picture-fraction ends are turned into map units
-    once, here, for the engine. The terrain file is read once and each map's Walk built once however many queries
-    run; a map with no ground in the file keeps the straight-line answer, and so does a ground answer of None."""
-    kb, _ = world
-    (Path(kb.root) / routes.TERRAIN_FILE).write_text(json.dumps(
-        {"source": "test", "maps": {HENESYS: {"fh": [[-800, 0, 800, 0]], "lr": [[0, 0, 100]]}}}), encoding="utf-8")
-    reads, built, asked = [], [], []
-    answer = {"pads": "reversed"}
-
-    class FakeWalk:
-        @classmethod
-        def of(cls, fh, lr):
-            built.append((fh, lr))
-            walk = cls()
-            walk.fh, walk.lr = fh, lr
-            return walk
-
-        def pads(self, you, target, jumps):
-            asked.append((you, target, [(j.name, j.frm, j.to) for j in jumps]))
-            return {"reversed": [jumps[1], jumps[0]], "none": None, "walk": []}[answer["pads"]]
-    monkeypatch.setattr(routes.terrain, "Walk", FakeWalk)
-    read_text = Path.read_text
-
-    def counting(self, *args, **kwargs):
-        if self.name == routes.TERRAIN_FILE:
-            reads.append(self)
-        return read_text(self, *args, **kwargs)
-    monkeypatch.setattr(Path, "read_text", counting)
-
-    def pad(name, x, to_x):
-        return {"name": name, "x": x, "y": 0, "to_x": to_x, "to_y": 0}
-    g = routes.Graph(kb, {"maps": [
-        {**_map(HENESYS, "Henesys", town=True), "hidden": [pad("t001", -650, -350), pad("t002", -350, 500)]},
-        {**_map(PERION, "Perion", town=True), "hidden": [pad("east", -650, 500)]}]})
-    t001, t002 = g.hidden_jumps(HENESYS)
-    # the engine's pads in its order (not the map's), as the picture's Jumps; asked again, the same answer
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [t002, t001]
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [t002, t001]
-    assert g.shortcut(HENESYS, _at(-700, 0), _at(700, 0)) == t002
-    # ... in map units for the engine: the player's and target's spots, and each pad's dot (raised) and landing
-    assert asked[0] == ((-700.0, 0.0), (700.0, 0.0),
-                        [("t001", (-650.0, -50.0), (-350.0, 0.0)), ("t002", (-350.0, -50.0), (500.0, 0.0))])
-    assert built == [([[-800, 0, 800, 0]], [[0, 0, 100]])] and len(reads) == 1     # read and built once per map
-    # the engine's [] is its word the player can walk there: no pad, though the straight line would name one
-    answer["pads"] = "walk"
-    assert g.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == [] and len(reads) == 1 and len(built) == 1
-    # a map with no ground in the file: the straight-line answer as ever, and no Walk built for it
-    (east,) = g.hidden_jumps(PERION)
-    assert g.shortcut_path(PERION, _at(-700, 0), _at(700, 0)) == [east] and len(built) == 1 and len(reads) == 1
-    # the engine cannot place an end (None): the straight-line answer as ever, derived not guessed — the same
-    # synthetic world in a Graph with no ground for the map (its terrain read as empty, as a KB with no
-    # terrain file gives it) is what "falls back" means, so that Graph's answer is the expected one
-    answer["pads"] = "none"
-    data = {"maps": [
-        {**_map(HENESYS, "Henesys", town=True), "hidden": [pad("t001", -650, -350), pad("t002", -350, 500)]},
-        _map(PERION, "Perion", town=True)]}
-    g2 = routes.Graph(kb, data)
-    bare = routes.Graph(kb, data)
-    bare._terrain_data = {}
-    assert g2.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0)) == bare.shortcut_path(HENESYS, _at(-700, 0), _at(700, 0))
-
-
-def test_walk_path_gives_the_grounds_way_as_spots_on_the_picture(world):
-    """Graph.walk_path: the walking path the map's real ground finds (terrain.Walk.path), every point back
-    on the map's minimap picture as a fraction of its size — the inverse of the map units shortcut_path
-    hands the engine — so whoever draws it never sees a map unit. The floor here is two fragments joined
-    end to end and the ledge is 600 above it, out of reach of anything but the pad, so the way is a walk
-    east along the floor and the pad up to the ledge; its "pad" steps are shortcut_path's pads, in that
-    order. [] where there is nothing to draw: no ground for the map, an end the ground cannot place, no
-    player dot, no map — and nothing said in the log for any of them, the pad query saying it once a run
-    already."""
-    kb, _ = world
-    (Path(kb.root) / routes.TERRAIN_FILE).write_text(json.dumps({"source": "test", "maps": {HENESYS: {
-        "fh": [[-800, 300, 0, 300], [0, 300, 800, 300], [400, -300, 800, -300]], "lr": []}}}), encoding="utf-8")
-    g = routes.Graph(kb, {"maps": [
-        {**_map(HENESYS, "Henesys", town=True),
-         "hidden": [{"name": "t001", "x": 600, "y": 300, "to_x": 600, "to_y": -300}]},
-        {**_map(PERION, "Perion", town=True),
-         "hidden": [{"name": "east", "x": -650, "y": 0, "to_x": 500, "to_y": 0}]}]})
-    you, target = _at(-700, 300), _at(700, -300)
-    steps = g.walk_path(HENESYS, you, target)
-    assert steps == [(_at(-700, 300), "walk", ""), (_at(0, 300), "walk", ""), (_at(700, -300), "pad", "t001")]
-    assert all(0 <= x <= 1 and 0 <= y <= 1 for (x, y), _, _ in steps)
-    assert [name for _, kind, name in steps if kind == "pad"] == \
-           [j.name for j in g.shortcut_path(HENESYS, you, target)]
-    assert g.walk_path(PERION, _at(-700, 0), _at(700, 0)) == []        # no ground for the map
-    assert g.walk_path(HENESYS, _at(-700, 3000), target) == []         # the ground cannot place the player
-    assert g.walk_path(HENESYS, None, target) == [] and g.walk_path(HENESYS, you, None) == []
-    assert g.walk_path("999999999", you, target) == []
-    assert "_ground_fallback_said" not in g.__dict__                   # the path says nothing in the log
 
 
 def _secret(kb):
@@ -372,45 +166,23 @@ def test_a_portal_in_the_maps_hidden_list_is_a_hidden_step(world):
     assert not any(leg.hidden for out in world_graph.edges.values() for leg in out)     # no hidden lists: none
 
 
-def test_a_hidden_teleport_only_where_nothing_else_gets_there_unless_the_player_allows_them(world):
-    """By default a way takes as few hidden teleports as it can: the walk through both hunting grounds beats Henesys'
-    one-step teleport to Snail Garden, and Perion, reached only through one, is still a way (never out of reach). The
-    player's setting (hidden=True) takes the teleport where it makes the way shorter, and of two ways as short the one
-    through drawn portals. The AI's route says which step is the hidden one."""
+def test_a_hidden_teleport_only_where_nothing_else_gets_there(world):
+    """A way takes as few hidden teleports as it can: the walk through both hunting grounds beats Henesys'
+    one-step teleport to Snail Garden, and Perion, reached only through one, is still a way (never out of
+    reach). The AI's route says which step is the hidden one."""
     kb, _ = world
     g = _secret(kb)
     walk = g.route(HENESYS, GARDEN)
     assert _path(g, walk) == [("portal", "Henesys Hunting Ground I"), ("portal", "Henesys Hunting Ground II"),
                               ("portal", "Snail Garden")]
     assert not any(leg.hidden for leg in walk.legs)
-    assert [(leg.via, leg.hidden) for leg in g.route(HENESYS, GARDEN, hidden=True).legs] == [("hide01", True)]
-    for allowed in (False, True):
-        r = g.route(HENESYS, PERION, hidden=allowed)
-        assert _path(g, r) == [("portal", "Henesys Hunting Ground I"), ("portal", "Henesys Hunting Ground II"),
-                               ("portal", "Perion")]
-        assert [leg.hidden for leg in r.legs] == [False, False, True]
-    # Hunting Ground I to Snail Garden, two steps either way: back through Henesys' teleport, or on through Hunting
-    # Ground II's drawn portals
-    assert _path(g, g.route(HG1, GARDEN, hidden=True)) == [("portal", "Henesys Hunting Ground II"),
-                                                            ("portal", "Snail Garden")]
+    r = g.route(HENESYS, PERION)
+    assert _path(g, r) == [("portal", "Henesys Hunting Ground I"), ("portal", "Henesys Hunting Ground II"),
+                           ("portal", "Perion")]
+    assert [leg.hidden for leg in r.legs] == [False, False, True]
     steps = routes.describe(g, g.route(HENESYS, PERION))
     assert "take the portal on the right side to Henesys Hunting Ground I" in steps[0] and "hidden" not in steps[0]
     assert "3. In Henesys Hunting Ground II: take the hidden teleport to Perion (" in steps[2]
-
-
-def test_the_ways_views_route_with_the_players_setting(world, monkeypatch):
-    """The search's page (gamelookup.way_to) and the ◎ window (mapview.way_from_here) take the hidden teleports
-    where they make the way shorter only when asked (the player's route_hidden_teleports)."""
-    from maplehelper import gamelookup
-    from maplehelper.ui import mapview
-    kb, _ = world
-    g = _secret(kb)
-    monkeypatch.setattr(routes, "of", lambda kb: g)
-    assert len(gamelookup.way_to(kb, HENESYS, GARDEN).legs) == 3
-    assert [leg.via for leg in gamelookup.way_to(kb, HENESYS, GARDEN, hidden=True).legs] == ["hide01"]
-    assert len(mapview.way_from_here(kb, f"map/{GARDEN}", HENESYS).route.legs) == 3
-    way = mapview.way_from_here(kb, f"map/{GARDEN}", HENESYS, hidden=True)
-    assert [leg.via for leg in way.route.legs] == ["hide01"]
 
 
 def test_portals_go_one_way_and_a_short_walk_beats_a_cab(world):
@@ -601,8 +373,8 @@ def test_the_app_rebuilds_a_routes_file_without_the_hidden_teleports(tmp_path):
 
 def test_the_app_rebuilds_a_routes_file_without_the_landing_points(kb_copy):
     """A routes.json with the hidden teleports but not where they land (no "landings" mark: every KB built before
-    2026-10-14) is rebuilt once too. The new file says where each pad lands, so the route graph names the one that
-    shortens the walk to the way's next step, and carries the mark, so it is never fetched again."""
+    2026-10-14) is rebuilt once too. The new file says where each pad lands, so the route graph's hidden_jumps
+    carry that landing, and carries the mark, so it is never fetched again."""
     from maplehelper import mapdata
     from maplehelper.kb import KnowledgeBase
     old = {"source": "x", "taxi": [],
@@ -625,8 +397,8 @@ def test_the_app_rebuilds_a_routes_file_without_the_landing_points(kb_copy):
     assert data["landings"] is True
     assert data["maps"][0]["hidden"] == [{"name": "t001", "x": -600, "y": 0, "to_x": 500, "to_y": 0}]
     g = routes.Graph(KnowledgeBase(kb_copy))
-    step = g.route(HENESYS, HG1).legs[0]                                    # east00, at the map's right edge
-    assert g.shortcut(HENESYS, _at(-700, 0), step.spot).name == "t001"
+    assert g.route(HENESYS, HG1).legs[0].via == "east00"                    # at the map's right edge
+    assert [j.name for j in g.hidden_jumps(HENESYS)] == ["t001"]
     asked.clear()
     assert not mapdata.needs_refresh(kb_copy) and mapdata.refresh(kb_copy, fetch=fetch, pause=lambda: None) is False
     assert asked == []
@@ -640,45 +412,22 @@ def test_no_routes_file_is_not_an_old_one(tmp_path):
     assert not mapdata.needs_refresh(tmp_path)
 
 
-def test_terrain_data_keeps_only_pad_maps_and_only_the_ground():
-    """terrain.json: only maps with hidden teleports, only their footholds ("fh") and ropes/ladders ("lr" as
-    [x, y_a, y_b], a vertical segment whose third value is the other end's y) as the site's ints — "vr", "nd",
-    "ct" and "version" dropped — each map asked for once, and a map whose terrain can't be fetched left out
-    (the engine falls back for it)."""
-    from maplehelper import mapdata
-    maps = [{"id": "000000001", "portals": [{"name": "door", "type": 1, "toMapId": "000000002", "x": 5, "y": 6}],
-             "npcs": []},
-            {"id": "000000002", "portals": [], "npcs": []},
-            {"id": "000000003", "intraPortals": [{"name": "t001", "type": 3, "x": 1, "y": 2, "toX": 3, "toY": 4}],
-             "npcs": []}]
-    asked = []
-    ground = {"version": 2, "vr": [-400, -300, 400, 300], "fh": [[0, 0, 100, 0], [-50, 20, 0, 20]],
-              "lr": [[10, -90, 90, 7], [20, -40, 40, 7]], "nd": [[1, 2]], "ct": [3]}
-
-    def fetch(url):
-        asked.append(url)
-        return json.dumps(ground) if url == mapdata.MAP_TERRAIN.format(id="000000001") else None
-    assert mapdata.terrain_data(maps, fetch) == {"source": mapdata.SOURCE, "maps": {
-        "000000001": {"fh": [[0, 0, 100, 0], [-50, 20, 0, 20]], "lr": [[10, -90, 90], [20, -40, 40]]}}}
-    # the pad maps only, each once: 000000002 has no hidden teleport, 000000003's fetch failed and is left out
-    assert asked == [mapdata.MAP_TERRAIN.format(id="000000001"), mapdata.MAP_TERRAIN.format(id="000000003")]
-
-
-def test_routes_data_carries_the_terrain_marker_and_outdated_needs_it():
-    """routes.json marked "terrain" beside "landings": without the mark the app rebuilds it once (to fetch
-    terrain.json), with it never; an old file with no "hidden" list anywhere is still outdated either way."""
+def test_routes_data_carries_the_landing_marks_and_outdated_needs_them():
+    """routes.json marked "landings" and "all_pads" (and no "terrain"): without a mark the app rebuilds it
+    once, with them never; an old file with no "hidden" list anywhere is still outdated either way."""
     from maplehelper import mapdata
     data = mapdata.routes_data([{"id": "000000001", "name": "A", "portals": [], "npcs": []}], [])
-    assert data["terrain"] is True and data["landings"] is True
+    assert data["landings"] is True and data["all_pads"] is True and "terrain" not in data
     assert not mapdata.outdated(data)
-    assert mapdata.outdated({k: v for k, v in data.items() if k != "terrain"})
-    assert mapdata.outdated({"landings": True, "terrain": True,
+    assert mapdata.outdated({k: v for k, v in data.items() if k != "landings"})
+    assert mapdata.outdated({k: v for k, v in data.items() if k != "all_pads"})
+    assert mapdata.outdated({"landings": True, "all_pads": True,
                              "maps": [{"id": "000000001", "name": "A", "portals": [], "npcs": []}]})
 
 
-def test_refresh_writes_terrain_beside_routes_and_asks_a_shared_map_once(tmp_path):
-    """The rebuild writes both files: a map that is both a room (no minimap, with NPCs) and a pad map gets its
-    terrain file fetched once, used for its scene frame and its ground."""
+def test_refresh_asks_a_room_map_for_its_frame_once(tmp_path):
+    """The rebuild asks a room map (no minimap, with NPCs) for its terrain file once, for its scene frame,
+    and writes only routes.json — no terrain.json beside it."""
     from maplehelper import mapdata
     old = {"source": "x", "taxi": [], "maps": [{"id": "000000001", "name": "A", "portals": [], "npcs": []}]}
     mapdata.write_routes(tmp_path / "routes.json", old)
@@ -696,31 +445,29 @@ def test_refresh_writes_terrain_beside_routes_and_asks_a_shared_map_once(tmp_pat
     assert mapdata.refresh(tmp_path, fetch=fetch, pause=lambda: None) is True
     assert asked.count(terrain_url) == 1
     data = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
-    assert data["terrain"] is True and data["maps"][0]["scene"] == [800, 600, 400, 300]
-    assert json.loads((tmp_path / "terrain.json").read_text(encoding="utf-8")) == {
-        "source": mapdata.SOURCE, "maps": {"000000001": {"fh": [[0, 0, 9, 0]], "lr": [[1, 2, 3]]}}}
+    assert "terrain" not in data and data["maps"][0]["scene"] == [800, 600, 400, 300]
+    assert not (tmp_path / "terrain.json").exists()
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_refresh_leaves_no_temp_file_when_the_terrain_fetch_raises(tmp_path):
-    """A terrain fetch that raises leaves that map out of terrain.json (written, empty of it), still writes
-    routes.json, and leaves no half-written temp file behind."""
+def test_refresh_leaves_no_temp_file_when_the_frame_fetch_raises(tmp_path):
+    """A room map's frame fetch that raises leaves that map without a scene, still writes routes.json,
+    and leaves no half-written temp file (and no terrain.json) behind."""
     from maplehelper import mapdata
     old = {"source": "x", "taxi": [], "maps": [{"id": "000000001", "name": "A", "portals": [], "npcs": []}]}
     mapdata.write_routes(tmp_path / "routes.json", old)
-    maps = [{"id": "000000001", "name": "A", "hasMinimapImage": True, "minimapWidth": 160, "minimapHeight": 80,
-             "portals": [{"name": "door", "type": 1, "toMapId": "000000001", "x": 5, "y": 6}], "npcs": []}]
+    maps = [{"id": "000000001", "name": "Shop", "portals": [],
+             "npcs": [{"id": "8", "name": "Andre", "x": 0, "y": 0}]}]
 
     def fetch(url):
         if url == mapdata.MAPS_DATA:
             return json.dumps(maps)
         raise RuntimeError("site down")
     assert mapdata.refresh(tmp_path, fetch=fetch, pause=lambda: None) is True
-    assert json.loads((tmp_path / "terrain.json").read_text(encoding="utf-8")) == {"source": mapdata.SOURCE,
-                                                                                   "maps": {}}
-    assert json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))["terrain"] is True
+    data = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
+    assert "terrain" not in data and "scene" not in data["maps"][0]
+    assert not (tmp_path / "terrain.json").exists()
     assert not list(tmp_path.glob("*.tmp"))
-
 
 
 def test_validation_and_patch_notes(world, kb_copy, tmp_path):

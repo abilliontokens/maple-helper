@@ -175,15 +175,14 @@ class WayFromHere:
     tail: tuple = ()                   # Spot cards after the arrival (a door, a quest's turn-in)
 
 
-def way_from_here(kb, key: str, here_map: str | None, rides: bool = True, hidden: bool = False) -> WayFromHere | None:
+def way_from_here(kb, key: str, here_map: str | None, rides: bool = True) -> WayFromHere | None:
     """The way from the player's map to this map, NPC or quest giver, or None for today's entrances view (no live
     map, the map unknown to the graph, or no way there). Never empty: has_location stays independent of it.
-    rides=False: on foot (the game toolbar's Cabs & Teleports off): no cab, no NPC teleport, a boat still.
-    hidden=True: the player's route_hidden_teleports, a hidden teleport wherever it makes the way shorter."""
+    rides=False: on foot (the game toolbar's Cabs & Teleports off): no cab, no NPC teleport, a boat still."""
     g = routes.of(kb)
 
     def route(dest: str):
-        return g.route(here_map, dest, taxi=rides, teleport=rides, hidden=hidden)
+        return g.route(here_map, dest, taxi=rides, teleport=rides)
     if not here_map or here_map not in g.maps:
         return None
     cat = key.partition("/")[0]
@@ -668,8 +667,7 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         name = g.name(mid) if mid else (self.kb.get(key) or {}).get("name", key)
         here = LOCATION.here
         rides = self.settings is None or bool(self.settings["game_rides"])    # no settings (a test): as before
-        hidden = self.settings is not None and bool(self.settings["route_hidden_teleports"])
-        way = way_from_here(self.kb, key, here.map if here else None, rides, hidden)
+        way = way_from_here(self.kb, key, here.map if here else None, rides)
         if way is None:
             self._here_map = None
             title = "map_where_title" if key.startswith("map/") else "where_title"

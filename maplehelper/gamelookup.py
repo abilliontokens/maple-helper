@@ -96,13 +96,12 @@ def npc_place(kb, key: str, here_map: str | None = None) -> Place | None:
     return Place(mid, g.name(mid), _street(g, mid), g.picture_spot(mid, npc) if npc else None)
 
 
-def way_to(kb, here_map: str | None, to_map: str, rides: bool = True, hidden: bool = False) -> Way:
+def way_to(kb, here_map: str | None, to_map: str, rides: bool = True) -> Way:
     """The routes.of(kb).route(here, to) as a Way: unknown here or no route is known False with no legs.
-    rides=False: on foot (no cab, no NPC teleport; a boat still, a sea has no other way across). hidden=True: the
-    player's setting (route_hidden_teleports), a hidden teleport wherever it makes the way shorter (Graph.route)."""
+    rides=False: on foot (no cab, no NPC teleport; a boat still, a sea has no other way across)."""
     if here_map is None:
         return Way(None, (), False)
-    r = routes.of(kb).route(here_map, to_map, taxi=rides, teleport=rides, hidden=hidden)
+    r = routes.of(kb).route(here_map, to_map, taxi=rides, teleport=rides)
     if r is None:
         return Way(here_map, (), False)
     return Way(here_map, tuple(r.legs), True)

@@ -354,13 +354,12 @@ class _SettingsPanel(QWidget):
     glass colour of every window over the game as tiles of each tint and the lit buttons' accent as dots, the picked
     one ringed and named; Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead
     of words, and the bar's show/hide key in the same key box Settings has; Navigation, under a head of its own:
-    whether the arrow guides the whole way across maps, whether it says how many maps are left, whether the walking
-    path is drawn on the game's minimap, and whether Maple Helper's own map window draws each hidden teleport as an
-    arrow to where it lands — down this column, where there is room, rather than under the arrow's own switches,
-    which left the second one scrolling on a 1080p screen. The second holds the way and the minimap. Directions:
-    Cabs & Teleports, whether the way to a found NPC or map rides cabs and NPC teleports or walks, and Hidden
-    teleport routes, whether it may take the invisible teleports (the blue dots) when they make it shorter (the
-    bar's rides_toggled: a way shown is found again); Minimap: the hidden portals' blue dots and the route's arrow
+    whether the arrow guides the whole way across maps, whether it says how many maps are left, and whether Maple
+    Helper's own map window draws each hidden teleport as an arrow to where it lands — down this column, where
+    there is room, rather than under the arrow's own switches, which left the second one scrolling on a 1080p
+    screen. The second holds the way and the minimap. Directions: Cabs & Teleports, whether the way to a found
+    NPC or map rides cabs and NPC teleports or walks (the bar's rides_toggled: a way shown is found again);
+    Minimap: the hidden portals' blue dots and the route's arrow
     on the game's minimap, the arrow's colour as dots (the picked one ringed and named), its size on a slider in
     whole pixels, the name beside it (the map its portal leads to, or the NPC to talk to) and whether it flashes, a
     notice on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the
@@ -465,30 +464,23 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         self._hotkey_hint = self._hint(col)
         # Navigation: the arrow guiding the whole way across maps rather than one step, how many maps are left said
-        # beside it, the walking path drawn on the game's minimap, and — the odd one out, so its label names the
-        # window — the teleport arrows on Maple Helper's own map window. Their own head, and down this column: four
-        # more rows under the arrow's own switches left the second column scrolling on a 1080p screen at 125 %,
-        # where this one had room to spare.
+        # beside it, and — the odd one out, so its label names the window — the teleport arrows on Maple Helper's
+        # own map window. Their own head, and down this column: more rows under the arrow's own switches left the
+        # second column scrolling on a 1080p screen at 125 %, where this one had room to spare.
         self._nav_head = self._section(col)
         (self._route_follow_label, self._route_follow,
          self._route_follow_hint) = self._switch_row(col, self._pick_route_follow)
         col.addSpacing(10)
-        # the three under it say all there is to say in their labels: no hint line of their own
+        # the two under it say all there is to say in their labels: no hint line of their own
         self._route_steps_label, self._route_steps, _ = self._switch_row(col, self._pick_route_steps, hint=False)
-        col.addSpacing(10)
-        self._path_line_label, self._path_line, _ = self._switch_row(col, self._pick_path_line, hint=False)
         col.addSpacing(10)
         (self._teleport_arrows_label, self._teleport_arrows,
          _) = self._switch_row(col, self._pick_teleport_arrows, hint=False)
         col.addStretch(1)                           # (the shorter column's rows stay at its top)
-        # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button), and
-        # whether it may take the invisible teleports (the blue dots) where they make it shorter
+        # Directions: the way to a found NPC or map with cabs and NPC teleports, or on foot (was a bar button)
         col = way
         self._way_head = self._section(col, first=True)
         self._rides_label, self._rides, self._rides_hint = self._switch_row(col, self._pick_rides)
-        col.addSpacing(10)
-        (self._hidden_routes_label, self._hidden_routes,
-         self._hidden_routes_hint) = self._switch_row(col, self._pick_hidden_routes)
         # Minimap: the hidden portals' dots and the route's arrow on the game's minimap, each on or off, and whether
         # screenshots see the windows over the game (were on the Settings page)
         self._minimap_head = self._section(col)
@@ -631,7 +623,6 @@ class _SettingsPanel(QWidget):
                         (self._accent_label, "tbs_accent"), (self._accent_name, ACCENTS[accent_key][0]),
                         (self._opacity_label, "tbs_opacity"), (self._icons_label, "tbs_icons"),
                         (self._hotkey_label, "tb_hotkey"), (self._rides_label, "tb_rides"),
-                        (self._hidden_routes_label, "tb_hidden_routes"),
                         (self._hidden_portals_label, "minimap_hidden_portals"),
                         (self._route_arrow_label, "minimap_route_arrow"),
                         (self._arrow_color_label, "tbs_arrow_colour"),
@@ -643,7 +634,6 @@ class _SettingsPanel(QWidget):
                         (self._overlay_shots_label, "overlays_in_screenshots"),
                         (self._route_follow_label, "set_route_follow"),
                         (self._route_steps_label, "set_route_steps"),
-                        (self._path_line_label, "set_path_line"),
                         (self._teleport_arrows_label, "set_teleport_arrows")):
             lb.setText(bidi.plain(t(key), rtl))
         # each row's hint: its first sentence on the line under the row, all of it in the tooltip of that line, of the
@@ -652,7 +642,6 @@ class _SettingsPanel(QWidget):
                 (self._icons_hint, "tbs_icons_hint", self._icons_label, self._icons),
                 (self._hotkey_hint, "tb_hotkey_hint", self._hotkey_label, None),
                 (self._rides_hint, "tb_rides_tip", self._rides_label, self._rides),
-                (self._hidden_routes_hint, "tb_hidden_routes_tip", self._hidden_routes_label, self._hidden_routes),
                 (self._hidden_portals_hint, "minimap_hidden_portals_hint", self._hidden_portals_label,
                  self._hidden_portals),
                 (self._route_arrow_hint, "minimap_route_arrow_hint", self._route_arrow_label, self._route_arrow),
@@ -695,7 +684,6 @@ class _SettingsPanel(QWidget):
         self._hotkey.set_label(t("tb_hotkey"))
         # Directions', the Minimap's and Navigation's switches: each on from its setting, named as its label
         for switch, key, name in ((self._rides, "game_rides", "tb_rides"),
-                                  (self._hidden_routes, "route_hidden_teleports", "tb_hidden_routes"),
                                   (self._hidden_portals, "minimap_hidden_portals", "minimap_hidden_portals"),
                                   (self._route_arrow, "minimap_route_arrow", "minimap_route_arrow"),
                                   (self._arrow_label, "minimap_arrow_label", "tbs_arrow_label"),
@@ -704,7 +692,6 @@ class _SettingsPanel(QWidget):
                                   (self._overlay_shots, "overlays_in_screenshots", "overlays_in_screenshots"),
                                   (self._route_follow, "minimap_route_follow", "set_route_follow"),
                                   (self._route_steps, "minimap_route_steps", "set_route_steps"),
-                                  (self._path_line, "minimap_path_line", "set_path_line"),
                                   (self._teleport_arrows, "map_teleport_arrows", "set_teleport_arrows")):
             switch.setChecked(bool(s[key]))
             switch.set_accent(accent)
@@ -801,13 +788,6 @@ class _SettingsPanel(QWidget):
         self._settings["game_rides"] = self._rides.isChecked()
         self._bar.rides_toggled.emit()
 
-    def _pick_hidden_routes(self, _=False) -> None:
-        """Hidden teleport routes: written, and a way already shown is found again, through the invisible teleports
-        (the blue dots) where they make it shorter or past them (the bar's rides_toggled, as Cabs & Teleports: the app
-        redraws the search's page, the ◎ window and the route's arrow on the game's minimap)."""
-        self._settings["route_hidden_teleports"] = self._hidden_routes.isChecked()
-        self._bar.rides_toggled.emit()
-
     def _pick_hidden(self, _=False) -> None:
         """Hidden portals on the minimap: written, and the blue dots on the game's minimap come or go (the bar's
         minimap_toggled, which the app wires to the dots, the windows' captures and the pickers' pages)."""
@@ -878,12 +858,6 @@ class _SettingsPanel(QWidget):
     def _pick_route_steps(self, _=False) -> None:
         """How many maps are left: written, and the count comes or goes beside the arrow (minimap_toggled)."""
         self._settings["minimap_route_steps"] = self._route_steps.isChecked()
-        self._bar.minimap_toggled.emit()
-
-    def _pick_path_line(self, _=False) -> None:
-        """The walking path on the game's minimap: written, and the line the ground model works out is drawn there or
-        not (minimap_toggled)."""
-        self._settings["minimap_path_line"] = self._path_line.isChecked()
         self._bar.minimap_toggled.emit()
 
     def _pick_teleport_arrows(self, _=False) -> None:

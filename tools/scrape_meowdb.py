@@ -426,8 +426,7 @@ def fill_images() -> None:
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from maplehelper.mapdata import (MAPS_DATA, ROUTES, TERRAIN, routes_data, scene_frames, terrain_data,  # noqa: E402
-                                 write_routes, write_terrain)
+from maplehelper.mapdata import MAPS_DATA, ROUTES, routes_data, scene_frames, write_routes  # noqa: E402
 
 PATHFINDER = f"{BASE}/msclassic/pathfinder"
 _ID_LIST = re.compile(r'\[(?:"\d{9}",)+"\d{9}"\]')
@@ -468,8 +467,7 @@ def scrape_routes() -> int:
     if taxi is None:
         taxi = [t for t in old.get("taxi") or [] if t in ids]
         print("routes: taxi towns not read from the Pathfinder, keeping", taxi)
-    # (fetch looked up at each call: the tests answer the site's requests through it; memoised so a map needed
-    # for both its room frame and its ground is asked for once)
+    # (fetch looked up at each call: the tests answer the site's requests through it)
     fetched: dict[str, str | None] = {}
 
     def fetch_once(url):
@@ -478,12 +476,10 @@ def scrape_routes() -> int:
         return fetched[url]
     pause = lambda: time.sleep(DELAY_SECONDS)  # noqa: E731
     data = routes_data(maps, taxi, scene_frames(maps, fetch_once, pause))
-    terrain = terrain_data(maps, fetch_once, pause)
     if data == old:
         return 0
-    write_terrain(KB / TERRAIN, terrain)
     write_routes(path, data)
-    print(f"routes: {len(data['maps'])} maps, {len(terrain['maps'])} with ground, taxi {', '.join(taxi) or 'none'}")
+    print(f"routes: {len(data['maps'])} maps, taxi {', '.join(taxi) or 'none'}")
     return 1
 
 
