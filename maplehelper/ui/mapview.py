@@ -4,10 +4,11 @@ picture: the shop's way in). A quest: its giver's spot, then who it's turned in 
 quest card in the chat, or on a tile under "Maps", "NPCs" or "Quests"."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from .. import bidi, routes
@@ -25,6 +26,13 @@ CARD_SIDE = 24                        # a card's own left+right margins (its pic
 PICS_DEBOUNCE_MS = 120                # a drag sends resizes constantly: redraw the pictures once it settles
 MAX_ENTRANCES = 3                    # a map with many ways in: the first ones (the town first, see Graph.entrances)
 DOT = 7                              # the dot's radius in pixels, as NiaMeowDB's 11 px one on its smaller render
+# the hidden teleports the window draws with map_teleport_arrows on: violet, which is on none of the window's own
+# dots (the portal's orange, the NPC's green, the player's blue), thin and half-lit, so the arrows read without
+# ever shouting over those three
+TELEPORT, TELEPORT_DARK = QColor(170, 120, 255), QColor(20, 8, 38)
+PAD_R = 3.5                          # a pad's small hollow ring
+STUB = 11.0                          # the short tick a shared-landing pad gets instead of its own whole arrow
+SAME_LANDING = 0.01                  # landings this near each other are one (0.01 of the picture: ~5 px of 480)
 # the frames' gap: the two windows' see-through shadow margins overlap, so the panels show 8 px apart
 GAP = 8 - 2 * SHADOW
 POS_SETTING = "map_window_pos"       # where the player left the window: {"x", "y"}, plus {"w", "h"} once resized
@@ -282,8 +290,133 @@ def you_dot(pm: QPixmap, at: QPointF, r: float = DOT, glow: bool = True) -> None
     p.end()
 
 
+def _landing_groups(jumps) -> list[list]:
+    """The map's pads grouped by where they put the player: two landings within SAME_LANDING of each other are one
+    landing (Utah's Pig Farm's nine pads that all land at its west entrance come out as a single group)."""
+    groups: dict[tuple[int, int], list] = {}
+    for j in jumps:
+        groups.setdefault((round(j.to[0] / SAME_LANDING), round(j.to[1] / SAME_LANDING)), []).append(j)
+    return list(groups.values())
+
+
+def _bowed(a: QPointF, b: QPointF) -> tuple[QPainterPath, QPointF]:
+    """The arrow's gentle bow from a to b, and its control point (the arrowhead's heading): a straight line is easy
+    to lose among a minimap's own lines, and the bow keeps two arrows between near-identical points apart."""
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    n = math.hypot(dx, dy) or 1.0
+    k = min(16.0, n * 0.18)
+    ctrl = QPointF((a.x() + b.x()) / 2 - dy / n * k, (a.y() + b.y()) / 2 + dx / n * k)
+    path = QPainterPath(a)
+    path.quadTo(ctrl, b)
+    return path, ctrl
+
+
+def _arrow_head(p: QPainter, tip: QPointF, towards: QPointF, size: float = 6.0) -> None:
+    """The filled head at the landing end, pointing away from `towards` (the bow's control point)."""
+    dx, dy = tip.x() - towards.x(), tip.y() - towards.y()
+    n = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / n, dy / n
+    back = QPointF(tip.x() - ux * size, tip.y() - uy * size)
+    wing = QPointF(-uy * size * 0.55, ux * size * 0.55)
+    p.drawPolygon(QPolygonF([tip, back + wing, back - wing]))
+
+
+def _pad_ring(p: QPainter, at: QPointF, line: QColor, dark: QColor) -> None:
+    """A pad's own mark: a small hollow ring, dark-lined first so it reads over a pale map."""
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(dark, 2.6))
+    p.drawEllipse(at, PAD_R, PAD_R)
+    p.setPen(QPen(line, 1.4))
+    p.drawEllipse(at, PAD_R, PAD_R)
+
+
+def _stub(p: QPainter, frm: QPointF, to: QPointF, line: QColor, dark: QColor) -> None:
+    """A shared-landing pad's short tick, pointing the way its group's whole arrow goes."""
+    dx, dy = to.x() - frm.x(), to.y() - frm.y()
+    n = math.hypot(dx, dy) or 1.0
+    far = min(STUB, n * 0.5)
+    end = QPointF(frm.x() + dx / n * far, frm.y() + dy / n * far)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(dark, 2.6, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(frm, end)
+    p.setPen(QPen(line, 1.3, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(frm, end)
+
+
+def _landing_count(p: QPainter, at: QPointF, towards: QPointF, n: int, w: int, h: int,
+                   line: QColor, dark: QColor) -> None:
+    """How many pads land here, on a small dark pill near the arrowhead ("×9"): past the tip, or to one side of the
+    arrow where the picture's edge leaves no room there, so it covers neither the landing nor the line. Nothing for
+    a landing of one."""
+    if n < 2:
+        return
+    dx, dy = at.x() - towards.x(), at.y() - towards.y()
+    d = math.hypot(dx, dy) or 1.0
+    spots = []
+    for ox, oy in ((dx, dy), (-dy, dx), (dy, -dx)):      # past the tip, then either side of the arrow
+        cx = min(max(at.x() + ox / d * 17, 16.0), w - 16.0)
+        cy = min(max(at.y() + oy / d * 15, 9.0), h - 9.0)
+        spots.append((math.hypot(cx - at.x(), cy - at.y()), cx, cy))
+    _, cx, cy = max(spots)
+    box = QRectF(cx - 14, cy - 8, 28, 16)
+    pill = QColor(dark)
+    pill.setAlpha(215)
+    font = p.font()
+    font.setPointSizeF(7.5)
+    font.setBold(True)
+    p.setFont(font)
+    p.setPen(Qt.NoPen)
+    p.setBrush(pill)
+    p.drawRoundedRect(box, 5, 5)
+    p.setPen(QPen(line))
+    p.drawText(box, Qt.AlignCenter, f"×{n}")
+
+
+def draw_teleports(pm: QPixmap, jumps) -> None:
+    """The map's hidden teleports on its picture (routes.Jump, as NiaMeowDB's own picture draws them): a small
+    hollow ring on each pad and a bowed arrow to where that pad puts the player.
+
+    Pads that land on the same point are drawn as one group rather than one arrow each: nine of Utah's Pig Farm's
+    sixteen land at its west entrance, and nine lines converging there would be a starburst that buries the landing
+    and the map under it. So the group's farthest pad carries the whole arrow — the longest one shows the heading
+    most clearly and is the one worth following — every other pad of the group keeps its ring plus a short tick
+    along the same heading (each pad still says "a teleport, going that way"), and the arrowhead wears "×9", which
+    reads as "these nine pads all put me here" in one glance instead of nine crossings.
+
+    Quiet by design: violet (on none of the window's own dots), thin, and drawn before them, so the orange portal,
+    the green NPC and the player's blue dot stay the loudest things on the picture. () costs nothing."""
+    if not jumps or pm.isNull():
+        return
+    w, h = pm.width(), pm.height()
+    line, dark = QColor(TELEPORT), QColor(TELEPORT_DARK)
+    line.setAlpha(235)
+    dark.setAlpha(165)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    for group in _landing_groups(jumps):
+        land = QPointF(group[0].to[0] * w, group[0].to[1] * h)
+        pads = [QPointF(j.frm[0] * w, j.frm[1] * h) for j in group]
+        lead = max(pads, key=lambda q: math.hypot(q.x() - land.x(), q.y() - land.y()))
+        path, ctrl = _bowed(lead, land)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(dark, 3.4, Qt.SolidLine, Qt.RoundCap))       # a dark underlay: readable over a pale map
+        p.drawPath(path)
+        p.setPen(QPen(line, 1.6, Qt.SolidLine, Qt.RoundCap))
+        p.drawPath(path)
+        p.setPen(QPen(dark, 1.0))
+        p.setBrush(line)
+        _arrow_head(p, land, ctrl)
+        for q in pads:
+            if q is not lead:
+                _stub(p, q, land, line, dark)
+            _pad_ring(p, q, line, dark)
+        _landing_count(p, land, ctrl, len(group), w, h, line, dark)
+    p.end()
+
+
 def legend_icon(kind: str, ratio: float = 2.0) -> QPixmap:
-    """The legend's small dot ("you", "portal", "npc"), drawn as on the map so the two match at a glance."""
+    """The legend's small mark ("you", "portal", "npc", or the hidden teleport's ring-and-arrow), drawn as on the
+    map so the two match at a glance."""
     side, r = 16, 5.5
     pm = QPixmap(round(side * ratio), round(side * ratio))
     pm.setDevicePixelRatio(ratio)
@@ -291,6 +424,17 @@ def legend_icon(kind: str, ratio: float = 2.0) -> QPixmap:
     at = QPointF(side / 2, side / 2)
     if kind == "you":
         you_dot(pm, at, r, glow=False)
+    elif kind == "teleport":
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(TELEPORT, 1.4))
+        p.drawEllipse(QPointF(3.5, at.y()), 2.6, 2.6)
+        p.drawLine(QPointF(6.5, at.y()), QPointF(11.5, at.y()))
+        p.setPen(QPen(TELEPORT, 1.0))
+        p.setBrush(TELEPORT)
+        _arrow_head(p, QPointF(14.5, at.y()), QPointF(8, at.y()), 4.5)
+        p.end()
     else:
         fill, ring = _mark_colors(kind == "npc")
         p = QPainter(pm)
@@ -303,10 +447,11 @@ def legend_icon(kind: str, ratio: float = 2.0) -> QPixmap:
 
 
 class MapLegend(QWidget):
-    """What the dots on a step's picture are: "● You are here   ● The portal" (or the NPC), above the picture.
-    The player's entry hides while the minimap read has no dot for them."""
+    """What the marks on a step's picture are: "● You are here   ● The portal" (or the NPC), and, on a picture that
+    has hidden teleports, "⊸ Hidden teleport and where it lands", above the picture. The player's entry hides while
+    the minimap read has no dot for them; the teleport entry only where that picture draws arrows."""
 
-    def __init__(self, t, npc: bool, you: bool):
+    def __init__(self, t, npc: bool, you: bool, teleports: bool = False):
         super().__init__()
         rtl = t.rtl
         self.setLayoutDirection(Qt.RightToLeft if rtl else Qt.LeftToRight)
@@ -315,6 +460,8 @@ class MapLegend(QWidget):
         lay.setSpacing(14)
         self.you = self._entry(lay, "you", t("legend_you"), rtl)
         self.target = self._entry(lay, "npc" if npc else "portal", t("legend_npc" if npc else "legend_portal"), rtl)
+        self.teleport = self._entry(lay, "teleport", t("map_teleport_legend"), rtl)
+        self.teleport.setVisible(bool(teleports))
         lay.addStretch(1)
         self.show_you(you)
 
@@ -337,12 +484,14 @@ class MapLegend(QWidget):
 
 
 def route_picture(path, spot: tuple[float, float] | None = None, npc: bool = False,
-                   you: tuple[float, float] | None = None, cap_w: int = PICTURE_W) -> QPixmap:
-    """A step's picture: the portal/NPC dot as marked_picture draws it, plus the player's blue dot (a white ring,
-    so it stands out from the orange and green ones). Either dot missing: just the other."""
+                   you: tuple[float, float] | None = None, jumps=(), cap_w: int = PICTURE_W) -> QPixmap:
+    """A step's picture: the map's hidden teleports (jumps: routes.Jump, drawn first so they stay under the dots),
+    the portal/NPC dot as marked_picture draws it, then the player's blue dot (a white ring, so it stands out from
+    the orange and green ones). Anything missing: just the rest; no jumps costs nothing."""
     pm = _scaled(path, cap_w)
     if pm.isNull():
         return pm
+    draw_teleports(pm, jumps)
     if spot is not None:
         _dot(pm, spot, *_mark_colors(npc))
     if you is not None:
@@ -577,16 +726,24 @@ class MapLocationDialog(EdgeResize, GlassDialog):
             if self._legend is not None:
                 self._legend.show_you(you is not None)
             g = routes.of(self.kb)
-            cap = self._picture_cap()
+            cap, jumps = self._picture_cap(), self._jumps(g, mid)
             if leg is not None:
-                pm = route_picture(g.minimap(mid), leg.spot, leg.kind != "portal", you, cap_w=cap)
-                pic._pic_spec = (g.minimap(mid), leg.spot, leg.kind != "portal", you)
+                spec = (g.minimap(mid), leg.spot, leg.kind != "portal", you, jumps)
             else:
-                pm = route_picture(g.minimap(mid), npc_at, npc_at is not None, you, cap_w=cap)
-                pic._pic_spec = (g.minimap(mid), npc_at, npc_at is not None, you)
+                spec = (g.minimap(mid), npc_at, npc_at is not None, you, jumps)
+            pm = route_picture(*spec, cap_w=cap)
+            pic._pic_spec = spec
             pic.setPixmap(pm)
         except RuntimeError:
             pass                                       # closed meanwhile
+
+    def _jumps(self, g, mid: str) -> tuple:
+        """The map's hidden teleports for its picture (routes.Graph.hidden_jumps, worked out once per map there):
+        () with ⚙'s map_teleport_arrows off, and on a map with none, so a picture without them costs nothing.
+        Part of every picture's _pic_spec, so a resize redraws them with the rest."""
+        if self.settings is not None and not self.settings["map_teleport_arrows"]:
+            return ()                                  # no settings (a test): on, as the setting defaults
+        return tuple(g.hidden_jumps(mid))
 
     def _picture_cap(self) -> int:
         """The width a map picture may take: the card's inside width at the window's current width."""
@@ -595,7 +752,8 @@ class MapLocationDialog(EdgeResize, GlassDialog):
 
     def _rescale_pictures(self) -> None:
         """The window changed width: redraw the shown pictures at the card's new width, where they are (no rebuild,
-        the scroll position stays). The dots draw after scaling, from fractions, so they stay where they belong."""
+        the scroll position stays). The dots and the teleport arrows draw after scaling, from the spec's fractions,
+        so they stay where they belong."""
         if self.key is None:
             return
         cap = self._picture_cap()
@@ -656,10 +814,14 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         says = QLabel(bidi.plain(t(spot.says, **args), rtl), objectName="RowLabel")
         says.setWordWrap(True)
         col.addWidget(says)
+        jumps = self._jumps(g, spot.map)
         pic = QLabel()
-        pic.setPixmap(marked_picture(g.minimap(spot.map), spot.at, spot.npc, cap_w=self._shown_cap))
-        pic._pic_spec = (g.minimap(spot.map), spot.at, spot.npc, None)    # redone at this width on resize
+        spec = (g.minimap(spot.map), spot.at, spot.npc, None, jumps)      # redone at this width on resize
+        pic.setPixmap(route_picture(*spec, cap_w=self._shown_cap))
+        pic._pic_spec = spec
         pic.setAccessibleName(t(spot.says, name=spot.name, inside=spot.inside))
+        if jumps:
+            self._legend_above(card, col.count(), spot.npc, None, True)   # what the arrows are, above the picture
         col.addWidget(pic, 0, Qt.AlignHCenter)
         return card
 
@@ -668,20 +830,29 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                        spec=None) -> tuple[QFrame, QLabel]:
         return step_card(self.t, routes.of(self.kb), number, good, mid, says, pm, spec)
 
+    def _legend_above(self, card, index: int, npc: bool, you, teleports: bool, target: bool = True) -> MapLegend:
+        """A card's legend of its marks, inserted above its picture (`index`: the picture's place in the card's
+        column); the teleport line only on a picture that has arrows."""
+        legend = MapLegend(self.t, npc, you is not None, teleports)
+        legend.target.setVisible(target)
+        card.layout().insertWidget(index, legend)
+        return legend
+
     def _route_card(self, g, number: str, mid: str, leg, you, first: bool = False) -> QFrame:
-        """One step of the way: what to do on this map, its minimap with the portal/NPC ringed, and on the first
-        card the player's blue dot and a legend of the dots."""
-        t = self.t
-        path = g.minimap(mid)
+        """One step of the way: what to do on this map, its minimap with the portal/NPC ringed and the map's hidden
+        teleports arrowed, and on the first card the player's blue dot. A legend of the marks on the first card, and
+        on any later one whose picture has teleports (nothing else there needs naming twice)."""
+        t, path, jumps = self.t, g.minimap(mid), self._jumps(g, mid)
+        npc = leg.kind != "portal"
+        spec = (path, leg.spot, npc, you, jumps)
         card, pic = self._numbered_card(number, False, mid, route_says(t, g, leg),
-                                        route_picture(path, leg.spot, leg.kind != "portal", you,
-                                                      cap_w=self._shown_cap),
-                                        g.name(mid), (path, leg.spot, leg.kind != "portal", you))
+                                        route_picture(*spec, cap_w=self._shown_cap), g.name(mid), spec)
         if first:
-            # what each dot is, above the picture (the owner's, 2026-10-08: "which dot is me?")
-            self._legend = MapLegend(t, leg.kind != "portal", you is not None)
-            card.layout().insertWidget(2, self._legend)
+            # what each mark is, above the picture (the owner's, 2026-10-08: "which dot is me?")
+            self._legend = self._legend_above(card, 2, npc, you, bool(jumps))
             self._first = (pic, mid, leg, None)
+        elif jumps:
+            self._legend_above(card, 2, npc, None, True)
         return card
 
     def _npc_at(self, g, npc: str):
@@ -693,14 +864,16 @@ class MapLocationDialog(EdgeResize, GlassDialog):
         return hit[1] if hit else None
 
     def _arrival_card(self, g, way: WayFromHere) -> QFrame:
-        """The destination: arrived, its picture (the NPC's green dot for an NPC target)."""
+        """The destination: arrived, its picture (the NPC's green dot for an NPC target, its hidden teleports
+        arrowed, with a legend of them where there are any)."""
         t = self.t
         npc_at = self._npc_at(g, way.npc)
-        path = g.minimap(way.dest)
+        jumps = self._jumps(g, way.dest)
+        spec = (g.minimap(way.dest), npc_at, npc_at is not None, None, jumps)
         card, _pic = self._numbered_card("✓", True, way.dest, t("route_arrive"),
-                                        route_picture(path, npc_at, npc_at is not None, None,
-                                                      cap_w=self._shown_cap),
-                                        g.name(way.dest), (path, npc_at, npc_at is not None, None))
+                                        route_picture(*spec, cap_w=self._shown_cap), g.name(way.dest), spec)
+        if jumps:
+            self._legend_above(card, 2, npc_at is not None, None, True, npc_at is not None)
         return card
 
     def _clear_route(self) -> None:
@@ -712,16 +885,14 @@ class MapLocationDialog(EdgeResize, GlassDialog):
                 LOCATION.set_route_dest(None)
 
     def _here_card(self, g, way: WayFromHere, you) -> QFrame:
-        """Already on the destination map: said, with the player's blue dot (and the NPC's for an NPC)."""
+        """Already on the destination map: said, with the player's blue dot (and the NPC's for an NPC), the map's
+        hidden teleports arrowed under them."""
         t = self.t
         npc_at = self._npc_at(g, way.npc)
-        path = g.minimap(way.dest)
+        jumps = self._jumps(g, way.dest)
+        spec = (g.minimap(way.dest), npc_at, npc_at is not None, you, jumps)
         card, pic = self._numbered_card("✓", True, way.dest, t("route_here_already"),
-                                        route_picture(path, npc_at, npc_at is not None, you,
-                                                      cap_w=self._shown_cap),
-                                        g.name(way.dest), (path, npc_at, npc_at is not None, you))
-        self._legend = MapLegend(t, True, you is not None)
-        self._legend.target.setVisible(npc_at is not None)
-        card.layout().insertWidget(2, self._legend)
+                                        route_picture(*spec, cap_w=self._shown_cap), g.name(way.dest), spec)
+        self._legend = self._legend_above(card, 2, True, you, bool(jumps), npc_at is not None)
         self._first = (pic, way.dest, None, npc_at)
         return card

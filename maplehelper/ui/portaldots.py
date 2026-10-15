@@ -49,7 +49,29 @@ never reads as the NPC itself; on a pill in its arrow's colours, its letters siz
 mark's shaft or inward of the sign at the edge, all of it inside the panel) and whether they blink
 (minimap_arrow_flash: both hidden and shown again together every FLASH_MS, their names with them, to catch the eye
 on a busy minimap; the dots and the ring never blink). Both at once (a guide here while the route leads elsewhere):
-the NPC's is drawn over the route's."""
+the NPC's is drawn over the route's.
+
+Under either arrow the walking path the ground model works out is drawn along its points
+(minimap_path_line, on unless it is turned off: routes.Graph.walk_path from the player's own dot to what that arrow
+guides to — the route's next step, the guided NPC), in its arrow's own colours but quieter: this is the trail, the
+arrow is the instruction, and the trail never competes with it. Only the part of the map the minimap shows is drawn:
+a point off it (View.at) breaks the line clean rather than cutting a stroke across the panel. A pad of the way is a
+jump in the line, not a walk across the map — its teleport is a dotted hop from the pad to where it lands. The path
+costs a ground search, so it is asked where the arrow's own answer is asked, once a read has the player's dot in
+another of the picture's cells (SHORTCUT_CELLS, as the pad chain's own asking), and never for a follow frame; it
+blinks with its arrow and is drawn under it and under the numbered markers.
+
+Beside the route's arrow its name pill says how many maps are still to go (minimap_route_steps: arrow_maps_left,
+arrow_maps_left_one on the last one), and on the read after a wrong portal that the way was worked out again from
+where the player stands (route_off_track). The count comes from LOCATION.journey, the way from the player's CURRENT
+map to the map they picked: this window works it out (journey.of) where it works out the arrow's own step and
+publishes it (LOCATION.set_journey), once for a map, a destination and the switches and never for a follow frame,
+and clears it whenever the arrow guides nothing. A panel with no room for the count keeps the name alone.
+
+Guiding the whole way (minimap_route_follow, on unless it is turned off) decides what happens once the player
+leaves the map the arrow was armed on: on, the map they picked stands and the way is worked out afresh from
+wherever they are, map after map, which is what the journey gives; off, the arrow guides only on the map it was
+armed from and goes quiet the moment they leave it."""
 from __future__ import annotations
 
 import logging
@@ -61,7 +83,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QWidget
 
-from .. import bidi, routes, terrain
+from .. import bidi, journey, routes, terrain
 from ..i18n import I18n
 from ..kb import KnowledgeBase
 from ..minimap import Here, View
@@ -110,6 +132,12 @@ TAG_CHARS = 18                  # a name longer than this many characters is cut
 TAG_PAD_X, TAG_PAD_Y = 0.5, 0.1     # the pill's room around its words, across and above/below, in its letters' size
 TAG_ALPHA = 0.85                # how opaque the pill's fill (the arrow's rim) is, the minimap a touch through it
 TAG_GAP_PX = 2                  # how far clear of the arrow it stays, in screen pixels
+TAG_SEP = " · "                 # between the name and how many maps are still to go (minimap_route_steps)
+# the walking path under an arrow (minimap_path_line, _path_segs): a line along routes.Graph.walk_path's points in
+# the arrow's own fill, thinner than the arrow and this see-through, so it reads as the trail and never competes
+# with the instruction; a pad of the way is a dotted hop from the pad to where it lands, never a walk across the map
+PATH_PEN_PX = 2.0
+PATH_ALPHA = 0.55
 # a later pad of a chain (_chain_marks), numbered in the arrow's colours beside the first pad's arrow
 CHAIN_MARK_PX = 14                  # its marker's width in screen pixels: smaller than the arrow (ARROW_SIZE_PX
                                     # long), wider than a blue dot, its bright fill on its dark rim and its order
@@ -235,6 +263,16 @@ def _switch(settings, name: str) -> bool:
         return bool(settings[name])
     except (KeyError, TypeError):
         return False
+
+
+def _on(settings, name: str) -> bool:
+    """One of the player's navigation switches that is on unless they turn it off (minimap_route_follow,
+    minimap_route_steps, minimap_path_line); on when the settings can't say, as they default."""
+    try:
+        value = settings[name]
+    except (KeyError, TypeError):
+        return True
+    return True if value is None else bool(value)
 
 
 def _shape(points, scale: float) -> QPolygonF:
@@ -480,7 +518,7 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     if taken is not None and not _on_landing_side(you, taken):
         taken = None                                # back on its pad's side: the given-up lapses with the side
     given_up = jump is not None and taken is not None and taken.name == jump.name
-    now = (int(you[0] * SHORTCUT_CELLS), int(you[1] * SHORTCUT_CELLS))
+    now = _cell(you)
     if now == cell and not given_up:
         if pending is not None:
             there, reads, candidate = pending
@@ -522,6 +560,42 @@ def _ask_shortcut(graph, here: Here, target: tuple[float, float], kept: tuple) -
     seen = fresh[0] if fresh and _on_pad(you, fresh[0]) else (
         seen if seen is not None and fresh and seen.name == fresh[0].name else None)
     return fresh, now, seen, taken, you, standing[1] if fresh else None, None
+
+
+def _cell(spot: tuple[float, float] | None) -> tuple[int, int] | None:
+    """Which of the picture's cells the player's dot falls in (SHORTCUT_CELLS each way), the measure every search
+    this window pays for is asked by: their dot moves a little on every read and not at all between, so a cell it
+    has not left is an answer already given. None without a dot read."""
+    return None if spot is None else (int(spot[0] * SHORTCUT_CELLS), int(spot[1] * SHORTCUT_CELLS))
+
+
+def _ask_path(graph, here: Here, target: tuple[float, float], kept: tuple) -> tuple:
+    """The walking path from the player's own dot to a spot on their map (routes.Graph.walk_path: its points on the
+    minimap picture, how each was reached and a pad's name), for the line drawn under the arrow that guides there
+    (PortalDots._path_segs). `kept` is the last path and what it was asked for — (the map, the spot, the cell of
+    their dot) — handed back as they are now: a ground search costs about what a pad chain's does, so it is asked
+    on the same measure (_cell) and never for a follow frame, which leaves what it drew in place. [] from a graph
+    that cannot answer one (an older stand-in) and from ground that has no way."""
+    key = (here.map, target, _cell(here.spot))
+    if key == kept[0]:
+        return kept
+    walk = getattr(graph, "walk_path", None)
+    return key, (walk(here.map, here.spot, target) if walk is not None else [])
+
+
+def _steps_words(settings, j) -> tuple[str, dict] | None:
+    """What the count beside the route's arrow says (minimap_route_steps, LOCATION.journey), an i18n key and what it
+    carries: how many maps are still to pass through (arrow_maps_left; arrow_maps_left_one on the last one), or that
+    the way was worked out again from where the player stands after they strayed off it (route_off_track, the read
+    after). None with the switch off, with no journey published, and on the map they picked: there is nothing left
+    to count."""
+    if j is None or not _on(settings, "minimap_route_steps"):
+        return None
+    if j.off:
+        return "route_off_track", {}
+    if j.arrived or j.left < 1:
+        return None
+    return ("arrow_maps_left_one", {}) if j.left == 1 else ("arrow_maps_left", {"n": j.left})
 
 
 def _tag_words(graph, leg: routes.Leg, jump: routes.Jump | None = None) -> tuple[str, str]:
@@ -617,7 +691,13 @@ class PortalDots(QWidget):
     (minimap_arrow_size), the name beside each (minimap_arrow_label, in the language the app's settings pick: the
     window is made without one) and their blink (minimap_arrow_flash): one timer on the window hiding and showing
     both arrows, their names and their chains' numbered markers alone every FLASH_MS, together, while either is
-    placed and the setting is on. The guided NPC's is drawn over the route's."""
+    placed and the setting is on. The guided NPC's is drawn over the route's. Under each arrow its walking path is
+    drawn (minimap_path_line, _ask_path, _path_segs: routes.Graph.walk_path toward that arrow's own spot, asked on
+    the cell the pad chains are asked on and placed afresh each refresh, its pieces broken where the part shown
+    ends and a pad's hop dotted), and beside the route's arrow's name how many maps are still to go
+    (minimap_route_steps, _steps_words) from the journey this window works out and publishes at the arrow's own
+    cache point (_journey, LOCATION.journey). With Guide the whole way off (minimap_route_follow) the route's
+    arrow guides only on the map it was armed on and goes quiet, journey and all, once the player leaves it."""
 
     def __init__(self, kb: KnowledgeBase, settings: Settings):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -655,6 +735,21 @@ class PortalDots(QWidget):
         self._arrow_platform: int | None = None
         self._arrow_pending: tuple | None = None     # a platform not yet arrived on (_ask_shortcut's pending)
         self._arrow_said: tuple | None = None   # what the log last said about the arrow's placing (_say)
+        # the map the route was armed on, as (the map picked, the player's map then): with Guide the whole way off
+        # (minimap_route_follow) the arrow guides on that map alone and goes quiet once they leave it
+        self._armed: tuple[str, str] | None = None
+        # what the journey last published to LOCATION was worked out for (_journey: the player's map, the map
+        # picked and the switches; None while the arrow guides nothing), so a follow frame publishes nothing
+        self._journey_key: tuple[str, str, bool, bool] | None = None
+        # the walking path drawn under each arrow (minimap_path_line, _ask_path): what routes.Graph.walk_path last
+        # answered toward the arrow's spot and what it was asked for (the map, that spot, the cell of the player's
+        # dot), and the segments placed from it at each refresh (_path_segs), each (from, to, a teleport's hop)
+        self._path_key: tuple | None = None
+        self._path_pts: list = []
+        self._path: list[tuple[QPointF, QPointF, bool]] = []
+        self._npc_path_key: tuple | None = None
+        self._npc_path_pts: list = []
+        self._npc_path: list[tuple[QPointF, QPointF, bool]] = []
         self._ratio = 1.0
         # the arrows' look, from the settings at each refresh: how many times their drawn size (_size_scale), and
         # the route's fill and rim (_arrow_colors; the guided NPC's are always the ring's, RING_FILL and RING_RIM)
@@ -701,6 +796,8 @@ class PortalDots(QWidget):
         self._kb = kb
         self._arrow_key = None      # another KB, another graph: the arrow's way routed and its shortcut asked again
         self._npc_key = None        # ... and the guided NPC's shortcut asked again
+        self._journey_key = None    # ... the journey worked out again
+        self._path_key = self._npc_path_key = None      # ... and the walking paths asked again
         self.refresh()
 
     def refresh(self, _what: object = None) -> None:
@@ -737,6 +834,14 @@ class PortalDots(QWidget):
         leg, jump = self._next_step(graph, here) or (None, None)
         npc = guide is not None and bool(self._settings["minimap_route_arrow"])
         npc_jump = self._npc_shortcut(graph, here, guide) if npc else None
+        # the walking path under each arrow, toward what that arrow guides to (the way's next step, the NPC
+        # itself: the trail is the whole walk, pads and all, not the walk to a pad): asked by the cell of the
+        # player's dot, as the pad chains are, so a follow frame asks nothing (_ask_path)
+        line = _on(self._settings, "minimap_path_line")
+        self._path_key, self._path_pts = (_ask_path(graph, here, leg.spot, (self._path_key, self._path_pts))
+                                          if leg is not None and line else (None, []))
+        self._npc_path_key, self._npc_path_pts = (
+            _ask_path(graph, here, guide[1], (self._npc_path_key, self._npc_path_pts)) if npc and line else (None, []))
         scale = _size_scale(self._settings)     # the edge arrow's room in the panel depends on its size
         aim = _aim(view, jump.frm if jump is not None else leg.spot, here.spot, scale) if leg is not None else None
         npc_aim = _aim(view, npc_jump.frm if npc_jump is not None else guide[1], here.spot, scale) if npc else None
@@ -765,13 +870,18 @@ class PortalDots(QWidget):
         self._arrow_fill, self._arrow_rim = _arrow_colors(self._settings)
         # the names beside them, with their setting on: placed by the arrows just placed, inside the panel shown
         label = self._settings["minimap_arrow_label"]
-        self._tag = self._make_tag(_tag_words(graph, leg, jump), aim, view.panel) if aim is not None and label else None
+        self._tag = (self._make_tag(_tag_words(graph, leg, jump), aim, view.panel,
+                                    _steps_words(self._settings, LOCATION.journey))
+                     if aim is not None and label else None)
         self._npc_tag = (self._make_tag(_npc_words(self._kb, guide[2], npc_jump), npc_aim, view.panel)
                          if npc_aim is not None and label else None)
         # the later pads of each arrow's chain, numbered in order: only the ones the part shown has, and none the
         # arrow's name pill would cover (_chain_marks); a one-pad chain (or none) has none
         self._arrow_marks = self._chain_marks(view, self._arrow_chain, self._tag) if aim is not None else []
         self._npc_marks = self._chain_marks(view, self._npc_chain, self._npc_tag) if npc_aim is not None else []
+        # ... and each arrow's path laid on the box, broken wherever the part shown hasn't a point (_path_segs)
+        self._path = self._path_segs(view, self._path_pts) if aim is not None else []
+        self._npc_path = self._path_segs(view, self._npc_path_pts) if npc_aim is not None else []
         self._flash((self._arrow is not None or self._npc_arrow is not None)
                     and bool(self._settings["minimap_arrow_flash"]))
         if self.geometry() != rect:
@@ -790,14 +900,26 @@ class PortalDots(QWidget):
         (settings["game_rides"]), through the hidden teleports where they make it shorter when the player allows
         them (settings["route_hidden_teleports"], which the shortcut needs too: off, never a pad), as the search's
         page and the ◎ window draw it. None with the arrow's setting off, no route picked or already on its map, no
-        way known, or a first step with no spot on the minimap. Routed only when the player's map, the route's map
+        way known, or a first step with no spot on the minimap — and, with Guide the whole way off
+        (minimap_route_follow), once the player has left the map the route was armed on: the arrow guides there and
+        nowhere else then, while on (the default) the map they picked stands and the way is worked out from
+        wherever they now are. Routed only when the player's map, the route's map
         or a switch changes, the step kept for the refreshes after (set_kb forgets it) and its shortcut asked anew:
         refresh runs on the GUI thread for every follow frame while the minimap scrolls, and Graph.route is a
-        Dijkstra search over the whole map graph."""
+        Dijkstra search over the whole map graph. The journey behind the count beside the arrow is published at that
+        same point and on that same key (_journey)."""
         dest = LOCATION.route_dest
-        if not self._settings["minimap_route_arrow"] or not dest or dest == here.map:
-            return None
         rides, hidden = _switch(self._settings, "game_rides"), _switch(self._settings, "route_hidden_teleports")
+        if not dest:
+            self._armed = None
+        elif self._armed is None or self._armed[0] != dest:
+            self._armed = (dest, here.map)      # armed here: the map it guides on with Guide the whole way off
+        quiet = self._armed is not None and here.map != self._armed[1] and not _on(self._settings,
+                                                                                   "minimap_route_follow")
+        self._journey(graph, here, dest, rides, hidden,
+                      bool(dest) and bool(self._settings["minimap_route_arrow"]) and not quiet)
+        if not self._settings["minimap_route_arrow"] or not dest or dest == here.map or quiet:
+            return None
         key = (here.map, dest, rides, hidden)
         if key != self._arrow_key:
             route = getattr(graph, "route", None)     # a stand-in graph that can't route (an older test's): no arrow
@@ -820,6 +942,21 @@ class PortalDots(QWidget):
             self._arrow_seen, self._arrow_taken, self._arrow_last, self._arrow_platform, self._arrow_pending = None, None, None, None, None
             return leg, None
         return leg, self._shortcut(graph, here, leg)
+
+    def _journey(self, graph, here: Here, dest: str | None, rides: bool, hidden: bool, guiding: bool) -> None:
+        """Work out the whole way from the player's CURRENT map to the map they picked (journey.of: its legs from
+        here, how many maps are still to go, and whether they strayed off the way it last knew) and publish it for
+        everyone who shows it — the count beside this window's own arrow first of all (_steps_words,
+        LOCATION.journey). Nobody else writes it. Worked out where the arrow's own step is worked out and on the
+        same key (the player's map, the map picked, the switches), so the follow frames between reads publish
+        nothing and nothing new is searched a frame; cleared (None) whenever the arrow guides nothing: no route
+        picked, its setting off, or the player off the map it was armed on with Guide the whole way off."""
+        key = (here.map, dest, rides, hidden) if guiding and dest else None
+        if key == self._journey_key:
+            return
+        self._journey_key = key
+        LOCATION.set_journey(journey.of(graph, here.map, dest, rides=rides, hidden=hidden, last=LOCATION.journey)
+                             if key is not None else None)
 
     def _shortcut(self, graph, here: Here, leg: routes.Leg) -> routes.Jump | None:
         """The first pad of the hidden-teleport chain on the player's own map that cuts their walk to the way's next
@@ -889,13 +1026,33 @@ class PortalDots(QWidget):
             marks.append(mark)
         return marks
 
-    def _make_tag(self, words: tuple[str, str], aim: _Aim, panel: tuple[float, float, float, float]) -> _Tag | None:
+    def _path_segs(self, view: View, pts: list) -> list[tuple[QPointF, QPointF, bool]]:
+        """The walking path (`pts`, _ask_path) as the pieces of line to draw at this refresh, in the window's
+        pixels: one per step from the point before it, and only while the part of the minimap shown has both its
+        ends (View.at) — a point off it drops its pieces, so the line breaks clean at the panel instead of cutting
+        a stroke across it. A "pad" step is marked as the hop it is (its teleport, from the pad to where it lands),
+        for the dotted mark _draw_path gives it: a teleport is a jump in the line, never a walk across the map.
+        From the one path already asked for: no search here."""
+        segs: list[tuple[QPointF, QPointF, bool]] = []
+        last: QPointF | None = None
+        for spot, kind, _n in pts:
+            at = view.at(spot)
+            now = QPointF(at[0] / self._ratio, at[1] / self._ratio) if at is not None else None
+            if last is not None and now is not None:
+                segs.append((last, now, kind == "pad"))
+            last = now
+        return segs
+
+    def _make_tag(self, words: tuple[str, str], aim: _Aim, panel: tuple[float, float, float, float],
+                  note: tuple[str, dict] | None = None) -> _Tag | None:
         """The name beside an arrow just placed at `aim` (settings["minimap_arrow_label"]), in the language the app's
         settings pick (Hebrew until one is): `words`, an i18n key and the name it carries (_tag_words: what to click
         there, for the route's; _npc_words: the NPC's own, for the guided NPC's). A game name, so one left-to-right
         block in a Hebrew line, cut short with "…" past about TAG_CHARS characters or what the panel's width leaves
         it, never its glyph. Its letters sized with the arrow, its pill just behind the arrow's tail (_tag_rect) and
         all of it EDGE_GAP_PX inside the panel (`panel`: the view's, in box pixels), as the sign at the edge keeps.
+        `note` says how many maps are still to go, after the name on the one pill (_steps_words, the route's arrow
+        alone): a panel with no room for both keeps the name alone, which is the instruction.
         None when there is no name or the panel no room for it."""
         t = I18n(self._settings["language"] or "he")
         key, name = words
@@ -917,10 +1074,16 @@ class PortalDots(QWidget):
         if shown in ("", "…"):
             return None
         text = t(key, name=bidi.ltr_block(shown, t.rtl))
-        w, h = fm.horizontalAdvance(text) + 2 * pad_x, fm.height() + 2 * pad_y
-        box = (x0 + inset, x1 - inset - w, y0 + inset, y1 - inset - h)     # where its top-left corner may go
-        if box[0] > box[1] or box[2] > box[3]:
-            return None
+        if note is not None:
+            text += TAG_SEP + t(note[0], **note[1])
+        while True:
+            w, h = fm.horizontalAdvance(text) + 2 * pad_x, fm.height() + 2 * pad_y
+            box = (x0 + inset, x1 - inset - w, y0 + inset, y1 - inset - h)     # where its top-left corner may go
+            if box[0] <= box[1] and box[2] <= box[3]:
+                break
+            if note is None:
+                return None
+            note, text = None, t(key, name=bidi.ltr_block(shown, t.rtl))     # no room for the count: the name alone
         ys = [y * self._arrow_scale * k for _, y in (EDGE_ARROW_PX if aim.edge else ARROW_PX)]
         # the mark on a spot may have it below its tip instead (no room above it, by the panel's top); the sign at
         # the edge never: past its tip is the panel's edge
@@ -936,11 +1099,13 @@ class PortalDots(QWidget):
         self._arrow_edge = False
         self._tag = None
         self._arrow_marks = []
+        self._path = []
         self._npc_arrow = None
         self._npc_arrow_angle = 0.0
         self._npc_arrow_edge = False
         self._npc_tag = None
         self._npc_marks = []
+        self._npc_path = []
         self._flash(False)
         if self.isVisible():
             self.hide()
@@ -956,13 +1121,13 @@ class PortalDots(QWidget):
             self._flash_timer.start()
 
     def _blink(self) -> None:
-        """The flash timer's beat: both arrows, their names and their chains' numbered markers hidden, or shown
-        again (they alone: the dots and the ring stay)."""
+        """The flash timer's beat: both arrows, their names, their chains' numbered markers and their walking paths
+        hidden, or shown again (they alone: the dots and the ring stay)."""
         self._flash_on = not self._flash_on
         self.update()
 
     def paintEvent(self, e) -> None:
-        shown = self._flash_on      # blinking (_flash): both arrows, their names and chain markers with them, left
+        shown = self._flash_on      # blinking (_flash): both arrows, their names, chain markers and paths with
         route = shown and self._arrow is not None     # out every other beat
         npc = shown and self._npc_arrow is not None
         if not self._dots and self._ring is None and not route and not npc:
@@ -981,6 +1146,12 @@ class PortalDots(QWidget):
             p.drawEllipse(self._ring, rr, rr)
             p.setPen(QPen(RING_FILL, RING_PEN / self._ratio))
             p.drawEllipse(self._ring, rr, rr)
+        # each arrow's trail first, under its arrow and its numbered markers: the line is never to be read over the
+        # instruction, and it blinks with it
+        if route:
+            self._draw_path(p, self._path, self._arrow_fill)
+        if npc:
+            self._draw_path(p, self._npc_path, RING_FILL)
         if route:
             self._draw_arrow(p, self._arrow, self._arrow_angle, self._arrow_edge, self._tag, self._arrow_fill,
                              self._arrow_rim)
@@ -1006,6 +1177,24 @@ class PortalDots(QWidget):
         p.setFont(font)
         p.setPen(rim)
         p.drawText(QRectF(mark.at.x() - r, mark.at.y() - r, 2 * r, 2 * r), Qt.AlignCenter, str(mark.n))
+
+    def _draw_path(self, p: QPainter, segs: list, fill: QColor) -> None:
+        """One arrow's walking path (paintEvent, _path_segs): a line along its points in the arrow's own fill,
+        thinner than the arrow and PATH_ALPHA see-through, so it reads as the trail under the instruction. Each
+        piece drawn on its own, so a point the part shown hasn't leaves a clean break and no stroke across the
+        panel; a teleport's hop is dotted, the jump in the line it is."""
+        if not segs:
+            return
+        colour = QColor(fill)
+        colour.setAlphaF(PATH_ALPHA)
+        pen = QPen(colour, PATH_PEN_PX / self._ratio)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setBrush(Qt.NoBrush)
+        for a, b, pad in segs:
+            pen.setStyle(Qt.DotLine if pad else Qt.SolidLine)
+            p.setPen(pen)
+            p.drawLine(a, b)
 
     def _draw_arrow(self, p: QPainter, at: QPointF, angle: float, edge: bool, tag: _Tag | None, fill: QColor,
                     rim: QColor) -> None:

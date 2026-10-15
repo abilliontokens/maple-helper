@@ -18,15 +18,19 @@ class _Location(QObject):
     player asked to be guided to (ui/npcoverlay.py), as (map, spot on its minimap picture, NPC key) or None; the
     game-minimap overlay (ui/portaldots.py) rings it. `routed` (`route_dest`) is the map the player picked a route
     to, as its routes.Graph id (like "010003000") or None; the same overlay puts an orange arrow at the next portal
-    or NPC on the way there. `boxed` is where the game's minimap window is on screen now, the box the reads and the
-    follow grab ({"x","y","w","h"} in capture pixels), found on its own at the game's top left; None while it isn't
-    there."""
+    or NPC on the way there. `journey` (`journeyed`) is the way to that destination from the map the player is on
+    right now (journey.of), as a journey.Journey or None when there is no way (or nothing is being followed): it
+    carries the legs from here, how many maps are left, whether the player is already there, and whether the way
+    had to be worked out again because they strayed off it. `boxed` is where the game's minimap window is on screen
+    now, the box the reads and the follow grab ({"x","y","w","h"} in capture pixels), found on its own at the game's
+    top left; None while it isn't there."""
 
     changed = Signal(object)          # Here | None
     status = Signal(str)              # "" (no read yet, or recognized), "unknown" (read, not recognized)
     followed = Signal(object)         # (map, View | None)
     guided = Signal(object)           # (map, (fx, fy), "npc/<id>") | None
     routed = Signal(object)           # str | None (destination map id)
+    journeyed = Signal(object)        # journey.Journey | None
     boxed = Signal(object)            # {"x","y","w","h"} | None
 
     def __init__(self):
@@ -36,6 +40,7 @@ class _Location(QObject):
         self.follow: tuple | None = None
         self.guide: tuple | None = None
         self.route_dest: str | None = None
+        self.journey = None           # journey.Journey | None
         self.box: dict | None = None
 
     def set(self, here: Here | None) -> None:
@@ -73,6 +78,16 @@ class _Location(QObject):
             else:
                 log.info("route: to %s", dest)
             self.routed.emit(dest)
+
+    def set_journey(self, j) -> None:
+        if j != self.journey:
+            self.journey = j
+            if j is None:
+                log.info("journey: none")
+            else:
+                log.info("journey: to %s, %d maps left%s", j.dest, j.left,
+                         " (worked out again)" if j.off else "")
+            self.journeyed.emit(j)
 
     def set_box(self, box: dict | None) -> None:
         if box != self.box:

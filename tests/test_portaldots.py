@@ -4,7 +4,10 @@ hidden when there is nothing to place or their setting is off, an arrow pointing
 an NPC off the part shown, the route's in the colour its setting picks and the NPC's in the ring's green, both at the
 size picked, with a name beside each saying what to click there, and blinking together with the flash setting; each
 on the pad of a hidden teleport that cuts the walk to its spot with the Hidden teleport routes switch on (the NPC's
-ring staying on the NPC); and the dots' switch, gone from Settings to the bar's ⚙ panel."""
+ring staying on the NPC); the walking path drawn under an arrow with its switch on, broken where the part shown
+ends; how many maps are still to go beside the route's arrow, the way worked out again said there after a stray,
+and the arrow going quiet on another map with Guide the whole way off; and the dots' switch, gone from Settings to
+the bar's ⚙ panel."""
 import os
 from types import SimpleNamespace
 
@@ -27,11 +30,13 @@ def qapp():
 @pytest.fixture
 def clean_location():
     from maplehelper.ui.location import LOCATION
-    old = LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest
+    old = (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest,
+           LOCATION.journey)
     LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box = None, "", None, None, None
-    LOCATION.route_dest = None
+    LOCATION.route_dest, LOCATION.journey = None, None
     yield LOCATION
-    LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest = old
+    (LOCATION.here, LOCATION.state, LOCATION.follow, LOCATION.guide, LOCATION.box, LOCATION.route_dest,
+     LOCATION.journey) = old
 
 
 @pytest.fixture
@@ -51,14 +56,31 @@ def shortcuts():
     callable of (their spot, that spot) returning one, None for a graph that cannot cost its ways; `platform`,
     what its Graph.standing_platform answers for a spot — a callable of their spot returning the joined
     platform they stand on, or a dict by spot, the map counting as ground when it is set at all (None, the
-    default: no ground, the straight-line hold); and `asked`, each time it was asked for a chain, in order:
+    default: no ground, the straight-line hold); `walk`, the walking path its Graph.walk_path answers wherever it
+    is asked ([] as on a map the KB has no ground for), or `walks` by the spot asked toward — each a list of
+    (a spot on the minimap picture, how it was reached, a pad's name) — with every ask kept in `walked`:
+    (the player's map, their spot, that spot); and `asked`, each time it was asked for a chain, in order:
     (the player's map, their spot, that spot)."""
     return SimpleNamespace(jump=None, toward={}, path=None, paths={}, asked=[], costs=None, cost_asked=[],
-                           platform=None)
+                           platform=None, walk=[], walks={}, walked=[])
 
 
 @pytest.fixture
-def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcuts):
+def journeys():
+    """The dots' stand-in journey.of (maplehelper/journey.py, which this window alone calls and publishes):
+    `answer`, the Journey it gives — one object, or a callable of the player's map — and `asked`, every ask in
+    order: (the player's map, the map picked, cabs & teleports, hidden teleports, the journey published last)."""
+    return SimpleNamespace(answer=None, asked=[])
+
+
+def _journey(dest="020000000", left=2, off=False, arrived=False):
+    """A journey as journey.of answers one, with as many maps left as a test wants."""
+    from maplehelper.journey import Journey
+    return Journey(dest=dest, legs=tuple(range(left)), left=left, off=off, arrived=arrived)
+
+
+@pytest.fixture
+def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcuts, journeys):
     from maplehelper.routes import Leg
     from maplehelper.ui import portaldots
     spots = {"010003000": [(0.5, 0.5), (0.9, 0.9), (0.0, 0.0)]}
@@ -103,11 +125,20 @@ def dots(qapp, isolated_store, kb, clean_location, monkeypatch, routed, shortcut
         if shortcuts.platform is None:
             return False, None
         return True, shortcuts.platform(you) if callable(shortcuts.platform) else shortcuts.platform.get(you)
+
+    def walk_path(mid, you, target):
+        shortcuts.walked.append((mid, you, target))
+        return list(shortcuts.walks.get(target, shortcuts.walk))
+
+    def journey_of(graph, here_map, dest, *, rides, hidden, last=None):
+        journeys.asked.append((here_map, dest, rides, hidden, last))
+        return journeys.answer(here_map) if callable(journeys.answer) else journeys.answer
+    monkeypatch.setattr(portaldots.journey, "of", journey_of)
     monkeypatch.setattr(portaldots.routes, "of", lambda kb: SimpleNamespace(
         hidden_spots=lambda m: spots.get(m, []), route=route, name=lambda m: names.get(m, m),
         hidden_jumps=lambda m: [j for j in (shortcuts.jump, *shortcuts.toward.values()) if j is not None],
         shortcut=shortcut, shortcut_path=shortcut_path, shortcut_costs=shortcut_costs,
-        standing_platform=standing_platform))
+        standing_platform=standing_platform, walk_path=walk_path))
     s = isolated_store.Settings()
     clean_location.set_box(dict(BOX))        # the minimap window the reads grab, found or drawn
     w = portaldots.PortalDots(kb, s)
@@ -1991,3 +2022,154 @@ def test_the_hidden_portal_switch_left_settings_for_the_toolbar_panel(qapp, isol
         assert s["minimap_hidden_portals"] is False
     finally:
         dlg.close()
+
+
+def test_the_walking_path_is_drawn_under_the_arrow_only_with_its_switch(dots, shortcuts):
+    """The ground model's walk from the player's dot to what the arrow guides to, drawn along its points over the
+    game's minimap (settings["minimap_path_line"], on by default): a line in the arrow's own colour, the arrow
+    still drawn over it. Its switch off, no line and no search at all. The search costs what a pad chain's does,
+    so it is asked from the player's cell and not again for the follow frames between reads."""
+    from PySide6.QtCore import QPointF
+
+    from maplehelper.minimap import View
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False                             # the arrow and its path alone
+    s["minimap_arrow_label"] = False
+    assert s["minimap_path_line"] is True
+    # the walk from their dot at (0.3, 0.3) to the way's next step at (0.5, 0.5), by way of (0.4, 0.3)
+    shortcuts.walk = [((0.3, 0.3), "walk", ""), ((0.4, 0.3), "walk", ""), ((0.5, 0.5), "walk", "")]
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    assert w._arrow == QPointF(60, 45) and shortcuts.walked == [("010003000", (0.3, 0.3), (0.5, 0.5))]
+    assert [(a, b) for a, b, _pad in w._path] == [(QPointF(40, 35), QPointF(50, 35)),
+                                                  (QPointF(50, 35), QPointF(60, 45))]
+    img = w.grab().toImage()
+    c = img.pixelColor(45, 35)                                      # on the line between the first two points
+    assert c.alpha() and c.red() > 200 and c.green() > 120 and c.blue() < 120      # the arrow's orange, quieter
+    assert c.alpha() < 255                                          # ... and never as loud as the arrow itself
+    assert img.pixelColor(60, 37).alpha() == 255                    # the arrow's own shaft, drawn over it
+    for x in (9, 8, 7):                                             # the minimap scrolling, frame by frame
+        loc.set_follow(("010003000", View(x, 20, 100, 50, (0, 0, 200, 200))))
+    assert len(shortcuts.walked) == 1 and w._path[0][0] == QPointF(37, 35)     # asked once, moved with the picture
+    s["minimap_path_line"] = False
+    w.refresh()
+    assert w._path == [] and len(shortcuts.walked) == 1             # nothing drawn, nothing searched
+    assert w.grab().toImage().pixelColor(42, 35).alpha() == 0
+    assert w._arrow is not None                                     # the arrow is the instruction: it stays
+
+
+def test_a_path_point_off_the_part_shown_breaks_the_line(dots, shortcuts):
+    """The game's minimap shows only part of the map, and a walk can leave it: the points off the part shown are
+    simply not drawn (View.at), and the line breaks there instead of cutting a stroke across the panel to where it
+    comes back."""
+    from PySide6.QtCore import QPointF
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["minimap_arrow_label"] = False
+    # the panel shows the box up to x=55 only: the walk's last two points are out past it
+    shortcuts.walk = [((0.1, 0.3), "walk", ""), ((0.3, 0.3), "walk", ""), ((0.9, 0.3), "walk", ""),
+                      ((0.95, 0.3), "walk", "")]
+    loc.set_route_dest("050000000")                                 # its step at (0.0, 0.0), inside the panel
+    _place(loc, _here(panel=(0, 0, 55, 200)))
+    assert w._arrow == QPointF(10, 20)
+    assert [(a, b) for a, b, _pad in w._path] == [(QPointF(20, 35), QPointF(40, 35))]     # the one piece shown
+    img = w.grab().toImage()
+    assert img.pixelColor(30, 35).alpha()                           # the piece drawn
+    assert not any(img.pixelColor(x, y).alpha() for x in range(42, 55) for y in (34, 35, 36))     # no stroke on
+    assert not any(img.pixelColor(x, y).alpha() for x in range(55, 60) for y in range(30, 40))    # ... and none out
+
+
+def test_a_pad_of_the_walk_is_a_dotted_hop_not_a_stroke_across_the_map(dots, shortcuts):
+    """A hidden teleport on the way is a jump in the line, not a walk: its step is marked as the hop it is and
+    drawn dotted from the pad to where it lands, so the trail never reads as a walk across the whole map."""
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    s["minimap_arrow_label"] = False
+    # the walk, then a pad at (0.35, 0.3) that lands them at (0.9, 0.3): straight across the picture, clear of
+    # everything else drawn, so the hop's own pixels are the only ones along that row
+    shortcuts.walk = [((0.3, 0.3), "walk", ""), ((0.35, 0.3), "walk", ""), ((0.9, 0.3), "pad", "t001"),
+                      ((0.9, 0.35), "walk", "")]
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    assert [pad for _a, _b, pad in w._path] == [False, True, False]
+    img = w.grab().toImage()
+    on = [img.pixelColor(x, 35).alpha() > 0 for x in range(66, 99)]     # along the hop, past the arrow
+    assert any(on) and not all(on)                                  # dotted: a hop, never one stroke across the map
+
+
+@pytest.mark.parametrize("left, said", [(3, "3 maps to go"), (1, "Last map")])
+def test_the_name_pill_says_how_many_maps_are_left(dots, journeys, left, said):
+    """Beside the route's arrow its name pill carries the count from LOCATION.journey
+    (settings["minimap_route_steps"], on by default): how many maps are still to pass through, and its own wording
+    on the last one. Off, the name alone as before."""
+    w, s, loc = dots
+    s["language"] = "en"
+    s["minimap_hidden_portals"] = False
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})           # room on the pill for both
+    journeys.answer = _journey(left=left)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert s["minimap_route_steps"] is True
+    assert loc.journey is journeys.answer and w._tag.text == "→ Bush Road · " + said
+    s["minimap_route_steps"] = False
+    w.refresh()
+    assert w._tag.text == "→ Bush Road"
+
+
+def test_straying_off_the_way_says_so_beside_the_arrow(dots, journeys):
+    """A wrong portal puts the player off the way, and the journey worked out from where they now stand says so
+    (Journey.off): the read after says it beside the arrow, in place of the count."""
+    w, s, loc = dots
+    s["language"] = "en"
+    s["minimap_hidden_portals"] = False
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})
+    journeys.answer = _journey(left=4, off=True)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert w._tag.text == "→ Bush Road · Off the way — worked it out again from here"
+
+
+def test_with_guiding_the_whole_way_off_the_arrow_goes_quiet_on_another_map(dots, journeys):
+    """Guiding the whole way (settings["minimap_route_follow"], on by default) decides what the arrow does once the
+    player leaves the map it was armed on: on, the map they picked stands and the way is worked out from wherever
+    they are; off, the arrow guides on the map it was armed from alone and goes quiet — journey and all — the
+    moment they leave it, and guides again when they come back."""
+    from PySide6.QtCore import QPointF
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    journeys.answer = _journey(left=2)
+    loc.set_route_dest("020000000")
+    _place(loc, _here())                                            # armed on the player's own map
+    assert w._arrow == QPointF(60, 45) and loc.journey is journeys.answer
+    _place(loc, _here("010003001"))                                 # walked on: guided the whole way, as it comes
+    assert w.isVisible() and w._arrow == QPointF(60, 45) and loc.journey is journeys.answer
+    s["minimap_route_follow"] = False
+    w.refresh()
+    assert not w.isVisible() and w._arrow is None and w._tag is None and loc.journey is None
+    _place(loc, _here())                                            # back on the map it was armed on
+    assert w.isVisible() and w._arrow == QPointF(60, 45) and loc.journey is journeys.answer
+
+
+def test_the_journey_is_published_once_per_asked_answer_not_per_frame(dots, journeys, routed):
+    """The journey this window publishes is worked out where the arrow's own step is (journey.of costs a search of
+    the map graph, and refresh runs for every follow frame while the minimap scrolls): once for the player's map,
+    the map picked and the switches, the last answer handed to the next, and cleared the moment there is no
+    destination."""
+    from maplehelper.minimap import View
+    w, s, loc = dots
+    s["minimap_hidden_portals"] = False
+    first, second = _journey(left=2), _journey(left=1)
+    journeys.answer = first
+    loc.set_route_dest("020000000")
+    _place(loc, _here())
+    assert journeys.asked == [("010003000", "020000000", False, False, None)] and loc.journey is first
+    for x in (9, 8, 7, 6):                                          # the minimap scrolling, frame by frame
+        loc.set_follow(("010003000", View(x, 20, 100, 50, (0, 0, 200, 200))))
+    w.refresh()
+    assert len(journeys.asked) == 1 and loc.journey is first        # nothing asked a frame
+    journeys.answer = second
+    _place(loc, _here("010003001"))                                 # a portal taken: the way from the new map
+    assert journeys.asked[1:] == [("010003001", "020000000", False, False, first)] and loc.journey is second
+    loc.set_route_dest(None)                                        # the route stopped: nothing to publish
+    assert loc.journey is None and len(journeys.asked) == 2
+    assert len(routed) == 2                                         # the arrow's own routing, once a map

@@ -160,18 +160,25 @@ def _picture(kb, key: str) -> None:
     (kb / "index.json").write_text(json.dumps(index), encoding="utf-8")
 
 
-def _map(mid, name, portals=(), npcs=(), town=False, street="Victoria Road", region="VictoriaIsland", minimap=True):
+# Henesys' hidden teleports for the map window's arrows: (name, x, y, landing x, landing y), the first two landing
+# on one point (as nine of Utah's Pig Farm's sixteen land at its west entrance), the third on its own
+PADS = [("t001", -600, 300, 400, -200), ("t002", -200, 300, 400, -200), ("t003", 400, 300, -600, -200)]
+
+
+def _map(mid, name, portals=(), npcs=(), town=False, street="Victoria Road", region="VictoriaIsland", minimap=True,
+         hidden=()):
     return {"id": mid, "name": name, "street": street, "region": region, "town": town, "return": mid,
             "minimap": [1600, 800, 800, 400] if minimap else None,
             "portals": [{"to": to, "name": f"p{i}", "x": 700, "y": 0} for i, to in enumerate(portals)],
+            "hidden": [{"name": n, "x": x, "y": y, "to_x": tx, "to_y": ty} for n, x, y, tx, ty in hidden],
             "npcs": [{"id": i, "name": n, "x": -700, "y": 0} for i, n in npcs]}
 
 
 @pytest.fixture
 def tiny(kb_copy):
     """Henesys to Perion on foot (Hunting Ground I between them), a cab in each town, an NPC on Perion, one in a
-    picture-less shop off Henesys, a quest from the first to a second NPC on Henesys, and two connected maps no
-    way from Henesys reaches."""
+    picture-less shop off Henesys, a quest from the first to a second NPC on Henesys, two connected maps no
+    way from Henesys reaches, and three hidden teleports on Henesys itself (PADS), which no other map has."""
     _page(kb_copy, f"map/{PERION}", "Perion", "Location Victoria Road / Victoria Island\nMap type Town")
     _page(kb_copy, f"map/{SHOP}", "Henesys Hair Salon", "Location Victoria Road / Victoria Island\nMap type Field")
     _page(kb_copy, f"map/{SLEEPY}", "Sleepywood", "Location Victoria Road / Victoria Island\nMap type Field")
@@ -185,7 +192,7 @@ def tiny(kb_copy):
     for key in (f"map/{HENESYS}", f"map/{HG1}", f"map/{PERION}", f"map/{SLEEPY}"):
         _picture(kb_copy, key)
     data = {"taxi": [HENESYS, PERION], "maps": [
-        _map(HENESYS, "Henesys", [HG1, SHOP], [("9001", "Regular Cab"), ("2003", "Rina")], town=True),
+        _map(HENESYS, "Henesys", [HG1, SHOP], [("9001", "Regular Cab"), ("2003", "Rina")], town=True, hidden=PADS),
         _map(HG1, "Henesys Hunting Ground I", [HENESYS, PERION]),
         _map(HG2, "Henesys Hunting Ground II", [HG1, GARDEN]),
         _map(GARDEN, "Snail Garden", [HENESYS]),
@@ -547,3 +554,162 @@ def test_the_dot_stays_at_its_fraction_at_any_width(tmp_path):
     stepped = mapview.route_picture(str(path), spot, False, you, cap_w=480)
     assert stepped.toImage().pixelColor(round(you[0] * stepped.width()),
                                         round(you[1] * stepped.height())) == mapview.YOU_FILL
+
+
+
+def _white(path, w: int = 320, h: int = 200) -> str:
+    """A blank white map picture: every pixel the drawing changes afterwards is ink."""
+    from PySide6.QtCore import Qt
+    pm = QPixmap(w, h)
+    pm.fill(Qt.white)
+    assert pm.save(str(path))
+    return str(path)
+
+
+def _ink(pm, at=None, r: int = 0) -> int:
+    """Pixels no longer white: over the whole picture, or in a box of r pixels around a spot (0-1 fractions)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+    img = pm.toImage()
+    if at is None:
+        xs, ys = range(img.width()), range(img.height())
+    else:
+        cx, cy = round(at[0] * img.width()), round(at[1] * img.height())
+        xs = range(max(0, cx - r), min(img.width(), cx + r + 1))
+        ys = range(max(0, cy - r), min(img.height(), cy + r + 1))
+    white = QColor(Qt.white)
+    return sum(img.pixelColor(x, y) != white for y in ys for x in xs)
+
+
+def test_a_hidden_teleport_is_a_mark_on_its_pad_and_an_arrow_to_where_it_lands(tmp_path):
+    """Drawn as NiaMeowDB's own picture draws them: each pad ringed, and ink all the way from it to its landing."""
+    path = _white(tmp_path / "mini.png")
+    pads = [routes.Jump((0.15, 0.80), (0.75, 0.25), "t001"), routes.Jump((0.55, 0.85), (0.20, 0.30), "t002")]
+    plain = mapview.route_picture(path, cap_w=320)
+    drawn = mapview.route_picture(path, jumps=pads, cap_w=320)
+    assert _ink(plain) == 0 and _ink(drawn) > 0
+    for j in pads:
+        assert _ink(drawn, j.frm, 6) > 0                       # its pad is marked
+        assert _ink(drawn, j.to, 8) > 0                        # its landing has the arrowhead
+        middle = ((j.frm[0] + j.to[0]) / 2, (j.frm[1] + j.to[1]) / 2)
+        assert _ink(drawn, middle, 24) > 0                     # and the bowed arrow between the two
+
+
+def test_pads_that_land_on_one_spot_are_one_arrow_and_a_count_not_nine_lines(tmp_path):
+    """Nine pads landing on one point (Utah's Pig Farm's west entrance) do not become nine arrows into it: the
+    group's farthest pad carries the whole arrow, every pad keeps its ring and a short tick along the same heading,
+    and the landing wears the count."""
+    path = _white(tmp_path / "mini.png")
+    land = (0.80, 0.25)
+    shared = [routes.Jump((0.08 + i * 0.08, 0.85), land, f"t{i:03d}") for i in range(9)]
+    apart = [routes.Jump((0.08 + i * 0.08, 0.85), (0.08 + i * 0.08, 0.25), f"u{i:03d}") for i in range(9)]
+    one, many = (mapview.route_picture(path, jumps=js, cap_w=320) for js in (shared, apart))
+    assert _ink(one) < _ink(many)                              # one long line and eight ticks, not nine long lines
+    for j in shared:
+        assert _ink(one, j.frm, 6) > 0                         # every pad of the group still says it is a pad
+    lead = max(shared, key=lambda j: abs(j.frm[0] - land[0]))
+    assert _ink(one, ((lead.frm[0] + land[0]) / 2, (lead.frm[1] + land[1]) / 2), 24) > 0
+    alone = mapview.route_picture(path, jumps=[routes.Jump(lead.frm, land, "t000")], cap_w=320)
+    assert _ink(one, land, 34) > _ink(alone, land, 34)          # "×9" beside the arrowhead, which one pad has not
+
+
+def test_the_window_drawn_dots_stay_above_the_arrows(tmp_path):
+    """A pad landing on the portal and another under the player: the orange and blue dots are still what is on top
+    at those points (the arrows draw first, and they are the quiet thing)."""
+    from PySide6.QtGui import QColor
+    path = _white(tmp_path / "mini.png")
+    spot, you = (0.60, 0.40), (0.30, 0.70)
+    jumps = [routes.Jump(you, spot, "t001"), routes.Jump((0.85, 0.80), spot, "t002")]
+    pm = mapview.route_picture(path, spot, False, you, jumps, cap_w=320)
+    assert pm.toImage().pixelColor(round(spot[0] * pm.width()), round(spot[1] * pm.height())) == QColor(245, 182, 66)
+    assert pm.toImage().pixelColor(round(you[0] * pm.width()), round(you[1] * pm.height())) == mapview.YOU_FILL
+
+
+def _teleport_cards(kb, g, settings):
+    """The ◎ window on Perion with the player on Henesys (whose pads PADS are), its picture-bearing labels and its
+    legends. The caller closes the window and lets the live map go."""
+    assert QPixmap(400, 300).save(str(g.minimap(HENESYS)))      # life-size, not the 16x12 stand-in
+    LOCATION.set(Here(HENESYS, (0.5, 0.5)))
+    d = mapview.MapLocationDialog(kb, "en", "", settings)
+    d.show()
+    d.show_map(f"map/{PERION}")
+    app.processEvents()
+    pics = [lb for lb in d.body.findChildren(QLabel) if getattr(lb, "_pic_spec", None)]
+    return d, pics, d.body.findChildren(mapview.MapLegend)
+
+
+def test_the_window_draws_the_hidden_teleports_only_with_the_switch_on(tiny, isolated_store):
+    """map_teleport_arrows on: Henesys' pads are in its card's picture spec and change what it draws. Off: the spec
+    carries none and the picture is the one without them."""
+    kb, g = tiny
+    assert len(g.hidden_jumps(HENESYS)) == len(PADS) and not g.hidden_jumps(PERION)
+    on = off = bare = None
+    settings = isolated_store.Settings()
+    try:
+        d, pics, _ = _teleport_cards(kb, g, settings)
+        try:
+            assert tuple(pics[0]._pic_spec[4]) == tuple(g.hidden_jumps(HENESYS))
+            assert all(not lb._pic_spec[4] for lb in pics[1:])      # no other map here has any
+            on = pics[0].pixmap().toImage()
+        finally:
+            d.close()
+        settings["map_teleport_arrows"] = False
+        d, pics, _ = _teleport_cards(kb, g, settings)
+        try:
+            assert all(lb._pic_spec[4] == () for lb in pics)
+            off = pics[0].pixmap().toImage()
+            bare = mapview.route_picture(*pics[0]._pic_spec, cap_w=d._picture_cap()).toImage()
+        finally:
+            d.close()
+    finally:
+        LOCATION.set(None)
+    assert on != off and off == bare      # with the switch off, the picture is exactly the one without arrows
+
+
+def test_the_legend_says_what_the_arrows_are_only_where_there_are_teleports(tiny, isolated_store):
+    """Henesys' card names the arrows beside "You are here" and "The portal"; Perion's arrival card, with no pads,
+    has no legend at all, and with the switch off neither does Henesys' name them."""
+    kb, g = tiny
+    t = I18n("en")
+    settings = isolated_store.Settings()
+    try:
+        d, _, legends = _teleport_cards(kb, g, settings)
+        try:
+            (legend,) = legends                                    # only the first card has one
+            assert legend.teleport.isVisibleTo(legend)
+            assert legend.teleport.accessibleName() == t("map_teleport_legend")
+            assert legend.you.isVisibleTo(legend) and legend.target.isVisibleTo(legend)
+        finally:
+            d.close()
+        settings["map_teleport_arrows"] = False
+        d, _, legends = _teleport_cards(kb, g, settings)
+        try:
+            (legend,) = legends
+            assert not legend.teleport.isVisibleTo(legend)
+        finally:
+            d.close()
+    finally:
+        LOCATION.set(None)
+
+
+def test_a_wider_window_redraws_the_teleports_too(tiny, isolated_store):
+    """The arrows are part of the picture's spec, not painted once: the resize path redraws them at the new width."""
+    kb, g = tiny
+    try:
+        d, pics, _ = _teleport_cards(kb, g, isolated_store.Settings())
+        try:
+            pic = pics[0]
+            narrow = pic.pixmap().width()
+            d.resize(d.width() + 200, d.height())
+            app.processEvents()
+            d._pics.stop()
+            d._rescale_pictures()
+            wide = pic.pixmap()
+            assert wide.width() > narrow
+            assert tuple(pic._pic_spec[4]) == tuple(g.hidden_jumps(HENESYS))
+            bare = mapview.route_picture(*pic._pic_spec[:4], (), cap_w=d._picture_cap())
+            assert wide.width() == bare.width() and wide.toImage() != bare.toImage()
+        finally:
+            d.close()
+    finally:
+        LOCATION.set(None)
