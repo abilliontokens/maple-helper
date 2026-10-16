@@ -1160,9 +1160,9 @@ class KnowledgeBase:
     @cached_property
     def _monsters(self) -> list[dict]:
         """The monsters the KB confirms are in the game, with the maps a player can go to (the AI's level digest).
-        No tutorial/job-test/PQ copies ("Fairy 2", "Tutorial Jr. Sentinel", the Tools' training spots skip them
-        too), and a boss the KB also lists as a map-less copy (King Slime, Mushmom's 800xxx entries) only once:
-        those rows took the place of monsters a player can train on under the 40-row cap."""
+        No tutorial/job-test/PQ copies ("Jr. Necki (alt) (KPQ)", "Tutorial Jr. Sentinel", the Tools' training spots
+        skip them too), and a boss the KB also lists as a map-less copy (King Slime, Mushmom's 800xxx entries) only
+        once: those rows took the place of monsters a player can train on under the 40-row cap."""
         from . import availability, combat
         open_ = availability.of(self)
         rows = []

@@ -60,7 +60,13 @@ _CLOSED_MAP = re.compile(r"^(Warrior|Thief|Magician|Bowman|Pirate)'s |\bFor (?:W
                          r"Accompaniment|KPQ|Party Quest|Test|Event|Exam", re.I)
 # ... and the ones nobody grinds on (those, and hidden streets)
 _NOT_GRIND = re.compile(_CLOSED_MAP.pattern + r"|Hidden Street$", re.I)
-_NOT_GRIND_MOB = re.compile(r"\(|\bFairy \d|Dummy", re.I)
+# a version of a monster nobody grinds on: an alternate or party-quest one, which the KB names in brackets
+# ("Jr. Necki (alt) (KPQ)"), and the job tests' dummies. Not the KB's Fairy 1-4: those are the game's own Fairy,
+# which NiaMeowDB splits per spawn region — a level 29 field monster (593 HP, 54 EXP, back in 7.5 s) that lives
+# on open Victoria Island maps, and calling it special hid every one of them from the Monsters & NPCs search
+# (live). The versions nobody can reach drop out on the data: Fairy 1 has no map the KB confirms, and Fairy 2's
+# only one is a Hidden Street
+_NOT_GRIND_MOB = re.compile(r"\(|Dummy", re.I)
 
 
 # a spawn this slow is a boss (the KB monster pages' "Respawn" column: Mano "1h-1h 30m", Jr. Balrog "3h",

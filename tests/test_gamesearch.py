@@ -1329,6 +1329,23 @@ def test_where_snail_lives_is_every_map_most_spawns_first(real):
 
 
 @needs_kb
+def test_the_fairies_are_monsters_the_search_finds(real):
+    """NiaMeowDB splits the game's Fairy per spawn region (Fairy 1-4), and all four were named special versions
+    of a monster, like the party quest's "(alt)" ones: Monsters & NPCs then found no fairy monster at all, only
+    Ellinia's NPCs whose names end in "the Fairy" (live). Fairy 3 is a row of its own with its level, and its
+    page's maps are the Tree Dungeons it lives on; Fairy 1, which the KB puts on no map it confirms, stays out.
+    """
+    from maplehelper.ui.gamesearch import monster_maps, search
+    hits, _ = search(real, "monster_npc", "fairy")
+    mobs = {h.name: h for h in hits if h.kind == "monster"}
+    assert set(mobs) == {"Fairy 2", "Fairy 3", "Fairy 4"}
+    assert mobs["Fairy 3"].key == "monster/27" and mobs["Fairy 3"].lv == (29, 29) and not mobs["Fairy 3"].boss
+    assert {m[1] for m in monster_maps(real, "monster/27")} == {"Tree Dungeon, Forest Up North VI",
+                                                                "Tree Dungeon, Forest Up North VII"}
+    assert any(h.kind == "npc" and h.name == "Arwen the Fairy" for h in hits)    # the NPCs still list with them
+
+
+@needs_kb
 def test_an_npc_is_found_with_its_role_and_the_map_it_stands_on(real):
     from maplehelper.ui.gamesearch import search
     hits, _ = search(real, "npc", "roger")
