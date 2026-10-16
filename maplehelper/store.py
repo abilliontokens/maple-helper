@@ -178,11 +178,12 @@ DEFAULT_SETTINGS = {
     "minimap_route_arrow": True,  # an arrow on the game's minimap at the next step toward the picked place (ui/portaldots.py)
     "minimap_arrow_color": "orange",   # ... its colour, a key of ui/portaldots.ARROW_COLORS
     "minimap_arrow_size": 22,     # ... how long it is drawn, in screen pixels (ARROW_SIZE_MIN to ARROW_SIZE_MAX)
-    # ... how solid it is drawn, ARROW_OPACITY_MIN to 1.0: the name beside it and the maps-left strip fade with it,
-    # the hidden portals' dots and the guided NPC's ring never do (ui/portaldots.py)
+    # ... how solid it is drawn, ARROW_OPACITY_MIN to 1.0: the maps-left strip fades with it, the hidden portals' dots
+    # and the guided NPC's ring never do (ui/portaldots.py)
     "minimap_arrow_opacity": 1.0,
     "minimap_arrow_flash": False,  # ... and whether it blinks, to be easy to spot on a busy minimap
     "minimap_arrow_label": True,  # ... a small name beside it: the portal's map, or the NPC to talk to
+    "minimap_arrow_label_opacity": 1.0,   # ... how solid that name is drawn, on its own: the same range as the arrow's
     "minimap_arrival_notice": True,   # a word when the map the arrow points to is reached, and the arrow goes
     # the arrow guides the whole way, not one step: it re-points the moment a new map is read, and works the way out
     # again from where the player stands after a wrong portal (ui/portaldots.py)

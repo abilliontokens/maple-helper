@@ -143,6 +143,11 @@ def _alpha(img, rect) -> int:
     return img.pixelColor(int(rect.left()) + 6, int(rect.center().y())).alpha()
 
 
+def _pill_alpha(img, rect) -> int:
+    """How solid the name beside an arrow is drawn: the alpha of its pill in its rounded end, before its words."""
+    return img.pixelColor(int(rect.left() + 2.5), int(rect.center().y())).alpha()
+
+
 def test_dots_sit_on_the_box_where_the_map_was_placed(dots, qapp):
     """Each hidden portal in view is a blue dot at its place in the minimap's box; one outside the window shown is
     left out. The window covers the box exactly and never takes a click."""
@@ -515,9 +520,10 @@ def test_the_arrows_size_setting_draws_it_bigger_or_smaller(dots):
 
 def test_the_arrows_opacity_setting_fades_the_way_and_nothing_else(dots, journeys):
     """The bar's ⚙ panel picks how solid the way's own marks are drawn (settings["minimap_arrow_opacity"], solid
-    as they always were): the arrow, the name beside it and the maps-left strip fade together, so the way can be
-    left on over a minimap it would otherwise cover, while the hidden portals' blue dots stay solid — as they stay
-    through the flash. The faintest it goes is ARROW_OPACITY_MIN, and a setting holding no number draws it solid."""
+    as they always were): the arrow and the maps-left strip fade together, so the way can be left on over a minimap
+    it would otherwise cover, while the hidden portals' blue dots stay solid — as they stay through the flash — and
+    the name beside the arrow keeps its own opacity. The faintest it goes is ARROW_OPACITY_MIN, and a setting
+    holding no number draws it solid."""
     from maplehelper.ui import portaldots
     w, s, loc = dots
     s["language"] = "en"
@@ -526,11 +532,13 @@ def test_the_arrows_opacity_setting_fades_the_way_and_nothing_else(dots, journey
     loc.set_route_dest("020000000")
     _place(loc, _here(panel=(0, 0, 600, 200)))
     assert s["minimap_arrow_opacity"] == portaldots.ARROW_OPACITY == 1.0 and portaldots.ARROW_OPACITY_MIN == 0.2
-    strip = w._strip.rect
+    strip, tag = w._strip.rect, w._tag.rect
     back = portaldots.STRIP_ALPHA                                  # the strip's backing, under the words
+    pill = round(255 * portaldots.TAG_ALPHA)                       # the name's pill, a little see-through
     solid = w.grab().toImage()
     assert solid.pixelColor(60, 37).alpha() == 255
     assert _alpha(solid, strip) == pytest.approx(round(255 * back), abs=3)
+    assert _pill_alpha(solid, tag) == pytest.approx(pill, abs=3)
     for value, op in ((0.4, 0.4), (0.75, 0.75), (0.0, portaldots.ARROW_OPACITY_MIN), (1000, 1.0), ("half", 1.0),
                       (None, 1.0), (True, 1.0), (float("nan"), 1.0)):
         s["minimap_arrow_opacity"] = value
@@ -538,7 +546,39 @@ def test_the_arrows_opacity_setting_fades_the_way_and_nothing_else(dots, journey
         img = w.grab().toImage()
         assert img.pixelColor(60, 37).alpha() == pytest.approx(round(255 * op), abs=3), value   # the arrow's step
         assert _alpha(img, strip) == pytest.approx(round(255 * back * op), abs=3), value        # the strip with it
+        assert _pill_alpha(img, tag) == pytest.approx(pill, abs=3), value          # the name: its own opacity
         assert img.pixelColor(100, 65).alpha() == 255, value                        # a hidden portal's dot: solid
+
+
+def test_the_names_opacity_setting_fades_the_name_beside_the_arrow_alone(dots, journeys):
+    """The name beside the arrow takes an opacity of its own (settings["minimap_arrow_label_opacity"], solid as it
+    always was), whatever the arrow's: the pill fades, its words with it, while the arrow, the maps-left strip and
+    the hidden portals' dots are drawn as before. A faint name on a solid arrow and a solid name on a faint arrow
+    both hold; the same range as the arrow's, and a setting holding no number draws it solid."""
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["language"] = "en"
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})
+    journeys.answer = _journey(left=3)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert s["minimap_arrow_label_opacity"] == 1.0
+    strip, tag = w._strip.rect, w._tag.rect
+    back, pill = portaldots.STRIP_ALPHA, portaldots.TAG_ALPHA
+    for value, op in ((0.4, 0.4), (0.75, 0.75), (0.0, portaldots.ARROW_OPACITY_MIN), (1000, 1.0), ("half", 1.0),
+                      (None, 1.0), (True, 1.0), (float("nan"), 1.0)):
+        s["minimap_arrow_label_opacity"] = value
+        w.refresh()
+        img = w.grab().toImage()
+        assert _pill_alpha(img, tag) == pytest.approx(round(255 * pill * op), abs=3), value    # the name fades
+        assert img.pixelColor(60, 37).alpha() == 255, value                         # the arrow: solid
+        assert _alpha(img, strip) == pytest.approx(round(255 * back), abs=3), value  # the strip as it was
+        assert img.pixelColor(100, 65).alpha() == 255, value                        # a hidden portal's dot: solid
+    s["minimap_arrow_label_opacity"], s["minimap_arrow_opacity"] = 1.0, 0.4        # a solid name on a faint arrow
+    w.refresh()
+    img = w.grab().toImage()
+    assert _pill_alpha(img, tag) == pytest.approx(round(255 * pill), abs=3)
+    assert img.pixelColor(60, 37).alpha() == pytest.approx(round(255 * 0.4), abs=3)
 
 
 def test_a_bigger_arrow_at_the_panels_edge_sits_further_in_and_stays_inside_it(dots):

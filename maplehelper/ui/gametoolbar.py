@@ -359,10 +359,10 @@ class _SettingsPanel(QWidget):
     there is room, rather than under the arrow's own switches, which left the second one scrolling on a 1080p
     screen. The second holds the way and the minimap. Directions: Cabs & Teleports, whether the way to a found
     NPC or map rides cabs and NPC teleports or walks (the bar's rides_toggled: a way shown is found again);
-    Minimap: the hidden portals' blue dots and the route's arrow
-    on the game's minimap, the arrow's colour as dots (the picked one ringed and named), its size on a slider in
-    whole pixels, the name beside it (the map its portal leads to, or the NPC to talk to) and whether it flashes, a
-    notice on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the
+    Minimap: the hidden portals' blue dots and the route's arrow on the game's minimap, the arrow's colour as dots
+    (the picked one ringed and named), its size in whole pixels and its opacity on sliders, the name beside it (the
+    map its portal leads to, or the NPC to talk to) with that name's own opacity on a slider, and whether it flashes,
+    a notice on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the
     windows over the game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it
     in the row's tooltip (_Hint). Each choice is written, applies at once and stays; "Reset to default look", under
     both columns, puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like
@@ -489,8 +489,8 @@ class _SettingsPanel(QWidget):
         col.addSpacing(10)
         self._route_arrow_label, self._route_arrow, self._route_arrow_hint = self._switch_row(col, self._pick_route)
         # the route arrow's look, under its switch: its colour as dots (the picked one ringed and named), its size on
-        # a slider in whole pixels and how solid it is drawn on another (each beside its label), the name beside it,
-        # and whether it flashes
+        # a slider in whole pixels and how solid it is drawn on another (each beside its label), the name beside it
+        # and how solid that is drawn on a third, and whether it flashes
         col.addSpacing(10)
         self._arrow_color_label, self._arrow_color_name = self._label_row(col)
         col.addSpacing(6)
@@ -510,11 +510,19 @@ class _SettingsPanel(QWidget):
         col.addSpacing(4)
         self._arrow_opacity = Slider(ARROW_OPACITY_MIN, ARROW_OPACITY, _edge, lambda: palette().light)
         self._arrow_opacity.changed.connect(self._pick_arrow_opacity)
-        self._arrow_opacity.released.connect(self._arrow_size_settled)   # the same follow: one timer for both
+        self._arrow_opacity.released.connect(self._arrow_size_settled)   # the same follow: one timer for all three
         col.addWidget(self._arrow_opacity)
         col.addSpacing(10)
         (self._arrow_label_label, self._arrow_label,
          self._arrow_label_hint) = self._switch_row(col, self._pick_arrow_label)
+        # ... how solid that name is drawn, on its own slider under its switch: a faint arrow can keep a name that reads
+        col.addSpacing(10)
+        self._label_opacity_label, self._label_opacity_value = self._label_row(col, value="Value")
+        col.addSpacing(4)
+        self._label_opacity = Slider(ARROW_OPACITY_MIN, ARROW_OPACITY, _edge, lambda: palette().light)
+        self._label_opacity.changed.connect(self._pick_label_opacity)
+        self._label_opacity.released.connect(self._arrow_size_settled)
+        col.addWidget(self._label_opacity)
         col.addSpacing(10)
         (self._arrow_flash_label, self._arrow_flash,
          self._arrow_flash_hint) = self._switch_row(col, self._pick_arrow_flash)
@@ -638,6 +646,7 @@ class _SettingsPanel(QWidget):
                         (self._arrow_size_label, "tbs_arrow_size"),
                         (self._arrow_opacity_label, "tbs_arrow_opacity"),
                         (self._arrow_label_label, "tbs_arrow_label"),
+                        (self._label_opacity_label, "tbs_arrow_label_opacity"),
                         (self._arrow_flash_label, "tbs_arrow_flash"),
                         (self._arrival_label, "tbs_arrival"),
                         (self._overlay_shots_label, "overlays_in_screenshots"),
@@ -715,16 +724,21 @@ class _SettingsPanel(QWidget):
         self._arrow_size.set_accent(accent)
         self._arrow_size.setAccessibleName(t("tbs_arrow_size"))
         self._arrow_size_value.setText(bidi.ltr_block(f"{size} px", rtl))
-        # ... and how solid it is drawn, as a whole percent between that slider's ends (a value past one: that end)
-        try:
-            opacity = float(s["minimap_arrow_opacity"])
-        except (TypeError, ValueError):
-            opacity = DEFAULT_SETTINGS["minimap_arrow_opacity"]
-        opacity = min(ARROW_OPACITY, max(ARROW_OPACITY_MIN, opacity))
-        self._arrow_opacity.set_value(opacity)
-        self._arrow_opacity.set_accent(accent)
-        self._arrow_opacity.setAccessibleName(t("tbs_arrow_opacity"))
-        self._arrow_opacity_value.setText(bidi.ltr_block(f"{round(opacity * 100)}%", rtl))
+        # ... how solid it is drawn and, on its own, the name beside it: each a whole percent between its slider's ends
+        # (a value past one: that end)
+        for slider, shown, key, name in ((self._arrow_opacity, self._arrow_opacity_value, "minimap_arrow_opacity",
+                                          "tbs_arrow_opacity"),
+                                         (self._label_opacity, self._label_opacity_value,
+                                          "minimap_arrow_label_opacity", "tbs_arrow_label_opacity")):
+            try:
+                opacity = float(s[key])
+            except (TypeError, ValueError):
+                opacity = DEFAULT_SETTINGS[key]
+            opacity = min(ARROW_OPACITY, max(ARROW_OPACITY_MIN, opacity))
+            slider.set_value(opacity)
+            slider.set_accent(accent)
+            slider.setAccessibleName(t(name))
+            shown.setText(bidi.ltr_block(f"{round(opacity * 100)}%", rtl))
         self._reset.setEnabled(any(s[k] != DEFAULT_SETTINGS[k] for k in LOOK_KEYS))
         self._fit(self._room())
         self.update()
@@ -846,14 +860,23 @@ class _SettingsPanel(QWidget):
             self._bar.minimap_toggled.emit()
 
     def _pick_arrow_opacity(self, value: float) -> None:
-        """A percent on the slider: written at once and shown beside the label, and the app follows a moment later
-        on the size slider's own timer (_arrow_follow: minimap_toggled, once per FOLLOW_MS of a drag, and once more
-        at the percent it was let go on, _arrow_size_settled). It fades the route's and the guided NPC's arrows,
-        the names beside them and the maps-left strip; the hidden portals' dots and the NPC's ring stay solid."""
-        if value == self._settings["minimap_arrow_opacity"]:
-            self._arrow_opacity.set_value(value)    # a step inside the same percent: the knob stays on it
+        """How solid the route's and the guided NPC's arrows and the maps-left strip are drawn (_pick_percent); the
+        names beside the arrows keep their own (_pick_label_opacity), the hidden portals' dots and the NPC's ring
+        stay solid."""
+        self._pick_percent("minimap_arrow_opacity", self._arrow_opacity, value)
+
+    def _pick_label_opacity(self, value: float) -> None:
+        """How solid the names beside the arrows are drawn, whatever the arrows' own opacity (_pick_percent)."""
+        self._pick_percent("minimap_arrow_label_opacity", self._label_opacity, value)
+
+    def _pick_percent(self, key: str, slider: Slider, value: float) -> None:
+        """A percent on one of the arrow's opacity sliders: written at once and shown beside its label, and the app
+        follows a moment later on the size slider's own timer (_arrow_follow: minimap_toggled, once per FOLLOW_MS of
+        a drag, and once more at the percent it was let go on, _arrow_size_settled)."""
+        if value == self._settings[key]:
+            slider.set_value(value)                 # a step inside the same percent: the knob stays on it
             return
-        self._settings["minimap_arrow_opacity"] = value
+        self._settings[key] = value
         self.refresh()                              # the knob on the new percent, its % beside the label
         if not self._arrow_follow.isActive():
             self._arrow_follow.start()

@@ -2540,6 +2540,7 @@ STRINGS = {
     "tbs_arrow_label": {"he": "שם ליד החץ", "en": "Name beside the arrow"},
     "tbs_arrow_label_hint": {"he": "תווית קטנה ליד החץ: המפה שהפורטל מוביל אליה, או הדמות שמדברים איתה.",
                              "en": "A small label by the arrow: the map the portal leads to, or the NPC to talk to."},
+    "tbs_arrow_label_opacity": {"he": "אטימות השם", "en": "Name opacity"},
     "tbs_arrival": {"he": "הודעה כשמגיעים", "en": "Say when you arrive"},
     "tbs_arrival_hint": {"he": "הודעה קטנה כשמגיעים למפה שהחץ מוביל אליה, והחץ כבה מעצמו.",
                          "en": "A small notice when you reach the map the arrow leads to, and the arrow turns itself off."},

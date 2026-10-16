@@ -1055,39 +1055,46 @@ def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_sign
     assert p._arrow_size_value.text() == f"{portaldots.ARROW_SIZE_MAX} px"
 
 
-def test_the_route_arrows_opacity_is_a_slider_of_its_own_under_its_size(bar):
-    """Beside the size slider, how solid the way's marks are drawn (settings["minimap_arrow_opacity"]): solid at
+@pytest.mark.parametrize("attr, key, other, words, above, below", [
+    ("_arrow_opacity", "minimap_arrow_opacity", "minimap_arrow_label_opacity", "Route arrow opacity",
+     "_arrow_size", "_arrow_label_label"),
+    ("_label_opacity", "minimap_arrow_label_opacity", "minimap_arrow_opacity", "Name opacity",
+     "_arrow_label_hint", "_arrow_flash_label"),
+])
+def test_the_route_arrows_opacity_and_its_names_are_sliders_of_their_own(bar, attr, key, other, words, above, below):
+    """How solid the way's marks are drawn (settings["minimap_arrow_opacity"], under the arrow's size) and, apart from
+    them, the name beside the arrow (settings["minimap_arrow_label_opacity"], under that name's switch): each solid at
     first, any whole percent down to portaldots.ARROW_OPACITY_MIN, shown beside its label and written as the knob
-    moves. It rides the size slider's own timer, so the app is told at most once a moment of a drag and once more
-    when the mouse lets go; a value changed elsewhere moves the knob, one past an end sits on that end."""
-    from PySide6.QtCore import QPoint, Qt
-    from PySide6.QtTest import QTest
-
+    moves, the other slider's setting left as it was. Both ride the size slider's own timer, so the app is told at
+    most once a moment of a drag and once more when the mouse lets go; a value changed elsewhere moves the knob, one
+    past an end sits on that end."""
     from maplehelper.ui import portaldots
     w, s = bar
     seen = []
-    w.minimap_toggled.connect(lambda: seen.append(s["minimap_arrow_opacity"]))
+    w.minimap_toggled.connect(lambda: seen.append(s[key]))
     w.refresh()
     w._gear.click()
     p = w._panel
-    sl = p._arrow_opacity
-    assert sl.value() == 1.0 and p._arrow_opacity_value.text() == "100%"
-    assert p._arrow_opacity_label.text() == "Route arrow opacity" and sl.accessibleName() == "Route arrow opacity"
-    assert _column(p, sl) == _column(p, p._arrow_size) and _from_the_top(p, p._arrow_size, sl, p._arrow_label_label)
+    sl, shown = getattr(p, attr), getattr(p, f"{attr}_value")
+    assert sl.value() == 1.0 and shown.text() == "100%"
+    assert getattr(p, f"{attr}_label").text() == words and sl.accessibleName() == words
+    assert _column(p, sl) == _column(p, p._arrow_size)
+    assert _from_the_top(p, getattr(p, above), sl, getattr(p, below))
     at = QPoint(round(sl._x(0.6)), sl.height() // 2)
     QTest.mousePress(sl, Qt.LeftButton, pos=at)
-    assert s["minimap_arrow_opacity"] == 0.6 and p._arrow_opacity_value.text() == "60%" and not seen
+    assert s[key] == 0.6 and shown.text() == "60%" and not seen
     QTest.mouseRelease(sl, Qt.LeftButton, pos=at)
     assert seen == [0.6] and not p._arrow_follow.isActive()         # told once, at the percent let go on
+    assert s[other] == 1.0                                          # the other slider's opacity: untouched
     QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(0, sl.height() // 2))        # past the end: the faintest it goes
-    assert s["minimap_arrow_opacity"] == portaldots.ARROW_OPACITY_MIN
-    assert p._arrow_opacity_value.text() == f"{round(portaldots.ARROW_OPACITY_MIN * 100)}%"
-    s["minimap_arrow_opacity"] = 0.33                               # changed elsewhere: the knob follows
+    assert s[key] == portaldots.ARROW_OPACITY_MIN
+    assert shown.text() == f"{round(portaldots.ARROW_OPACITY_MIN * 100)}%"
+    s[key] = 0.33                                                   # changed elsewhere: the knob follows
     w.refresh()
-    assert sl.value() == 0.33 and p._arrow_opacity_value.text() == "33%"
-    s["minimap_arrow_opacity"] = 9                                  # past the solid end: solid
+    assert sl.value() == 0.33 and shown.text() == "33%"
+    s[key] = 9                                                      # past the solid end: solid
     w.refresh()
-    assert sl.value() == portaldots.ARROW_OPACITY and p._arrow_opacity_value.text() == "100%"
+    assert sl.value() == portaldots.ARROW_OPACITY and shown.text() == "100%"
 
 
 def test_the_default_look_is_todays(bar):
