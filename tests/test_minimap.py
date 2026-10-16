@@ -155,6 +155,25 @@ def test_a_see_through_minimap_is_placed_and_followed_by_its_colours(graph, fixt
 
 
 @needs_kb
+def test_a_tall_map_cropped_hard_by_its_window_is_still_placed(graph):
+    """The Forest North of Ellinia's picture (130x428) is drawn at the game's x2 zoom in a window whose panel is
+    254 px tall: the picture stands 3.4 times that. The cap on how much bigger than the panel a picture may be
+    (_OV) was 2.5, so no scale was allowed, the map never placed, and the overlay drew nothing on it while the
+    title named it all along: no hidden-portal dots, no route arrow, no maps-left strip (live, 2026-10-16)."""
+    from maplehelper.minimap import Locator
+    here = Locator(graph).locate(_box("minimap_forest_north_tall_live.png"))
+    assert here is not None and here.map == "010002070"
+    assert here.spot == pytest.approx((0.156, 0.153), abs=0.02)
+    v = here.view
+    assert v is not None and v.h > 2.5 * (v.panel[3] - v.panel[1])   # taller than the old cap ever allowed
+    # what the overlay draws through: the spots of this map that the window shows land in its panel, the rest
+    # (the map runs far below the part shown) are off it
+    assert v.at(here.spot) is not None
+    assert v.at(graph._spot("010002070", {"x": -402, "y": -4013})) is not None    # the in10 tree hole, up top
+    assert v.at((0.5, 0.95)) is None                                              # the foot of the map, scrolled off
+
+
+@needs_kb
 @pytest.mark.parametrize("fixture,shown", [
     # the box runs past the window on the right: the panel took in its frame's right edge and bottom bar
     ("minimap_forest_south_dense_live.png", (8, 147, 422, 371)),

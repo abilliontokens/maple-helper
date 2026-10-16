@@ -92,8 +92,15 @@ _COV_MAX = 160   # the single-map alignment tries its trial scales shrunken (lon
 _LADDER = 1.08     # the trial scales above fitting climb by this much a rung (see Locator._trial_scales)
 _MIN_SIDE = 8       # a match smaller than this is noise, not a minimap ...
 _MIN_AREA = 0.05    # ... and so is one this small next to the panel (the panel is cut around the map, not the town)
-_OV = 2.5   # how much bigger than the panel the scaled picture may be (a cropped live view shows only part of the
-            # map: the panel is a sub-window of the scaled picture, up to this far per side)
+_OV = 4.0   # how much bigger than the panel the scaled picture may be (a cropped live view shows only part of the
+            # map: the panel is a sub-window of the scaled picture, up to this far per side). A tall map's window
+            # crops hard: The Forest North of Ellinia's picture (130x428) at the game's x2 zoom is 3.37x the 254 px
+            # panel its 404x394 window leaves, so at 2.5 no scale was allowed, the map never placed, and the overlay
+            # drew nothing on it at all — no hidden-portal dots, no route arrow, no maps-left strip, while the title
+            # still named the map (live, 2026-10-16; Ellinia's own picture sits right on the old cap at 2.50). The
+            # placings stay honest on the overlap floors (_see_scores' `need`, _ncc_over's `_OVERLAP_MIN`), not on
+            # this cap, and the trial scales are capped at x3 either way; a read of that map cost 2.9 s failing
+            # against 0.8 s placing it
 _OVERLAP_MIN = 0.5    # ... while still covering this much of the smaller side: less is a corner touching, not a view
 _FOLLOW_MIN = 0.35  # Locator.follow keeps the locked map while it matches this well at half size: the right map read
                     # 0.53-0.56 on a crowded live Kerning City, other maps' minimaps 0.13 at most, a loading screen none
