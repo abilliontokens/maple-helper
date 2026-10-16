@@ -28,7 +28,7 @@ REPORT_SETTINGS = ("language", "app_tint", "app_accent", "app_opacity", "font_si
                    "shot_hints_seen", "usage",
                    "saver_mode", "seen_version", "instant_answers", "telemetry", "presence", "minimap_scan_interval",
                    "minimap_hidden_portals", "minimap_route_arrow", "minimap_arrow_color", "minimap_arrow_size",
-                   "minimap_arrow_flash", "minimap_arrow_label", "minimap_arrival_notice",
+                   "minimap_arrow_opacity", "minimap_arrow_flash", "minimap_arrow_label", "minimap_arrival_notice",
                    "minimap_route_follow", "minimap_route_steps", "map_teleport_arrows",
                    "npc_overlay", "npc_overlay_opacity", "game_toolbar", "game_rides",
                    "overlays_in_screenshots", "loot_overlay", "loot_overlay_folded", "grind_bar", "grind_window",

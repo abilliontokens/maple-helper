@@ -136,6 +136,13 @@ def _span(w) -> tuple[int, int]:
     return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
 
 
+def _alpha(img, rect) -> int:
+    """How solid the strip under the box is drawn: the alpha of its backing a few pixels inside its left edge,
+    clear of its own edging and of the words over it (two translucent draws over each other would read more solid
+    than either)."""
+    return img.pixelColor(int(rect.left()) + 6, int(rect.center().y())).alpha()
+
+
 def test_dots_sit_on_the_box_where_the_map_was_placed(dots, qapp):
     """Each hidden portal in view is a blue dot at its place in the minimap's box; one outside the window shown is
     left out. The window covers the box exactly and never takes a click."""
@@ -504,6 +511,34 @@ def test_the_arrows_size_setting_draws_it_bigger_or_smaller(dots):
         s["minimap_arrow_size"] = size
         w.refresh()
         assert _span(w) == spans[like], size
+
+
+def test_the_arrows_opacity_setting_fades_the_way_and_nothing_else(dots, journeys):
+    """The bar's ⚙ panel picks how solid the way's own marks are drawn (settings["minimap_arrow_opacity"], solid
+    as they always were): the arrow, the name beside it and the maps-left strip fade together, so the way can be
+    left on over a minimap it would otherwise cover, while the hidden portals' blue dots stay solid — as they stay
+    through the flash. The faintest it goes is ARROW_OPACITY_MIN, and a setting holding no number draws it solid."""
+    from maplehelper.ui import portaldots
+    w, s, loc = dots
+    s["language"] = "en"
+    loc.set_box({"x": 100, "y": 100, "w": 600, "h": 200})           # room for the strip's words
+    journeys.answer = _journey(left=3)
+    loc.set_route_dest("020000000")
+    _place(loc, _here(panel=(0, 0, 600, 200)))
+    assert s["minimap_arrow_opacity"] == portaldots.ARROW_OPACITY == 1.0 and portaldots.ARROW_OPACITY_MIN == 0.2
+    strip = w._strip.rect
+    back = portaldots.STRIP_ALPHA                                  # the strip's backing, under the words
+    solid = w.grab().toImage()
+    assert solid.pixelColor(60, 37).alpha() == 255
+    assert _alpha(solid, strip) == pytest.approx(round(255 * back), abs=3)
+    for value, op in ((0.4, 0.4), (0.75, 0.75), (0.0, portaldots.ARROW_OPACITY_MIN), (1000, 1.0), ("half", 1.0),
+                      (None, 1.0), (True, 1.0), (float("nan"), 1.0)):
+        s["minimap_arrow_opacity"] = value
+        w.refresh()
+        img = w.grab().toImage()
+        assert img.pixelColor(60, 37).alpha() == pytest.approx(round(255 * op), abs=3), value   # the arrow's step
+        assert _alpha(img, strip) == pytest.approx(round(255 * back * op), abs=3), value        # the strip with it
+        assert img.pixelColor(100, 65).alpha() == 255, value                        # a hidden portal's dot: solid
 
 
 def test_a_bigger_arrow_at_the_panels_edge_sits_further_in_and_stays_inside_it(dots):

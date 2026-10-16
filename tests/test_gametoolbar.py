@@ -1055,6 +1055,41 @@ def test_the_route_arrows_colour_size_and_flashing_sit_under_its_switch_and_sign
     assert p._arrow_size_value.text() == f"{portaldots.ARROW_SIZE_MAX} px"
 
 
+def test_the_route_arrows_opacity_is_a_slider_of_its_own_under_its_size(bar):
+    """Beside the size slider, how solid the way's marks are drawn (settings["minimap_arrow_opacity"]): solid at
+    first, any whole percent down to portaldots.ARROW_OPACITY_MIN, shown beside its label and written as the knob
+    moves. It rides the size slider's own timer, so the app is told at most once a moment of a drag and once more
+    when the mouse lets go; a value changed elsewhere moves the knob, one past an end sits on that end."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from maplehelper.ui import portaldots
+    w, s = bar
+    seen = []
+    w.minimap_toggled.connect(lambda: seen.append(s["minimap_arrow_opacity"]))
+    w.refresh()
+    w._gear.click()
+    p = w._panel
+    sl = p._arrow_opacity
+    assert sl.value() == 1.0 and p._arrow_opacity_value.text() == "100%"
+    assert p._arrow_opacity_label.text() == "Route arrow opacity" and sl.accessibleName() == "Route arrow opacity"
+    assert _column(p, sl) == _column(p, p._arrow_size) and _from_the_top(p, p._arrow_size, sl, p._arrow_label_label)
+    at = QPoint(round(sl._x(0.6)), sl.height() // 2)
+    QTest.mousePress(sl, Qt.LeftButton, pos=at)
+    assert s["minimap_arrow_opacity"] == 0.6 and p._arrow_opacity_value.text() == "60%" and not seen
+    QTest.mouseRelease(sl, Qt.LeftButton, pos=at)
+    assert seen == [0.6] and not p._arrow_follow.isActive()         # told once, at the percent let go on
+    QTest.mouseClick(sl, Qt.LeftButton, pos=QPoint(0, sl.height() // 2))        # past the end: the faintest it goes
+    assert s["minimap_arrow_opacity"] == portaldots.ARROW_OPACITY_MIN
+    assert p._arrow_opacity_value.text() == f"{round(portaldots.ARROW_OPACITY_MIN * 100)}%"
+    s["minimap_arrow_opacity"] = 0.33                               # changed elsewhere: the knob follows
+    w.refresh()
+    assert sl.value() == 0.33 and p._arrow_opacity_value.text() == "33%"
+    s["minimap_arrow_opacity"] = 9                                  # past the solid end: solid
+    w.refresh()
+    assert sl.value() == portaldots.ARROW_OPACITY and p._arrow_opacity_value.text() == "100%"
+
+
 def test_the_default_look_is_todays(bar):
     """Nothing picked: today's dark glass, today's green lit buttons, today's words on the buttons."""
     from maplehelper.ui import npcoverlay

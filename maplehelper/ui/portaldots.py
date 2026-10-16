@@ -13,13 +13,16 @@ and the arrows' setting (minimap_route_arrow), and the route's arrow that settin
 map to another one, its first step on this map's minimap picture. The arrows look as the bar's ⚙ panel picks, read at
 every refresh: the route's colour (minimap_arrow_color, a name in ARROW_COLORS: orange unless another is picked; the
 NPC's is the ring's green whatever is picked, so it reads as the NPC and never as the route's step), their size
-(minimap_arrow_size: the length in screen pixels, from ARROW_SIZE_MIN to ARROW_SIZE_MAX, both shapes scaled alike), a
-small name beside each saying what to click there (minimap_arrow_label, in the app's language: the map the route's
-portal leads to, or the NPC to talk to for a cab, a boat or an NPC's trip; the guided NPC's own name, as the KB has
-it; on a pill in its arrow's colours, its letters sized with the arrow, just above the mark's shaft or inward of the
-sign at the edge, all of it inside the panel) and whether they blink (minimap_arrow_flash: both hidden and shown
-again together every FLASH_MS, their names with them, to catch the eye on a busy minimap; the dots and the ring
-never blink). Both at once (a guide here while the route leads elsewhere): the NPC's is drawn over the route's.
+(minimap_arrow_size: the length in screen pixels, from ARROW_SIZE_MIN to ARROW_SIZE_MAX, both shapes scaled alike),
+how solid they are drawn (minimap_arrow_opacity: ARROW_OPACITY_MIN to 1.0, the names beside them and the strip under
+the box faded with them, so the way can be left showing over a minimap it would otherwise cover; the dots and the
+ring stay solid), a small name beside each saying what to click there (minimap_arrow_label, in the app's language:
+the map the route's portal leads to, or the NPC to talk to for a cab, a boat or an NPC's trip; the guided NPC's own
+name, as the KB has it; on a pill in its arrow's colours, its letters sized with the arrow, just above the mark's
+shaft or inward of the sign at the edge, all of it inside the panel) and whether they blink (minimap_arrow_flash:
+both hidden and shown again together every FLASH_MS, their names with them, to catch the eye on a busy minimap; the
+dots and the ring never blink). Both at once (a guide here while the route leads elsewhere): the NPC's is drawn
+over the route's.
 
 Under the minimap box, outside the game's own picture, a strip says where the player is heading and how many maps
 are still to go (minimap_route_steps: the map they picked by name, then arrow_maps_left, arrow_maps_left_one on the
@@ -83,6 +86,11 @@ ARROW_COLORS = {"green": ("tbs_accent_green", "#4CD07D", "#083018"),
                 "teal": ("tbs_accent_teal", "#3FD9CF", "#062623")}
 ARROW_SIZE_MIN, ARROW_SIZE_MAX = 12, 40     # the arrow's length its size setting may pick, in screen pixels
 ARROW_SIZE_PX = 22      # how long the shapes below are drawn (the default size): a size scales them by size / this
+# how solid the route's and the guided NPC's arrows, the names beside them and the strip under the box are drawn
+# (minimap_arrow_opacity): 1.0 as they always were, down to ARROW_OPACITY_MIN, where the game's own minimap still
+# reads through them. The hidden portals' blue dots and the guided NPC's ring are never faded, as they are never
+# blinked: they mark the map itself, not the way
+ARROW_OPACITY_MIN, ARROW_OPACITY = 0.2, 1.0
 # an arrow on its spot (the route's next step's portal or NPC, or the guided NPC), in screen pixels from it: the tip
 # there, the head 14 px wide, the shaft up to 15 px above it, pointing down at it
 ARROW_PX = ((0, 1), (-7, -7), (-3, -7), (-3, -15), (3, -15), (3, -7), (7, -7))
@@ -169,6 +177,19 @@ def _size_scale(settings) -> float:
     if isinstance(size, bool) or not isinstance(size, (int, float)) or size != size:     # size != size: NaN
         size = ARROW_SIZE_PX
     return min(max(size, ARROW_SIZE_MIN), ARROW_SIZE_MAX) / ARROW_SIZE_PX
+
+
+def _opacity(settings) -> float:
+    """How solid the arrows, the names beside them and the strip under the box are drawn (the player's
+    minimap_arrow_opacity), kept within ARROW_OPACITY_MIN..ARROW_OPACITY; solid for a settings file that has no
+    number there (an old one, or a hand-edited one), as they were drawn before the setting existed."""
+    try:
+        value = settings["minimap_arrow_opacity"]
+    except (KeyError, TypeError):
+        return ARROW_OPACITY
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:   # value != value: NaN
+        return ARROW_OPACITY
+    return min(max(float(value), ARROW_OPACITY_MIN), ARROW_OPACITY)
 
 
 def _switch(settings, name: str) -> bool:
@@ -371,9 +392,11 @@ class PortalDots(QWidget):
         # picked and the switches; None while the arrow guides nothing), so a follow frame publishes nothing
         self._journey_key: tuple[str, str, bool] | None = None
         self._ratio = 1.0
-        # the arrows' look, from the settings at each refresh: how many times their drawn size (_size_scale), and
-        # the route's fill and rim (_arrow_colors; the guided NPC's are always the ring's, RING_FILL and RING_RIM)
+        # the arrows' look, from the settings at each refresh: how many times their drawn size (_size_scale), how
+        # solid they, their names and the strip are drawn (_opacity), and the route's fill and rim (_arrow_colors;
+        # the guided NPC's are always the ring's, RING_FILL and RING_RIM)
         self._arrow_scale = 1.0
+        self._arrow_opacity = _opacity(settings)
         self._arrow_fill, self._arrow_rim = _arrow_colors(settings)
         self._tag: _Tag | None = None   # the name beside the route's arrow (_make_tag) while placed, its setting on
         # the strip under the minimap box while the journey has something to say (_make_strip), and how far down
@@ -464,6 +487,7 @@ class PortalDots(QWidget):
         self._npc_arrow_angle, self._npc_arrow_edge = ((npc_aim.angle, npc_aim.edge) if npc_aim is not None
                                                        else (0.0, False))
         self._arrow_scale = scale
+        self._arrow_opacity = _opacity(self._settings)
         self._arrow_fill, self._arrow_rim = _arrow_colors(self._settings)
         # the names beside them, with their setting on: placed by the arrows just placed, inside the panel shown
         label = self._settings["minimap_arrow_label"]
@@ -651,10 +675,15 @@ class PortalDots(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        # the way's own marks — both arrows, the names beside them and the strip — at the opacity the player picks
+        # (minimap_arrow_opacity); the hidden portals' dots and the guided NPC's ring are drawn solid between them,
+        # as they are never blinked either
+        p.setOpacity(self._arrow_opacity)
         if strip is not None:
             self._draw_strip(p, strip)
         # ... and everything else measured from the box's own top-left, wherever the strip left the window's
         p.translate(0.0, self._shift)
+        p.setOpacity(1.0)
         p.setPen(QPen(OUTLINE, 1.0 / self._ratio))
         p.setBrush(FILL)
         r = DOT_PX / 2 / self._ratio
@@ -667,6 +696,7 @@ class PortalDots(QWidget):
             p.drawEllipse(self._ring, rr, rr)
             p.setPen(QPen(RING_FILL, RING_PEN / self._ratio))
             p.drawEllipse(self._ring, rr, rr)
+        p.setOpacity(self._arrow_opacity)
         if route:
             self._draw_arrow(p, self._arrow, self._arrow_angle, self._arrow_edge, self._tag, self._arrow_fill,
                              self._arrow_rim)

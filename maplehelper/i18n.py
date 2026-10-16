@@ -2533,6 +2533,7 @@ STRINGS = {
     "tbs_navigation": {"he": "ניווט", "en": "Navigation"},
     "tbs_arrow_colour": {"he": "צבע חץ המסלול", "en": "Route arrow colour"},
     "tbs_arrow_size": {"he": "גודל חץ המסלול", "en": "Route arrow size"},
+    "tbs_arrow_opacity": {"he": "אטימות חץ המסלול", "en": "Route arrow opacity"},
     "tbs_arrow_flash": {"he": "חץ מהבהב", "en": "Flashing arrow"},
     "tbs_arrow_flash_hint": {"he": "החץ נדלק וכבה, כדי שיהיה קל למצוא אותו במיני-מפה עמוסה.",
                              "en": "The arrow blinks, so it is easy to spot on a busy minimap."},
