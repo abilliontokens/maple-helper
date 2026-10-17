@@ -354,16 +354,16 @@ class _SettingsPanel(QWidget):
     glass colour of every window over the game as tiles of each tint and the lit buttons' accent as dots, the picked
     one ringed and named; Transparency: their glass's opacity on a slider, any whole percent; Toolbar: icons instead
     of words, and the bar's show/hide key in the same key box Settings has; Navigation, under a head of its own:
-    whether the arrow guides the whole way across maps, whether it says how many maps are left, and whether Maple
-    Helper's own map window draws each hidden teleport as an arrow to where it lands — down this column, where
-    there is room, rather than under the arrow's own switches, which left the second one scrolling on a 1080p
-    screen. The second holds the way and the minimap. Directions: Cabs & Teleports, whether the way to a found
-    NPC or map rides cabs and NPC teleports or walks (the bar's rides_toggled: a way shown is found again);
-    Minimap: the hidden portals' blue dots and the route's arrow on the game's minimap, the arrow's colour as dots
-    (the picked one ringed and named), its size in whole pixels and its opacity on sliders, the name beside it (the
-    map its portal leads to, or the NPC to talk to) with that name's own opacity on a slider, and whether it flashes,
-    a notice on reaching the map it leads to (the arrow turns itself off then), and whether screenshots see the
-    windows over the game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it
+    whether the arrow guides the whole way across maps, whether it says how many maps are left, a notice on reaching
+    the map it leads to (the arrow turns itself off then), and whether Maple Helper's own map window draws each
+    hidden teleport as an arrow to where it lands — down this column, where there is room, rather than under the
+    arrow's own switches, which left the second one scrolling on a 1080p screen. The second holds the way and the
+    minimap. Directions: Cabs & Teleports, whether the way to a found NPC or map rides cabs and NPC teleports or walks
+    (the bar's rides_toggled: a way shown is found again); Minimap: the hidden portals' blue dots and the route's
+    arrow on the game's minimap, the arrow's colour as dots (the picked one ringed and named), its size in whole
+    pixels and its opacity on sliders, the name beside it (the map its portal leads to, or the NPC to talk to) with
+    that name's own opacity on a slider, and whether it flashes, and whether screenshots see the windows over the
+    game (the bar's minimap_toggled: the app follows). A row's hint is one line under it, all of it
     in the row's tooltip (_Hint). Each choice is written, applies at once and stays; "Reset to default look", under
     both columns, puts the look back. ✕, the ⚙ again or Esc closes it (Esc once the panel has been clicked into: like
     the search window it takes the keyboard only then, never on opening). Side by side the sections fit a 1080p
@@ -464,15 +464,19 @@ class _SettingsPanel(QWidget):
         col.addLayout(row)
         self._hotkey_hint = self._hint(col)
         # Navigation: the arrow guiding the whole way across maps rather than one step, how many maps are left said
-        # beside it, and — the odd one out, so its label names the window — the teleport arrows on Maple Helper's
-        # own map window. Their own head, and down this column: more rows under the arrow's own switches left the
-        # second column scrolling on a 1080p screen at 125 %, where this one had room to spare.
+        # beside it, a notice on reaching the map it leads to, and — the odd one out, so its label names the window —
+        # the teleport arrows on Maple Helper's own map window. Their own head, and down this column: more rows under
+        # the arrow's own switches left the second column scrolling on a 1080p screen at 125 %, where this one had
+        # room to spare.
         self._nav_head = self._section(col)
         (self._route_follow_label, self._route_follow,
          self._route_follow_hint) = self._switch_row(col, self._pick_route_follow)
         col.addSpacing(10)
         # the two under it say all there is to say in their labels: no hint line of their own
         self._route_steps_label, self._route_steps, _ = self._switch_row(col, self._pick_route_steps, hint=False)
+        col.addSpacing(10)
+        # a notice on reaching the map the arrow leads to (the arrow turns itself off then)
+        self._arrival_label, self._arrival, self._arrival_hint = self._switch_row(col, self._pick_arrival)
         col.addSpacing(10)
         (self._teleport_arrows_label, self._teleport_arrows,
          _) = self._switch_row(col, self._pick_teleport_arrows, hint=False)
@@ -526,9 +530,6 @@ class _SettingsPanel(QWidget):
         col.addSpacing(10)
         (self._arrow_flash_label, self._arrow_flash,
          self._arrow_flash_hint) = self._switch_row(col, self._pick_arrow_flash)
-        # a notice on reaching the map the arrow leads to (the arrow turns itself off then)
-        col.addSpacing(10)
-        self._arrival_label, self._arrival, self._arrival_hint = self._switch_row(col, self._pick_arrival)
         col.addSpacing(10)
         (self._overlay_shots_label, self._overlay_shots,
          self._overlay_shots_hint) = self._switch_row(col, self._pick_shots)
