@@ -223,6 +223,20 @@ def test_one_misread_is_no_death_and_no_level_up(kb, rocky):
 
 
 @needs_kb
+def test_the_level_shown_is_the_newer_of_the_hud_read_and_the_saved_character(kb, rocky):
+    """A run left open for days reads Lv. 23 from a HUD read made then; the character Maple Helper has saved was
+    learnt later and says Lv. 29: the run shows 29 with its EXP %. The read wins again once it is the newer word."""
+    lg = lootlog.Log(start=0.0)
+    for s in (_read(0, rocky, level=23, exp=1000), _read(2, rocky, level=23, exp=1050)):
+        lg.add_sample(s)
+    c = Character("c1", "Kiwi", "Magician", "Magician", 29, exp_pct=37.31, updated_at=100.0)
+    lv = grindlive.live(kb, lg, c, [Goal("level", 30)], now=120.0)
+    assert (lv.level, lv.exp_pct) == (29, 37.31)
+    assert [g.have for g in lv.goals] == [29]
+    c.updated_at = -1.0
+    assert grindlive.live(kb, lg, c, [], now=120.0).level == 23
+
+@needs_kb
 @pytest.mark.parametrize("exp,pct", [(716, None), (None, 50.0)])
 def test_time_to_level_at_the_recent_rate(kb, rocky, exp, pct):
     """50 EXP every 10 s: 18,000 an hour over the last five minutes; the EXP left from the HUD's points (or %)."""

@@ -669,8 +669,15 @@ def _state(lg, run: _Run) -> str:
 
 
 def _level_now(kb, run: _Run, character) -> tuple[int | None, int | None, float | None]:
-    """(level, EXP points, EXP %) now: the newest HUD read that stood, else the character as saved."""
+    """(level, EXP points, EXP %) now: the newest HUD read that stood, or the character as Maple Helper knows them
+    when that is the newer word. A log stays open until the run is stopped, so a run left running for days reads
+    back the level of its last HUD read: a player who came back six levels later saw the bar say "Lv. 23 → 24"
+    while the app's own character (and the chat) said Lv. 29 (live). Whichever was learnt last wins; with the two
+    agreeing on the level the read stays, for its EXP points."""
     r = run.last
+    if r is not None and character is not None and character.level != r.level \
+            and character.updated_at > r.t:
+        r = None
     level = r.level if r is not None else (character.level if character is not None else None)
     exp = r.exp if r is not None else None
     pct = r.exp_pct if r is not None else None
